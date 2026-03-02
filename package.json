@@ -1,0 +1,17 @@
+{
+  "name": "melon-messenger",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "concurrently \"bun run dev:api\" \"bun run dev:web\"",
+    "dev:api": "bun run --cwd apps/api dev",
+    "dev:web": "bun run --cwd apps/web dev",
+    "build": "bun run --cwd apps/api build && bun run --cwd apps/web build",
+    "db:generate": "bun run --cwd apps/api db:generate",
+    "db:migrate": "bun run --cwd apps/api db:migrate",
+    "db:studio": "bun run --cwd apps/api db:studio"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

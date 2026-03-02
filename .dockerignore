@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+.git
+.env
+.env.*
+*.md
+dist
+**/dist
+apps/api/uploads
+.DS_Store

@@ -1,0 +1,29 @@
+{
+  "name": "@melon/api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "build": "bun build src/index.ts --outdir=dist --target=bun",
+    "start": "bun run dist/index.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
+    "db:seed": "bun run src/db/seed.ts"
+  },
+  "dependencies": {
+    "@melon/shared": "file:../../packages/shared",
+    "@elysiajs/cors": "^1.2.0",
+    "@elysiajs/jwt": "^1.2.0",
+    "cassandra-driver": "^4.7.4",
+    "drizzle-orm": "^0.38.0",
+    "elysia": "^1.2.0",
+    "ioredis": "^5.4.1",
+    "jose": "^5.9.6",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.30.0"
+  }
+}
