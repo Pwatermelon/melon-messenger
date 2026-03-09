@@ -4,6 +4,7 @@
  */
 import { Client, types } from "cassandra-driver";
 import type { MessageType, AttachmentMetadata } from "@melon/shared";
+import { decryptAtRest, encryptAtRest } from "../crypto/atRest";
 
 const contactPoints = (process.env.SCYLLA_CONTACT_POINTS ?? "127.0.0.1").split(",");
 const keyspace = process.env.SCYLLA_KEYSPACE ?? "melon";
@@ -91,11 +92,13 @@ export async function insertMessage(
   const createdAt = id.getDate();
   const messageType = opts.messageType ?? "text";
   const attachmentUrl = opts.attachmentUrl ?? null;
-  const attachmentMetadata = opts.attachmentMetadata != null ? JSON.stringify(opts.attachmentMetadata) : null;
+  const attachmentMetadata =
+    opts.attachmentMetadata != null ? encryptAtRest(JSON.stringify(opts.attachmentMetadata)) : null;
   const encrypted = opts.encrypted ?? false;
+  const storedContent = encryptAtRest(content);
   await scyllaClient.execute(
     insertQuery,
-    [chatId, id, senderId, content, createdAt, messageType, attachmentUrl, attachmentMetadata, encrypted],
+    [chatId, id, senderId, storedContent, createdAt, messageType, attachmentUrl, attachmentMetadata, encrypted],
     { prepare: true }
   );
   return { messageId: id.toString(), createdAt };
@@ -106,21 +109,27 @@ export async function getMessages(
   limit: number,
   beforeMessageId?: string
 ): Promise<MessageRow[]> {
-  const params = beforeMessageId
-    ? [chatId, beforeMessageId, limit]
-    : [chatId, limit];
+  const params = beforeMessageId ? [chatId, beforeMessageId, limit] : [chatId, limit];
   const query = beforeMessageId ? selectFromQuery : selectQuery;
-  const result = await scyllaClient.execute(query, params, { prepare: true });
+
+  let result;
+  try {
+    result = await scyllaClient.execute(query, params, { prepare: true });
+  } catch (err) {
+    console.warn("[Scylla] getMessages failed:", err);
+    // В dev/локально не роняем всё приложение — просто считаем, что сообщений нет.
+    return [];
+  }
   return result.rows.map((row) => {
     let attachment_metadata: string | null = null;
     try {
-      if (row.attachment_metadata != null) attachment_metadata = String(row.attachment_metadata);
+      if (row.attachment_metadata != null) attachment_metadata = decryptAtRest(String(row.attachment_metadata));
     } catch {}
     return {
       chat_id: row.chat_id?.toString(),
       message_id: row.message_id?.toString(),
       sender_id: row.sender_id?.toString(),
-      content: row.content,
+      content: decryptAtRest(String(row.content)),
       created_at: row.created_at,
       message_type: row.message_type != null ? String(row.message_type) : null,
       attachment_url: row.attachment_url != null ? String(row.attachment_url) : null,

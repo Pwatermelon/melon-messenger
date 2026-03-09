@@ -3,8 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import { useVoiceRecorder } from "../hooks/useVoiceRecorder";
-import { getChats, getMessages, uploadFile, setPublicKey } from "../api";
-import * as e2e from "../crypto/e2e";
+import { getChats, getMessages, uploadFile } from "../api";
 import type { Chat, Message } from "@melon/shared";
 import type { MessageItem } from "../api";
 
@@ -19,16 +18,11 @@ export default function ChatRoom() {
   const [loading, setLoading] = useState(true);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [decryptedContent, setDecryptedContent] = useState<Record<string, string>>({});
-  const [, setE2eReady] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const { recording, duration, start: startVoice, stop: stopVoice } = useVoiceRecorder();
-
-  const otherMember = chat?.members.find((m) => m.id !== user?.id);
-  const canEncrypt = Boolean(otherMember?.publicKey && e2e.getStoredKeys());
 
   useEffect(() => {
     return subscribe((msg) => {
@@ -40,20 +34,6 @@ export default function ChatRoom() {
       }
     });
   }, [subscribe, chatId]);
-
-  useEffect(() => {
-    let stored = e2e.getStoredKeys();
-    if (!stored) {
-      e2e.generateKeyPair().then(({ publicKey, privateKey }) => {
-        e2e.storeKeys(publicKey, privateKey);
-        setE2eReady(true);
-        setPublicKey(publicKey).catch(() => {});
-      });
-    } else {
-      setE2eReady(true);
-      setPublicKey(stored.publicKey).catch(() => {});
-    }
-  }, []);
 
   useEffect(() => {
     if (!chatId) return;
@@ -95,20 +75,6 @@ export default function ChatRoom() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  useEffect(() => {
-    if (!otherMember?.publicKey || !e2e.getStoredKeys()) return;
-    const keys = e2e.getStoredKeys()!;
-    messages
-      .filter((m) => m.encrypted && m.content && m.senderId !== user?.id && !decryptedContent[m.id])
-      .forEach((m) => {
-        e2e.decrypt(m.content, otherMember.publicKey!, keys.privateKey).then((plain) => {
-          setDecryptedContent((prev) => ({ ...prev, [m.id]: plain }));
-        }).catch(() => {
-          setDecryptedContent((prev) => ({ ...prev, [m.id]: "[decryption failed]" }));
-        });
-      });
-  }, [messages, otherMember?.publicKey, user?.id, decryptedContent]);
-
   async function sendMessage(opts: {
     content: string;
     messageType?: "text" | "image" | "file" | "video" | "location" | "voice";
@@ -117,15 +83,6 @@ export default function ChatRoom() {
   }) {
     if (!chatId || sending) return;
     let content = opts.content;
-    let encrypted = false;
-    if (opts.messageType === "text" && canEncrypt && content) {
-      try {
-        content = await e2e.encrypt(content, otherMember!.publicKey!, e2e.getStoredKeys()!.privateKey);
-        encrypted = true;
-      } catch (e) {
-        console.error("Encrypt failed", e);
-      }
-    }
     setSending(true);
     try {
       send({
@@ -135,7 +92,6 @@ export default function ChatRoom() {
         messageType: opts.messageType ?? "text",
         attachmentUrl: opts.attachmentUrl ?? null,
         attachmentMetadata: opts.attachmentMetadata ?? null,
-        encrypted,
       });
     } finally {
       setSending(false);
@@ -218,9 +174,8 @@ export default function ChatRoom() {
   }
 
   function displayContent(m: Message | MessageItem): string {
-    if (m.encrypted && m.senderId !== user?.id && decryptedContent[m.id] !== undefined) {
-      return decryptedContent[m.id];
-    }
+    // Legacy E2E messages cannot be decrypted after E2E removal.
+    if (m.encrypted) return "🔒 Зашифрованное сообщение";
     return m.content;
   }
 
@@ -249,7 +204,7 @@ export default function ChatRoom() {
             <div className="chat-item-avatar">{displayName.slice(0, 1).toUpperCase()}</div>
             <div className="chat-item-body">
               <p className="chat-item-name">{displayName}</p>
-              <p className="chat-item-preview">{canEncrypt ? "🔒 E2E" : "Current chat"}</p>
+              <p className="chat-item-preview">Current chat</p>
             </div>
           </Link>
         </div>
@@ -257,7 +212,6 @@ export default function ChatRoom() {
       <main className="main">
         <div className="chat-header">
           <h3>{displayName}</h3>
-          {canEncrypt && <span className="e2e-badge">E2E</span>}
           {status === "connecting" && (
             <span style={{ fontSize: "0.8rem", color: "var(--muted)" }} title={getWsUrl()}>
               Connecting…

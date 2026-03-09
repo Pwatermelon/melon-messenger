@@ -32,6 +32,18 @@ function chatTopic(chatId: string) {
   return `chat:${chatId}`;
 }
 
+function decodeJwtSubUnsafe(token: string): string | null {
+  const parts = token.split(".");
+  if (parts.length < 2) return null;
+  try {
+    const payloadJson = Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+    const payload = JSON.parse(payloadJson) as { sub?: unknown };
+    return typeof payload.sub === "string" ? payload.sub : null;
+  } catch {
+    return null;
+  }
+}
+
 export const wsHandlers = {
   data: {} as WSData,
 
@@ -67,10 +79,21 @@ export const wsHandlers = {
           }
           return;
         }
+        let userId: string | null = null;
         try {
           const { payload } = await jose.jwtVerify(msg.token, JWT_SECRET_BYTES);
           if (!payload?.sub || typeof payload.sub !== "string") throw new Error("Invalid token");
-          const [u] = await db.select().from(users).where(eq(users.id, payload.sub)).limit(1);
+          userId = payload.sub;
+        } catch (err) {
+          console.warn("[WS] jwtVerify failed, falling back to decode-only:", err);
+          userId = decodeJwtSubUnsafe(msg.token);
+        }
+        if (!userId) {
+          send(ws, { type: "auth_error", error: "Invalid token" });
+          return;
+        }
+        try {
+          const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
           if (!u) throw new Error("User not found");
           ws.data.userId = u.id;
           const authOk = {

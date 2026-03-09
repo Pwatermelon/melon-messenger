@@ -13,7 +13,8 @@ RUN bun install
 RUN bun run db:generate
 
 COPY apps/api/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# На Windows файл может быть с CRLF, из-за чего Alpine пишет "no such file or directory"
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 EXPOSE 3000
 ENTRYPOINT ["/entrypoint.sh"]

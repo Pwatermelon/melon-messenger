@@ -7,9 +7,17 @@ function getOrigin(): string {
   return "";
 }
 
+function isViteDev(): boolean {
+  // Vite injects this flag at build time.
+  return Boolean(import.meta.env.DEV);
+}
+
 export function getApiUrl(): string {
   const env = import.meta.env.VITE_API_URL;
   if (env && String(env).trim()) return String(env).trim().replace(/\/$/, "");
+  // In Vite dev, the frontend runs on :5173 and API usually runs separately on :3000.
+  // Without explicit VITE_API_URL, default to localhost:3000 to avoid hitting :5173/api.
+  if (isViteDev()) return "http://localhost:3000";
   if (typeof window !== "undefined" && getOrigin()) {
     return `${getOrigin()}/api`;
   }
@@ -23,6 +31,8 @@ export function getWsUrl(): string {
     const base = s.startsWith("ws") ? s : `ws://${s}`;
     return base.endsWith("/ws") ? base : `${base.replace(/\/+$/, "")}/ws`;
   }
+  // In Vite dev, default WS to the API host.
+  if (isViteDev()) return "ws://localhost:3000/ws";
   if (typeof window !== "undefined" && getOrigin()) {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;

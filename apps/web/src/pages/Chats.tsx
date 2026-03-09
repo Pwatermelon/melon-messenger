@@ -26,7 +26,7 @@ export default function Chats() {
           copy[i] = {
             ...copy[i],
             lastMessageAt: msg.message.createdAt,
-            lastMessagePreview: msg.message.content.slice(0, 80),
+            lastMessagePreview: msg.message.encrypted ? "🔒 Зашифрованное сообщение" : msg.message.content.slice(0, 80),
           };
           const [moved] = copy.splice(i, 1);
           copy.unshift(moved);

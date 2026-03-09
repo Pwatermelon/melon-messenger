@@ -8,7 +8,7 @@ export interface User {
   username: string;
   avatarUrl: string | null;
   createdAt: string;
-  /** X25519 public key (base64) for E2E encryption */
+  /** Legacy field from the old E2E experiment (base64) */
   publicKey?: string | null;
 }
 
@@ -45,7 +45,7 @@ export interface Message {
   id: string;
   chatId: string;
   senderId: string;
-  /** Plain text or E2E ciphertext (base64) */
+  /** Message content (plain text for clients) */
   content: string;
   createdAt: string;
   sender?: User;
@@ -55,7 +55,7 @@ export interface Message {
   attachmentUrl?: string | null;
   /** JSON metadata for attachment */
   attachmentMetadata?: AttachmentMetadata | null;
-  /** True if content is E2E encrypted */
+  /** Legacy: true if content was E2E-encrypted by old clients */
   encrypted?: boolean;
 }
 

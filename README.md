@@ -18,7 +18,7 @@ Real-time messenger: **Bun** (backend) + **React** (frontend), WebSocket, Postgr
 
 - Registration / login (JWT)
 - 1‑on‑1 (DM) chats
-- **E2E encryption (P2P)** — X25519 key agreement + AES-256-GCM for text in DMs when both users have keys; public key stored on server, private in browser
+- Secure transport (HTTPS/WSS) + optional **server-side encryption at rest** for message content (no E2E)
 - **Media messages** — photo, file, video (upload to server, link in message)
 - **Geolocation** — send current position (OpenStreetMap link)
 - **Voice messages** — record in browser (WebM), upload, play in chat
@@ -75,6 +75,7 @@ Env (optional):
 - `SCYLLA_CONTACT_POINTS` — default `127.0.0.1`
 - `SCYLLA_KEYSPACE` — default `melon`
 - `JWT_SECRET` — set in production
+- `MESSAGE_AT_REST_KEY` — optional, enables AES-256-GCM encryption for message content/metadata in ScyllaDB (at rest)
 - `UPLOAD_DIR` — directory for uploads (default: `apps/api/uploads`)
 
 ### 3. Frontend
@@ -119,7 +120,7 @@ melon-messenger/
 ## Architecture (high level)
 
 - **PostgreSQL**: users, chats, chat_members. ACID, Drizzle ORM.
-- **ScyllaDB**: messages table with `message_type`, `attachment_url`, `attachment_metadata`, `encrypted` for media and E2E.
+- **ScyllaDB**: messages table with `message_type`, `attachment_url`, `attachment_metadata`; optional server-side encryption at rest via `MESSAGE_AT_REST_KEY`.
 - **Redis**:  
   - Pub/Sub: channel `ws:chat:{chatId}` for real-time message broadcast across API instances.  
   - Presence: keys `presence:{userId}` with TTL for online/offline.

@@ -55,7 +55,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         try {
           const [first] = await scyllaGetMessages(row.chatId, 1);
           if (first) {
-            lastMessagePreview = first.content.slice(0, 80);
+            lastMessagePreview = first.encrypted ? "🔒 Зашифрованное сообщение" : first.content.slice(0, 80);
             lastMessageAt = first.created_at?.toISOString?.() ?? null;
           }
         } catch {
