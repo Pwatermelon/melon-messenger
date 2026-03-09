@@ -1,19 +1,19 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { useWebSocket } from "../hooks/useWebSocket";
+import { useWebSocketContext } from "../context/WebSocketContext";
 import { useVoiceRecorder } from "../hooks/useVoiceRecorder";
 import { getChats, getMessages, uploadFile, setPublicKey } from "../api";
 import * as e2e from "../crypto/e2e";
 import type { Chat, Message } from "@melon/shared";
-import type { WSServerMessage } from "@melon/shared";
 import type { MessageItem } from "../api";
 
 import { getUploadsBaseUrl, getWsUrl } from "../config";
 
 export default function ChatRoom() {
   const { chatId } = useParams<{ chatId: string }>();
-  const { user, token } = useAuth();
+  const { user } = useAuth();
+  const { send, ready, status, reconnect, subscribe } = useWebSocketContext();
   const [chat, setChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,14 +30,16 @@ export default function ChatRoom() {
   const otherMember = chat?.members.find((m) => m.id !== user?.id);
   const canEncrypt = Boolean(otherMember?.publicKey && e2e.getStoredKeys());
 
-  const { send, ready, status, reconnect } = useWebSocket(token, (msg: WSServerMessage) => {
-    if (msg.type === "message" && msg.message.chatId === chatId) {
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.message.id)) return prev;
-        return [...prev, msg.message];
-      });
-    }
-  });
+  useEffect(() => {
+    return subscribe((msg) => {
+      if (msg.type === "message" && msg.message.chatId === chatId) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === msg.message.id)) return prev;
+          return [...prev, msg.message];
+        });
+      }
+    });
+  }, [subscribe, chatId]);
 
   useEffect(() => {
     let stored = e2e.getStoredKeys();

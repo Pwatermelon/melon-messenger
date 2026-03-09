@@ -52,7 +52,19 @@ export const wsHandlers = {
 
       if (msg.type === "auth") {
         if (ws.data.userId) {
-          send(ws, { type: "error", error: "Already authenticated" });
+          const [u] = await db.select().from(users).where(eq(users.id, ws.data.userId)).limit(1);
+          if (u) {
+            send(ws, {
+              type: "auth_ok",
+              user: {
+                id: u.id,
+                email: u.email,
+                username: u.username,
+                avatarUrl: u.avatarUrl,
+                createdAt: u.createdAt?.toISOString?.() ?? "",
+              },
+            });
+          }
           return;
         }
         try {
@@ -61,17 +73,18 @@ export const wsHandlers = {
           const [u] = await db.select().from(users).where(eq(users.id, payload.sub)).limit(1);
           if (!u) throw new Error("User not found");
           ws.data.userId = u.id;
-          await redis.setPresence(u.id);
-          send(ws, {
-            type: "auth_ok",
+          const authOk = {
+            type: "auth_ok" as const,
             user: {
               id: u.id,
               email: u.email,
               username: u.username,
               avatarUrl: u.avatarUrl,
-              createdAt: u.createdAt?.toISOString?.(),
+              createdAt: u.createdAt?.toISOString?.() ?? "",
             },
-          });
+          };
+          send(ws, authOk);
+          redis.setPresence(u.id).catch((err) => console.warn("[WS] setPresence failed:", err));
         } catch (e) {
           send(ws, { type: "auth_error", error: String(e) });
         }

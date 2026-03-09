@@ -9,20 +9,25 @@ function getOrigin(): string {
 
 export function getApiUrl(): string {
   const env = import.meta.env.VITE_API_URL;
-  if (env && String(env).trim()) return String(env).replace(/\/$/, "");
-  const origin = getOrigin();
-  return origin ? `${origin}/api` : "http://localhost:3000";
+  if (env && String(env).trim()) return String(env).trim().replace(/\/$/, "");
+  if (typeof window !== "undefined" && getOrigin()) {
+    return `${getOrigin()}/api`;
+  }
+  return "http://localhost:3000";
 }
 
 export function getWsUrl(): string {
   const env = import.meta.env.VITE_WS_URL;
   if (env && String(env).trim()) {
-    const s = String(env).replace(/^http/, "ws").replace(/\/$/, "");
-    return s.startsWith("ws") ? s : `ws://${s}`;
+    const s = String(env).trim().replace(/^http/, "ws").replace(/\/$/, "");
+    const base = s.startsWith("ws") ? s : `ws://${s}`;
+    return base.endsWith("/ws") ? base : `${base.replace(/\/+$/, "")}/ws`;
   }
-  if (typeof window !== "undefined") {
+  if (typeof window !== "undefined" && getOrigin()) {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${protocol}//${window.location.host}/ws`;
+    const host = window.location.host;
+    const base = `${protocol}//${host}`;
+    return base.endsWith("/ws") ? base : `${base.replace(/\/+$/, "")}/ws`;
   }
   return "ws://localhost:3000/ws";
 }

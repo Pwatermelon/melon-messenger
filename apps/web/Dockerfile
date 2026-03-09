@@ -1,12 +1,8 @@
 # Контекст сборки: корень репозитория
+# Не задаём VITE_API_URL/VITE_WS_URL — в рантайме используем тот же хост (origin), nginx проксирует /api и /ws
 FROM node:20-alpine AS builder
 
 WORKDIR /app
-
-ARG VITE_API_URL=http://localhost:3000
-ARG VITE_WS_URL=ws://localhost:3000
-ENV VITE_API_URL=$VITE_API_URL
-ENV VITE_WS_URL=$VITE_WS_URL
 
 COPY package.json ./
 COPY packages ./packages

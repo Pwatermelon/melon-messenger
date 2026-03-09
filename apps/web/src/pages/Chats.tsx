@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { useWebSocket } from "../hooks/useWebSocket";
+import { useWebSocketContext } from "../context/WebSocketContext";
 import { getChats, createDm, searchUsers } from "../api";
 import type { Chat } from "@melon/shared";
-import type { WSServerMessage } from "@melon/shared";
 
 export default function Chats() {
-  const { user, token, logout } = useAuth();
+  const { user, logout } = useAuth();
+  const { subscribe } = useWebSocketContext();
   const navigate = useNavigate();
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(true);
@@ -16,9 +16,10 @@ export default function Chats() {
   const [searchResults, setSearchResults] = useState<Array<{ id: string; username: string; avatarUrl: string | null }>>([]);
   const [searching, setSearching] = useState(false);
 
-  useWebSocket(token, (msg: WSServerMessage) => {
-    if (msg.type === "message") {
-      setChats((prev) => {
+  useEffect(() => {
+    return subscribe((msg) => {
+      if (msg.type === "message") {
+        setChats((prev) => {
         const copy = [...prev];
         const i = copy.findIndex((c) => c.id === msg.message.chatId);
         if (i >= 0) {
@@ -33,7 +34,8 @@ export default function Chats() {
         return copy;
       });
     }
-  });
+    });
+  }, [subscribe]);
 
   useEffect(() => {
     let cancelled = false;

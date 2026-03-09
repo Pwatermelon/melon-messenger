@@ -42,7 +42,7 @@ async function main() {
     .use(uploadRoutes)
     .ws("/ws", wsHandlers);
 
-  app.listen(PORT);
+  app.listen({ port: PORT, hostname: "0.0.0.0" });
   const server = (app as { server?: { publish: (topic: string, data: string) => number } }).server;
   if (server) {
     setWSServer(server);

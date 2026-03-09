@@ -19,28 +19,24 @@ export function useWebSocket(token: string | null, onMessage: (msg: WSServerMess
 
   const reconnect = useCallback(() => setRetryKey((k) => k + 1), []);
 
-  const closedByReconnectRef = useRef(false);
-
   useEffect(() => {
     if (!token) {
       setStatus("connecting");
       return;
     }
-    closedByReconnectRef.current = false;
     setStatus("connecting");
     setReady(false);
     const url = getWsUrl();
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
-    let timeoutId: ReturnType<typeof setTimeout>;
-    timeoutId = window.setTimeout(() => {
+    let timeoutId = window.setTimeout(() => {
       setStatus((s) => (s === "connecting" ? "failed" : s));
     }, 12000);
 
-    ws.onmessage = (e) => {
+    const parse = (raw: string) => {
       try {
-        const msg = JSON.parse(e.data) as WSServerMessage;
+        const msg = JSON.parse(raw) as WSServerMessage;
         if (msg.type === "auth_ok") {
           window.clearTimeout(timeoutId);
           setReady(true);
@@ -48,7 +44,15 @@ export function useWebSocket(token: string | null, onMessage: (msg: WSServerMess
         }
         if (msg.type === "auth_error") setStatus("auth_failed");
         onMessageRef.current(msg);
-      } catch {}
+      } catch {
+        // ignore
+      }
+    };
+
+    ws.onmessage = (e: MessageEvent) => {
+      if (typeof e.data === "string") parse(e.data);
+      else if (e.data instanceof Blob) e.data.text().then(parse).catch(() => {});
+      else parse(String(e.data));
     };
 
     ws.onopen = () => {
@@ -57,18 +61,17 @@ export function useWebSocket(token: string | null, onMessage: (msg: WSServerMess
 
     ws.onclose = () => {
       setReady(false);
-      if (!closedByReconnectRef.current) setStatus("failed");
+      if (wsRef.current === ws) setStatus("failed");
     };
 
     ws.onerror = () => {
-      if (!closedByReconnectRef.current) setStatus("failed");
+      if (wsRef.current === ws) setStatus("failed");
     };
 
     return () => {
-      closedByReconnectRef.current = true;
+      wsRef.current = null;
       window.clearTimeout(timeoutId);
       ws.close();
-      wsRef.current = null;
     };
   }, [token, retryKey]);
 
