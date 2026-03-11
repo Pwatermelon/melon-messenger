@@ -31,8 +31,8 @@ export const uploadRoutes = new Elysia({ prefix: "/upload" })
     const u = requireAuth(set)(user);
     await ensureUploadDir();
     const formData = await request.formData();
-    const file = formData.get("file") as File | null;
-    if (!file || !(file instanceof File)) {
+    const file = formData.get("file") as File | Blob | null;
+    if (!file || typeof (file as Blob).arrayBuffer !== "function") {
       set.status = 400;
       return { error: "Missing file" };
     }

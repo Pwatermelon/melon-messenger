@@ -170,14 +170,21 @@ export default function ChatLayout() {
   }
 
   function chatAvatar(chat: Chat) {
-    if (chat.name) return null;
+    if (chat.type === "group") {
+      const url = chat.avatarUrl ?? null;
+      if (url) {
+        const src = url.startsWith("http") ? url : `${getUploadsBaseUrl()}${url}`;
+        return <img src={src} alt="" className="chat-item-avatar-img" />;
+      }
+      return <span className="chat-item-avatar-letter">{avatarLetter(chat)}</span>;
+    }
     const other = chat.members.find((m) => m.id !== user?.id);
-    const url = other?.avatarUrl;
+    const url = other?.avatarUrl ?? null;
     if (url) {
       const src = url.startsWith("http") ? url : `${getUploadsBaseUrl()}${url}`;
       return <img src={src} alt="" className="chat-item-avatar-img" />;
     }
-    return avatarLetter(chat);
+    return <span className="chat-item-avatar-letter">{avatarLetter(chat)}</span>;
   }
 
   return (

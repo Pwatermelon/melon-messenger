@@ -294,10 +294,14 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 600;
-  font-size: 1rem;
   flex-shrink: 0;
   overflow: hidden;
+}
+
+.chat-item-avatar-letter {
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: var(--text);
 }
 
 .chat-item-avatar-img {

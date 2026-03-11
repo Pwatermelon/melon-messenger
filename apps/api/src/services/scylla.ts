@@ -74,6 +74,7 @@ const selectQuery = `SELECT chat_id, message_id, sender_id, content, created_at,
   FROM ${MESSAGES_TABLE} WHERE chat_id = ? LIMIT ?`;
 const selectFromQuery = `SELECT chat_id, message_id, sender_id, content, created_at, message_type, attachment_url, attachment_metadata, encrypted
   FROM ${MESSAGES_TABLE} WHERE chat_id = ? AND message_id < ? LIMIT ?`;
+const deleteByChatQuery = `DELETE FROM ${MESSAGES_TABLE} WHERE chat_id = ?`;
 
 export interface InsertMessageOpts {
   messageType?: MessageType;
@@ -137,4 +138,12 @@ export async function getMessages(
       encrypted: row.encrypted === true,
     };
   }) as MessageRow[];
+}
+
+export async function deleteChatMessages(chatId: string): Promise<void> {
+  try {
+    await scyllaClient.execute(deleteByChatQuery, [chatId], { prepare: true });
+  } catch (err) {
+    console.warn("[Scylla] deleteChatMessages failed:", err);
+  }
 }

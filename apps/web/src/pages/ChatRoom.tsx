@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import { useVoiceRecorder } from "../hooks/useVoiceRecorder";
-import { getChats, getMessages, uploadFile, setPublicKey, addGroupMembers, removeGroupMember, getUserById } from "../api";
+import { getChats, getMessages, uploadFile, setPublicKey, addGroupMembers, removeGroupMember, getUserById, deleteChat, updateGroup } from "../api";
 import * as e2e from "../crypto/e2e";
 import { compressImage } from "../utils/imageCompress";
 import type { Chat, Message } from "@melon/shared";
@@ -30,6 +30,7 @@ export default function ChatRoom() {
   const [groupAddError, setGroupAddError] = useState("");
   const [idCopiedProfile, setIdCopiedProfile] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const groupAvatarInputRef = useRef<HTMLInputElement>(null);
 
   async function copyProfileId(id: string) {
     try {
@@ -269,6 +270,7 @@ export default function ChatRoom() {
 
   function headerAvatarUrl(): string | null {
     if (!chat) return null;
+    if (chat.type === "group" && chat.avatarUrl) return chat.avatarUrl;
     if (chat.type === "dm" && otherMember?.avatarUrl) return otherMember.avatarUrl;
     return null;
   }
@@ -278,6 +280,37 @@ export default function ChatRoom() {
   }
 
   const isGroupAdmin = Boolean(chat?.type === "group" && chat.members.find((m) => m.id === user?.id)?.role === "admin");
+
+  async function handleDeleteChat() {
+    if (!chatId) return;
+    try {
+      await deleteChat(chatId);
+      window.dispatchEvent(new Event("melon:refresh-chats"));
+      navigate("/", { replace: true });
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function handleGroupAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!chatId) return;
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !file.type.startsWith("image/")) return;
+    setSending(true);
+    try {
+      const compressed = await compressImage(file);
+      const { url } = await uploadFile(compressed);
+      const path = url.startsWith("http") ? new URL(url).pathname : url;
+      const updated = await updateGroup(chatId, { avatarUrl: path });
+      setChat(updated as Chat);
+      window.dispatchEvent(new Event("melon:refresh-chats"));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSending(false);
+    }
+  }
 
   async function handleAddGroupMember() {
     if (!chatId || !groupAddId.trim()) return;
@@ -518,6 +551,13 @@ export default function ChatRoom() {
                     </button>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  className="contact-info-remove-btn"
+                  onClick={handleDeleteChat}
+                >
+                  Удалить чат
+                </button>
               </>
             ) : chat.type === "group" && selectedMemberId ? (
               (() => {
@@ -551,7 +591,7 @@ export default function ChatRoom() {
                         </button>
                       </div>
                     </div>
-                    {isGroupAdmin && m.id !== user?.id && (
+                        {isGroupAdmin && m.id !== user?.id && (
                       <button
                         type="button"
                         className="contact-info-remove-btn"
@@ -560,21 +600,43 @@ export default function ChatRoom() {
                         Удалить из группы
                       </button>
                     )}
-                    {m.id === user?.id && (
-                      <button
-                        type="button"
-                        className="contact-info-remove-btn"
-                        onClick={() => handleRemoveGroupMember(m.id)}
-                      >
-                        Выйти из группы
-                      </button>
-                    )}
                   </>
                 );
               })()
             ) : chat.type === "group" ? (
               <>
                 <p className="contact-info-name contact-info-group-title">{chat.name ?? "Группа"}</p>
+                <div className="contact-info-group-avatar-block">
+                  <div className="contact-info-group-avatar">
+                    {chat.avatarUrl ? (
+                      <img
+                        src={chat.avatarUrl.startsWith("http") ? chat.avatarUrl : `${getUploadsBaseUrl()}${chat.avatarUrl}`}
+                        alt=""
+                      />
+                    ) : (
+                      (chat.name ?? "Группа").slice(0, 1).toUpperCase()
+                    )}
+                  </div>
+                  {isGroupAdmin && (
+                    <>
+                      <input
+                        type="file"
+                        ref={groupAvatarInputRef}
+                        accept="image/*"
+                        onChange={handleGroupAvatarChange}
+                        style={{ display: "none" }}
+                      />
+                      <button
+                        type="button"
+                        className="contact-info-group-avatar-change"
+                        onClick={() => groupAvatarInputRef.current?.click()}
+                        disabled={sending}
+                      >
+                        Сменить аватар группы
+                      </button>
+                    </>
+                  )}
+                </div>
                 <p className="contact-info-members-label">Участники</p>
                 <ul className="contact-info-members">
                   {chat.members.map((m) => (
@@ -595,14 +657,14 @@ export default function ChatRoom() {
                           <span className="contact-info-member-name">{m.username}</span>
                         </div>
                       </button>
-                      {(isGroupAdmin || m.id === user?.id) && (
+                      {isGroupAdmin && m.id !== user?.id && (
                         <button
                           type="button"
                           className="contact-info-member-remove"
                           onClick={(e) => { e.stopPropagation(); handleRemoveGroupMember(m.id); }}
-                          title={m.id === user?.id ? "Выйти из группы" : "Удалить из группы"}
+                          title="Удалить из группы"
                         >
-                          {m.id === user?.id ? "Выйти" : "×"}
+                          ×
                         </button>
                       )}
                     </li>
@@ -625,6 +687,24 @@ export default function ChatRoom() {
                     </div>
                     {groupAddError && <p className="search-error">{groupAddError}</p>}
                   </div>
+                )}
+                {user && (
+                  <button
+                    type="button"
+                    className="contact-info-remove-btn"
+                    onClick={() => handleRemoveGroupMember(user.id)}
+                  >
+                    Покинуть группу
+                  </button>
+                )}
+                {isGroupAdmin && (
+                  <button
+                    type="button"
+                    className="contact-info-remove-btn"
+                    onClick={handleDeleteChat}
+                  >
+                    Удалить группу
+                  </button>
                 )}
               </>
             ) : null}

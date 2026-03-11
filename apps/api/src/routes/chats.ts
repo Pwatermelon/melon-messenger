@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import { eq, and, inArray, desc } from "drizzle-orm";
 import { authPlugin, requireAuth } from "../auth";
 import { db, users, chats, chatMembers } from "../db";
-import { getMessages as scyllaGetMessages } from "../services/scylla";
+import { getMessages as scyllaGetMessages, deleteChatMessages } from "../services/scylla";
 
 function toUser(u: typeof users.$inferSelect) {
   return {
@@ -66,6 +66,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
           id: row.chat.id,
           type: row.chat.type,
           name: row.chat.name,
+          avatarUrl: row.chat.avatarUrl,
           createdAt: row.chat.createdAt?.toISOString?.(),
           lastMessageAt,
           lastMessagePreview,
@@ -112,6 +113,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         id: chat.id,
         type: chat.type,
         name: chat.name,
+        avatarUrl: chat.avatarUrl,
         createdAt: chat.createdAt?.toISOString?.(),
         lastMessageAt: null,
         lastMessagePreview: null,
@@ -132,6 +134,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       id: chat.id,
       type: chat.type,
       name: chat.name,
+      avatarUrl: chat.avatarUrl,
       createdAt: chat.createdAt?.toISOString?.(),
       lastMessageAt: null,
       lastMessagePreview: null,
@@ -167,6 +170,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       id: chat.id,
       type: chat.type,
       name: chat.name,
+      avatarUrl: chat.avatarUrl,
       createdAt: chat.createdAt?.toISOString?.(),
       lastMessageAt: null,
       lastMessagePreview: null,
@@ -204,6 +208,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       id: chatRow.id,
       type: chatRow.type,
       name: chatRow.name,
+      avatarUrl: chatRow.avatarUrl,
       createdAt: chatRow.createdAt?.toISOString?.(),
       lastMessageAt,
       lastMessagePreview,
@@ -300,6 +305,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       id: chatRow.id,
       type: chatRow.type,
       name: chatRow.name,
+      avatarUrl: chatRow.avatarUrl,
       createdAt: chatRow.createdAt?.toISOString?.(),
       lastMessageAt,
       lastMessagePreview,
@@ -346,4 +352,127 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       };
     });
     return { messages: messages.slice().reverse() };
+  })
+  .put("/:id", async ({ user, params, body, set }) => {
+    const u = requireAuth(set)(user);
+    const { id: chatId } = params;
+    const [chatRow] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1);
+    if (!chatRow) {
+      set.status = 404;
+      return { error: "Chat not found" };
+    }
+    if (chatRow.type !== "group") {
+      set.status = 400;
+      return { error: "Only groups can be updated" };
+    }
+    const [myMember] = await db
+      .select()
+      .from(chatMembers)
+      .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, u.id)))
+      .limit(1);
+    if (!myMember || myMember.role !== "admin") {
+      set.status = 403;
+      return { error: "Only admin can update group" };
+    }
+    const payload = body as { name?: string; avatarUrl?: string | null };
+    const updates: Partial<typeof chats.$inferInsert> = {};
+    if (typeof payload.name === "string") {
+      const trimmed = payload.name.trim();
+      if (!trimmed) {
+        set.status = 400;
+        return { error: "name cannot be empty" };
+      }
+      updates.name = trimmed;
+    }
+    if ("avatarUrl" in payload) {
+      if (payload.avatarUrl == null) {
+        updates.avatarUrl = null;
+      } else if (typeof payload.avatarUrl === "string") {
+        updates.avatarUrl = payload.avatarUrl.trim() || null;
+      }
+    }
+    if (Object.keys(updates).length === 0) {
+      return {
+        id: chatRow.id,
+        type: chatRow.type,
+        name: chatRow.name,
+        avatarUrl: chatRow.avatarUrl,
+        createdAt: chatRow.createdAt?.toISOString?.(),
+        lastMessageAt: null,
+        lastMessagePreview: null,
+        members: [] as unknown as Array<ReturnType<typeof toUser> & { role: string }>,
+      };
+    }
+    const [updatedChat] = await db
+      .update(chats)
+      .set(updates)
+      .where(eq(chats.id, chatId))
+      .returning();
+    const members = await db
+      .select({ user: users, role: chatMembers.role })
+      .from(chatMembers)
+      .innerJoin(users, eq(users.id, chatMembers.userId))
+      .where(eq(chatMembers.chatId, chatId));
+    let lastMessagePreview: string | null = null;
+    let lastMessageAt: string | null = null;
+    try {
+      const [first] = await scyllaGetMessages(chatId, 1);
+      if (first) {
+        lastMessagePreview = first.encrypted ? "🔒 Зашифрованное сообщение" : first.content.slice(0, 80);
+        lastMessageAt = first.created_at?.toISOString?.() ?? null;
+      }
+    } catch {}
+    return {
+      id: updatedChat.id,
+      type: updatedChat.type,
+      name: updatedChat.name,
+      avatarUrl: updatedChat.avatarUrl,
+      createdAt: updatedChat.createdAt?.toISOString?.(),
+      lastMessageAt,
+      lastMessagePreview,
+      members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
+    };
+  })
+  .delete("/:id", async ({ user, params, set }) => {
+    const u = requireAuth(set)(user);
+    const { id: chatId } = params;
+    const [chatRow] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1);
+    if (!chatRow) {
+      set.status = 404;
+      return { error: "Chat not found" };
+    }
+    const [member] = await db
+      .select()
+      .from(chatMembers)
+      .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, u.id)))
+      .limit(1);
+    if (!member) {
+      set.status = 403;
+      return { error: "Not a member of this chat" };
+    }
+
+    if (chatRow.type === "group") {
+      if (member.role !== "admin") {
+        set.status = 403;
+        return { error: "Only admin can delete group" };
+      }
+      await db.delete(chatMembers).where(eq(chatMembers.chatId, chatId));
+      await db.delete(chats).where(eq(chats.id, chatId));
+      await deleteChatMessages(chatId).catch(() => {});
+      return { success: true };
+    }
+
+    await db
+      .delete(chatMembers)
+      .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, u.id)));
+    const remaining = await db
+      .select()
+      .from(chatMembers)
+      .where(eq(chatMembers.chatId, chatId))
+      .limit(1);
+    if (remaining.length === 0) {
+      await db.delete(chats).where(eq(chats.id, chatId));
+      await deleteChatMessages(chatId).catch(() => {});
+    }
+    return { success: true };
   });

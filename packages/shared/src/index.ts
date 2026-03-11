@@ -16,6 +16,7 @@ export interface Chat {
   id: string;
   type: ChatType;
   name: string | null;
+  avatarUrl?: string | null;
   createdAt: string;
   lastMessageAt: string | null;
   lastMessagePreview: string | null;

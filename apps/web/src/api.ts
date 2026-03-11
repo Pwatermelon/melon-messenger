@@ -51,6 +51,7 @@ const chatResponseType = {
   id: "",
   type: "",
   name: null as string | null,
+  avatarUrl: null as string | null,
   createdAt: "",
   lastMessageAt: null as string | null,
   lastMessagePreview: null as string | null,
@@ -71,6 +72,22 @@ export async function createGroup(name: string, memberIds: string[]): Promise<Ch
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error ?? "Failed to create group");
+  }
+  return res.json();
+}
+
+export async function updateGroup(chatId: string, updates: { name?: string; avatarUrl?: string | null }): Promise<ChatResponse> {
+  const res = await fetch(`${getApiUrl()}/chats/${encodeURIComponent(chatId)}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Failed to update group");
   }
   return res.json();
 }
@@ -180,6 +197,17 @@ export async function setPublicKey(publicKey: string): Promise<void> {
     body: JSON.stringify({ publicKey }),
   });
   if (!res.ok) throw new Error("Failed to set public key");
+}
+
+export async function deleteChat(chatId: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/chats/${encodeURIComponent(chatId)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Failed to delete chat");
+  }
 }
 
 export async function uploadFile(file: File): Promise<{ url: string; fileName: string; mimeType: string; size: number }> {

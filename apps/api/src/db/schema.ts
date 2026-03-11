@@ -19,6 +19,7 @@ export const chats = pgTable("chats", {
   id: uuid("id").primaryKey().defaultRandom(),
   type: chatTypeEnum("type").notNull().default("dm"),
   name: varchar("name", { length: 255 }),
+  avatarUrl: text("avatar_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
