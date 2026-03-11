@@ -16,7 +16,9 @@ async function main() {
     console.warn("ScyllaDB init failed (optional for dev):", e);
   }
 
-  const app = new Elysia()
+  const app = new Elysia({
+    websocket: { perMessageDeflate: false },
+  })
     .use(cors({ origin: true, credentials: true }))
     .get("/uploads/:filename", async ({ params, set }) => {
       const filename = params.filename.replace(/\.\./g, "").replace(/\//g, "");

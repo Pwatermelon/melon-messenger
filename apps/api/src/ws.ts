@@ -51,15 +51,33 @@ export const wsHandlers = {
     ws.data = { userId: null, subscribedChats: new Set() };
   },
 
-  async message(ws: ServerWebSocket<WSData>, raw: string | Buffer) {
+  async message(ws: ServerWebSocket<WSData>, raw: string | Buffer | Record<string, unknown>) {
       try {
-      const str = typeof raw === "string" ? raw : raw.toString();
       let msg: WSClientMessage;
-      try {
-        msg = JSON.parse(str) as WSClientMessage;
-      } catch {
-        send(ws, { type: "error", error: "Invalid JSON" });
-        return;
+      if (typeof raw === "object" && raw !== null && !Buffer.isBuffer(raw) && !(raw instanceof Uint8Array) && !(raw instanceof ArrayBuffer)) {
+        msg = raw as unknown as WSClientMessage;
+      } else {
+        let str: string;
+        if (typeof raw === "string") {
+          str = raw.trim();
+        } else if (Buffer.isBuffer(raw)) {
+          str = raw.toString("utf8").trim();
+        } else if (raw instanceof Uint8Array || raw instanceof ArrayBuffer) {
+          const buf = raw instanceof ArrayBuffer ? Buffer.from(raw) : Buffer.from(raw);
+          str = buf.toString("utf8").trim();
+        } else {
+          str = String(raw).trim();
+        }
+        if (!str) {
+          send(ws, { type: "error", error: "Empty message" });
+          return;
+        }
+        try {
+          msg = JSON.parse(str) as WSClientMessage;
+        } catch {
+          send(ws, { type: "error", error: "Invalid JSON" });
+          return;
+        }
       }
 
       if (msg.type === "auth") {

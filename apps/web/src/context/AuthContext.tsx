@@ -8,6 +8,7 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, username: string) => Promise<void>;
   logout: () => void;
+  updateUser: (user: User) => void;
   isLoading: boolean;
 };
 
@@ -97,8 +98,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem(USER_KEY);
   }, []);
 
+  const updateUser = useCallback((next: User) => {
+    setUser(next);
+    localStorage.setItem(USER_KEY, JSON.stringify(next));
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, token, login, register, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, token, login, register, logout, updateUser, isLoading }}>
       {children}
     </AuthContext.Provider>
   );

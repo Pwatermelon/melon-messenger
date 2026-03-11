@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import { eq, and, inArray, desc, sql } from "drizzle-orm";
+import { eq, and, inArray, desc } from "drizzle-orm";
 import { authPlugin, requireAuth } from "../auth";
 import { db, users, chats, chatMembers } from "../db";
 import { getMessages as scyllaGetMessages } from "../services/scylla";
@@ -17,18 +17,19 @@ function toUser(u: typeof users.$inferSelect) {
 
 export const chatRoutes = new Elysia({ prefix: "/chats" })
   .use(authPlugin)
-  .get("/users/search", async ({ user, query, set }) => {
+  .get("/users/:id", async ({ user, params, set }) => {
     const u = requireAuth(set)(user);
-    const q = (query.q as string)?.trim();
-    if (!q || q.length < 2) {
-      return { users: [] };
+    const id = (params as { id?: string }).id?.trim();
+    if (!id || id === u.id) {
+      set.status = 404;
+      return { error: "User not found" };
     }
-    const list = await db
-      .select()
-      .from(users)
-      .where(sql`${users.username} ilike ${"%" + q + "%"} AND ${users.id} != ${u.id}`)
-      .limit(20);
-    return { users: list.map(toUser) };
+    const [target] = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    if (!target) {
+      set.status = 404;
+      return { error: "User not found" };
+    }
+    return toUser(target);
   })
   .get("/", async ({ user, set }) => {
     const u = requireAuth(set)(user);
@@ -137,6 +138,174 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
     };
   })
+  .post("/group", async ({ user, body, set }) => {
+    const u = requireAuth(set)(user);
+    const { name, memberIds } = body as { name?: string; memberIds?: string[] };
+    if (!name?.trim()) {
+      set.status = 400;
+      return { error: "name is required" };
+    }
+    const ids = Array.isArray(memberIds) ? [...new Set(memberIds)].filter((id) => id !== u.id) : [];
+    if (ids.length > 0) {
+      const existing = await db.select().from(users).where(inArray(users.id, ids));
+      if (existing.length !== ids.length) {
+        set.status = 400;
+        return { error: "Some users not found" };
+      }
+    }
+    const [chat] = await db.insert(chats).values({ type: "group", name: name.trim() }).returning();
+    await db.insert(chatMembers).values([
+      { chatId: chat.id, userId: u.id, role: "admin" },
+      ...ids.map((userId) => ({ chatId: chat.id, userId, role: "member" as const })),
+    ]);
+    const members = await db
+      .select({ user: users, role: chatMembers.role })
+      .from(chatMembers)
+      .innerJoin(users, eq(users.id, chatMembers.userId))
+      .where(eq(chatMembers.chatId, chat.id));
+    return {
+      id: chat.id,
+      type: chat.type,
+      name: chat.name,
+      createdAt: chat.createdAt?.toISOString?.(),
+      lastMessageAt: null,
+      lastMessagePreview: null,
+      members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
+    };
+  })
+  .get("/:id", async ({ user, params, set }) => {
+    const u = requireAuth(set)(user);
+    const { id: chatId } = params;
+    const [chatRow] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1);
+    if (!chatRow) {
+      set.status = 404;
+      return { error: "Chat not found" };
+    }
+    const [myMember] = await db.select().from(chatMembers).where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, u.id))).limit(1);
+    if (!myMember) {
+      set.status = 403;
+      return { error: "Not a member" };
+    }
+    const members = await db
+      .select({ user: users, role: chatMembers.role })
+      .from(chatMembers)
+      .innerJoin(users, eq(users.id, chatMembers.userId))
+      .where(eq(chatMembers.chatId, chatId));
+    let lastMessagePreview: string | null = null;
+    let lastMessageAt: string | null = null;
+    try {
+      const [first] = await scyllaGetMessages(chatId, 1);
+      if (first) {
+        lastMessagePreview = first.encrypted ? "🔒 Зашифрованное сообщение" : first.content.slice(0, 80);
+        lastMessageAt = first.created_at?.toISOString?.() ?? null;
+      }
+    } catch {}
+    return {
+      id: chatRow.id,
+      type: chatRow.type,
+      name: chatRow.name,
+      createdAt: chatRow.createdAt?.toISOString?.(),
+      lastMessageAt,
+      lastMessagePreview,
+      members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
+    };
+  })
+  .post("/:id/members", async ({ user, params, body, set }) => {
+    const u = requireAuth(set)(user);
+    const { id: chatId } = params;
+    const [chatRow] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1);
+    if (!chatRow || chatRow.type !== "group") {
+      set.status = 404;
+      return { error: "Group not found" };
+    }
+    const [myMember] = await db.select().from(chatMembers).where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, u.id))).limit(1);
+    if (!myMember || myMember.role !== "admin") {
+      set.status = 403;
+      return { error: "Only admin can add members" };
+    }
+    const { userIds } = body as { userIds?: string[] };
+    const ids = Array.isArray(userIds) ? [...new Set(userIds)].filter((id) => id && id !== u.id) : [];
+    if (ids.length === 0) {
+      set.status = 400;
+      return { error: "userIds required" };
+    }
+    const existingUsers = await db.select().from(users).where(inArray(users.id, ids));
+    if (existingUsers.length !== ids.length) {
+      set.status = 400;
+      return { error: "Some users not found" };
+    }
+    const alreadyIn = await db.select({ userId: chatMembers.userId }).from(chatMembers).where(eq(chatMembers.chatId, chatId));
+    const alreadySet = new Set(alreadyIn.map((r) => r.userId));
+    const toAdd = ids.filter((id) => !alreadySet.has(id));
+    if (toAdd.length > 0) {
+      await db.insert(chatMembers).values(toAdd.map((userId) => ({ chatId, userId, role: "member" as const })));
+    }
+    const members = await db
+      .select({ user: users, role: chatMembers.role })
+      .from(chatMembers)
+      .innerJoin(users, eq(users.id, chatMembers.userId))
+      .where(eq(chatMembers.chatId, chatId));
+    let lastMessagePreview: string | null = null;
+    let lastMessageAt: string | null = null;
+    try {
+      const [first] = await scyllaGetMessages(chatId, 1);
+      if (first) {
+        lastMessagePreview = first.encrypted ? "🔒 Зашифрованное сообщение" : first.content.slice(0, 80);
+        lastMessageAt = first.created_at?.toISOString?.() ?? null;
+      }
+    } catch {}
+    return {
+      id: chatRow.id,
+      type: chatRow.type,
+      name: chatRow.name,
+      createdAt: chatRow.createdAt?.toISOString?.(),
+      lastMessageAt,
+      lastMessagePreview,
+      members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
+    };
+  })
+  .delete("/:id/members/:userId", async ({ user, params, set }) => {
+    const u = requireAuth(set)(user);
+    const { id: chatId, userId: targetUserId } = params;
+    const [chatRow] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1);
+    if (!chatRow || chatRow.type !== "group") {
+      set.status = 404;
+      return { error: "Group not found" };
+    }
+    const [myMember] = await db.select().from(chatMembers).where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, u.id))).limit(1);
+    if (!myMember) {
+      set.status = 403;
+      return { error: "Not a member" };
+    }
+    if (targetUserId !== u.id && myMember.role !== "admin") {
+      set.status = 403;
+      return { error: "Only admin can remove other members" };
+    }
+    await db.delete(chatMembers).where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, targetUserId)));
+    const members = await db
+      .select({ user: users, role: chatMembers.role })
+      .from(chatMembers)
+      .innerJoin(users, eq(users.id, chatMembers.userId))
+      .where(eq(chatMembers.chatId, chatId));
+    let lastMessagePreview: string | null = null;
+    let lastMessageAt: string | null = null;
+    try {
+      const [first] = await scyllaGetMessages(chatId, 1);
+      if (first) {
+        lastMessagePreview = first.encrypted ? "🔒 Зашифрованное сообщение" : first.content.slice(0, 80);
+        lastMessageAt = first.created_at?.toISOString?.() ?? null;
+      }
+    } catch {}
+    return {
+      id: chatRow.id,
+      type: chatRow.type,
+      name: chatRow.name,
+      createdAt: chatRow.createdAt?.toISOString?.(),
+      lastMessageAt,
+      lastMessagePreview,
+      members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
+    };
+  })
   .get("/:id/messages", async ({ user, params, query, set }) => {
     const u = requireAuth(set)(user);
     const { id: chatId } = params;
@@ -176,5 +345,5 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         encrypted: r.encrypted ?? false,
       };
     });
-    return { messages };
+    return { messages: messages.slice().reverse() };
   });

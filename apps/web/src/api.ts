@@ -47,14 +47,99 @@ export async function createDm(userId: string): Promise<{
   return res.json();
 }
 
-export async function searchUsers(q: string): Promise<Array<{ id: string; username: string; avatarUrl: string | null }>> {
+const chatResponseType = {
+  id: "",
+  type: "",
+  name: null as string | null,
+  createdAt: "",
+  lastMessageAt: null as string | null,
+  lastMessagePreview: null as string | null,
+  members: [] as Array<{ id: string; username: string; avatarUrl: string | null; publicKey?: string | null; role: string }>,
+};
+
+export type ChatResponse = typeof chatResponseType;
+
+export async function createGroup(name: string, memberIds: string[]): Promise<ChatResponse> {
+  const res = await fetch(`${getApiUrl()}/chats/group`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ name: name.trim(), memberIds }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Failed to create group");
+  }
+  return res.json();
+}
+
+export async function getChat(chatId: string): Promise<ChatResponse | null> {
+  const res = await fetch(`${getApiUrl()}/chats/${encodeURIComponent(chatId)}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function addGroupMembers(chatId: string, userIds: string[]): Promise<ChatResponse> {
+  const res = await fetch(`${getApiUrl()}/chats/${encodeURIComponent(chatId)}/members`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ userIds }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Failed to add members");
+  }
+  return res.json();
+}
+
+export async function removeGroupMember(chatId: string, userId: string): Promise<ChatResponse> {
   const res = await fetch(
-    `${getApiUrl()}/chats/users/search?q=${encodeURIComponent(q)}`,
-    { headers: { Authorization: `Bearer ${getToken()}` } }
+    `${getApiUrl()}/chats/${encodeURIComponent(chatId)}/members/${encodeURIComponent(userId)}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${getToken()}` } }
   );
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.users ?? [];
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Failed to remove member");
+  }
+  return res.json();
+}
+
+export async function getUserById(id: string): Promise<{ id: string; username: string; avatarUrl: string | null } | null> {
+  const res = await fetch(`${getApiUrl()}/chats/users/${encodeURIComponent(id)}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function updateProfile(updates: { username?: string; avatarUrl?: string | null }): Promise<{
+  id: string;
+  email: string;
+  username: string;
+  avatarUrl: string | null;
+  publicKey: string | null;
+  createdAt: string | undefined;
+}> {
+  const res = await fetch(`${getApiUrl()}/auth/me`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Update failed");
+  }
+  return res.json();
 }
 
 export interface MessageItem {

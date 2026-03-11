@@ -61,6 +61,44 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     const token = await jwt.sign({ sub: u.id });
     return { user: toUserResponse(u), token };
   })
+  .put("/me", async ({ request, set }) => {
+    const authHeader = request.headers.get("authorization");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) {
+      set.status = 401;
+      return { error: "Unauthorized" };
+    }
+    try {
+      const secret = new TextEncoder().encode(process.env.JWT_SECRET ?? "melon-dev-secret-change-in-prod");
+      const { payload } = await jose.jwtVerify(token, secret);
+      const userId = payload.sub as string;
+      if (!userId) {
+        set.status = 401;
+        return { error: "Invalid token" };
+      }
+      const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+      if (!u) {
+        set.status = 401;
+        return { error: "User not found" };
+      }
+      const body = (await request.json()) as { username?: string; avatarUrl?: string | null };
+      const updates: { username?: string; avatarUrl?: string | null } = {};
+      if (typeof body.username === "string" && body.username.trim().length > 0) {
+        updates.username = body.username.trim().slice(0, 100);
+      }
+      if (body.avatarUrl !== undefined) {
+        updates.avatarUrl = typeof body.avatarUrl === "string" ? body.avatarUrl.trim() || null : null;
+      }
+      if (Object.keys(updates).length === 0) {
+        return toUserResponse(u);
+      }
+      const [updated] = await db.update(users).set(updates).where(eq(users.id, u.id)).returning();
+      return toUserResponse(updated!);
+    } catch {
+      set.status = 401;
+      return { error: "Invalid token" };
+    }
+  })
   .put("/me/public-key", async ({ request, set }) => {
     const authHeader = request.headers.get("authorization");
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;

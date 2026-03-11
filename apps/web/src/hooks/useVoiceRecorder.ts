@@ -7,6 +7,9 @@ export function useVoiceRecorder() {
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const durationRef = useRef(0);
+  durationRef.current = duration;
+
   const start = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -19,8 +22,13 @@ export function useVoiceRecorder() {
       recorder.start(100);
       setRecording(true);
       setDuration(0);
+      durationRef.current = 0;
       const startTime = Date.now();
-      timerRef.current = setInterval(() => setDuration(Math.floor((Date.now() - startTime) / 1000)), 1000);
+      timerRef.current = setInterval(() => {
+        const d = Math.floor((Date.now() - startTime) / 1000);
+        durationRef.current = d;
+        setDuration(d);
+      }, 1000);
     } catch (err) {
       console.error("Voice recording failed:", err);
     }
@@ -33,22 +41,31 @@ export function useVoiceRecorder() {
         resolve({ blob: new Blob(), duration: 0 });
         return;
       }
-      const d = duration;
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
-      recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+      const d = durationRef.current;
+      const mime = recorder.mimeType || "audio/webm";
+      const finish = () => {
         recorder.stream.getTracks().forEach((t) => t.stop());
         setRecording(false);
         setDuration(0);
         mediaRecorderRef.current = null;
+        const blob = new Blob(chunksRef.current, { type: mime });
         resolve({ blob, duration: d });
       };
-      recorder.stop();
+      recorder.onstop = () => {
+        requestAnimationFrame(() => requestAnimationFrame(finish));
+      };
+      if (recorder.state === "recording") {
+        recorder.requestData?.();
+        recorder.stop();
+      } else {
+        finish();
+      }
     });
-  }, [duration]);
+  }, []);
 
   return { recording, duration, start, stop };
 }
