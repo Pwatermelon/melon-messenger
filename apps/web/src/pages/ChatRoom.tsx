@@ -201,13 +201,13 @@ export default function ChatRoom() {
     try {
       const isImage = file.type.startsWith("image/");
       const toUpload = isImage ? await compressImage(file) : file;
-      const { url } = await uploadFile(toUpload);
+      const { path, fileName, mimeType, size } = await uploadFile(toUpload);
       const type = isImage ? "image" : file.type.startsWith("video/") ? "video" : "file";
       await sendMessage({
         content: type === "image" ? "Фотография" : file.name,
         messageType: type,
-        attachmentUrl: url,
-        attachmentMetadata: type === "image" ? { fileName: "Фотография", mimeType: toUpload.type, size: toUpload.size } : { fileName: file.name, mimeType: file.type, size: file.size },
+        attachmentUrl: path,
+        attachmentMetadata: type === "image" ? { fileName: "Фотография", mimeType: toUpload.type, size: toUpload.size } : { fileName: file.name ?? fileName, mimeType: mimeType ?? file.type, size: size ?? file.size },
       });
     } catch (err) {
       console.error(err);
@@ -243,8 +243,7 @@ export default function ChatRoom() {
       const mime = blob.type || "audio/webm";
       const ext = mime.includes("ogg") ? "ogg" : "webm";
       const file = new File([blob], `voice.${ext}`, { type: mime });
-      const { url } = await uploadFile(file);
-      const path = url.startsWith("http") ? new URL(url).pathname : url;
+      const { path } = await uploadFile(file);
       await sendMessage({
         content: "Голосовое сообщение",
         messageType: "voice",
@@ -300,8 +299,7 @@ export default function ChatRoom() {
     setSending(true);
     try {
       const compressed = await compressImage(file);
-      const { url } = await uploadFile(compressed);
-      const path = url.startsWith("http") ? new URL(url).pathname : url;
+      const { path } = await uploadFile(compressed);
       const updated = await updateGroup(chatId, { avatarUrl: path });
       setChat(updated as Chat);
       window.dispatchEvent(new Event("melon:refresh-chats"));

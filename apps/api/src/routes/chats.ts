@@ -78,7 +78,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
   })
   .post("/dm", async ({ user, body, set }) => {
     const u = requireAuth(set)(user);
-    const { userId: otherUserId } = body as { userId?: string };
+    const { userId: otherUserId } = (typeof body === "object" && body !== null ? body : {}) as { userId?: string };
     if (!otherUserId) {
       set.status = 400;
       return { error: "userId is required" };
@@ -113,7 +113,6 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         id: chat.id,
         type: chat.type,
         name: chat.name,
-        avatarUrl: chat.avatarUrl,
         createdAt: chat.createdAt?.toISOString?.(),
         lastMessageAt: null,
         lastMessagePreview: null,
@@ -143,7 +142,9 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
   })
   .post("/group", async ({ user, body, set }) => {
     const u = requireAuth(set)(user);
-    const { name, memberIds } = body as { name?: string; memberIds?: string[] };
+    const b = (typeof body === "object" && body !== null ? body : {}) as { name?: string; memberIds?: string[] };
+    const name = b?.name;
+    const memberIds = b?.memberIds;
     if (!name?.trim()) {
       set.status = 400;
       return { error: "name is required" };

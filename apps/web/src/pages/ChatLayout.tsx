@@ -24,6 +24,7 @@ export default function ChatLayout() {
   const [groupSelected, setGroupSelected] = useState<Array<{ id: string; username: string }>>([]);
   const [groupAddId, setGroupAddId] = useState("");
   const [groupAddError, setGroupAddError] = useState("");
+  const [groupError, setGroupError] = useState("");
   const newChatMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -100,12 +101,12 @@ export default function ChatLayout() {
   }
 
   async function startDm(otherUserId: string) {
+    setDmError("");
     try {
       const chat = await createDm(otherUserId);
       setDmOpen(false);
       setDmUserId("");
       setDmUser(null);
-      setDmError("");
       setChats((prev) => [chat as Chat, ...prev]);
       navigate(`/chat/${chat.id}`);
     } catch (e) {
@@ -113,15 +114,18 @@ export default function ChatLayout() {
         const existing = chats.find((c) => c.members.some((m) => m.id === otherUserId));
         if (existing) navigate(`/chat/${existing.id}`);
         setDmOpen(false);
+      } else {
+        setDmError(e instanceof Error ? e.message : "Не удалось создать чат");
       }
     }
   }
 
   async function startGroup() {
     const name = groupName.trim();
-    const ids = groupSelected.map((u) => u.id);
-    if (!name || ids.length === 0) return;
+    if (!name) return;
+    setGroupError("");
     try {
+      const ids = groupSelected.map((u) => u.id);
       const chat = await createGroup(name, ids);
       setGroupOpen(false);
       setGroupName("");
@@ -131,7 +135,7 @@ export default function ChatLayout() {
       setChats((prev) => [chat as Chat, ...prev]);
       navigate(`/chat/${chat.id}`);
     } catch (err) {
-      console.error(err);
+      setGroupError(err instanceof Error ? err.message : "Не удалось создать группу");
     }
   }
 
@@ -235,7 +239,7 @@ export default function ChatLayout() {
                 <button type="button" onClick={() => { setNewChatMenuOpen(false); setDmOpen(true); }}>
                   Личный чат
                 </button>
-                <button type="button" onClick={() => { setNewChatMenuOpen(false); setGroupOpen(true); }}>
+                <button type="button" onClick={() => { setNewChatMenuOpen(false); setGroupError(""); setGroupOpen(true); }}>
                   Группа
                 </button>
               </div>
@@ -248,7 +252,10 @@ export default function ChatLayout() {
       </main>
 
       {dmOpen && (
-        <div className="search-overlay" onClick={() => { setDmOpen(false); setDmUser(null); setDmError(""); }}>
+        <div
+          className="search-overlay"
+          onClick={(e) => { if (e.target === e.currentTarget) { setDmOpen(false); setDmUser(null); setDmError(""); } }}
+        >
           <div className="search-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Новый диалог</h3>
             <div className="search-id-row">
@@ -271,7 +278,11 @@ export default function ChatLayout() {
                   <img src={dmUser.avatarUrl.startsWith("http") ? dmUser.avatarUrl : `${getUploadsBaseUrl()}${dmUser.avatarUrl}`} alt="" />
                 ) : dmUser.username.slice(0, 1).toUpperCase()}</div>
                 <span>{dmUser.username}</span>
-                <button type="button" className="btn-primary" onClick={() => startDm(dmUser.id)}>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={(e) => { e.stopPropagation(); startDm(dmUser.id); }}
+                >
                   Написать
                 </button>
               </div>
@@ -284,7 +295,10 @@ export default function ChatLayout() {
       )}
 
       {groupOpen && (
-        <div className="search-overlay" onClick={() => setGroupOpen(false)}>
+        <div
+          className="search-overlay"
+          onClick={(e) => { if (e.target === e.currentTarget) setGroupOpen(false); }}
+        >
           <div className="search-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Новая группа</h3>
             <input
@@ -308,6 +322,7 @@ export default function ChatLayout() {
               </button>
             </div>
             {groupAddError && <p className="search-error">{groupAddError}</p>}
+            {groupError && <p className="search-error">{groupError}</p>}
             {groupSelected.length > 0 && (
               <div className="group-selected">
                 {groupSelected.map((u) => (
@@ -318,8 +333,13 @@ export default function ChatLayout() {
                 ))}
               </div>
             )}
-            <div className="modal-actions">
-              <button type="button" className="close primary" onClick={startGroup} disabled={!groupName.trim()}>
+            <div className="modal-actions" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                className="close primary"
+                onClick={(e) => { e.stopPropagation(); startGroup(); }}
+                disabled={!groupName.trim()}
+              >
                 Создать группу
               </button>
               <button type="button" className="close" onClick={() => setGroupOpen(false)}>

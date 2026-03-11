@@ -41,8 +41,21 @@ export async function createDm(userId: string): Promise<{
     body: JSON.stringify({ userId }),
   });
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error ?? "Failed to create chat");
+    const text = await res.text();
+    let data: { error?: string } = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = {};
+    }
+    const msg =
+      (typeof data.error === "string" && data.error) ||
+      (res.status === 401 && "Сессия истекла. Войдите снова.") ||
+      (res.status === 404 && "Пользователь не найден") ||
+      (res.status === 400 && (data.error || "Неверный запрос")) ||
+      (res.status >= 500 && "Ошибка сервера. Попробуйте позже.") ||
+      "Не удалось создать чат. Попробуйте войти снова.";
+    throw new Error(msg);
   }
   return res.json();
 }
@@ -210,7 +223,7 @@ export async function deleteChat(chatId: string): Promise<void> {
   }
 }
 
-export async function uploadFile(file: File): Promise<{ url: string; fileName: string; mimeType: string; size: number }> {
+export async function uploadFile(file: File): Promise<{ url: string; path: string; fileName: string; mimeType: string; size: number }> {
   const form = new FormData();
   form.append("file", file);
   const res = await fetch(`${getApiUrl()}/upload`, {
@@ -219,9 +232,24 @@ export async function uploadFile(file: File): Promise<{ url: string; fileName: s
     body: form,
   });
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error ?? "Upload failed");
+    const text = await res.text();
+    let data: { error?: string } = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {}
+    const msg =
+      res.status === 413 ? "Файл слишком большой (макс. 100 МБ)" :
+      (typeof data.error === "string" && data.error) || "Ошибка загрузки";
+    throw new Error(msg);
   }
   const data = await res.json();
-  return { url: `${getApiUrl().replace(/\/api$/, "")}${data.url}`, fileName: data.fileName, mimeType: data.mimeType, size: data.size };
+  const path = typeof data.url === "string" ? data.url : "/uploads/";
+  const base = getApiUrl().replace(/\/api\/?$/, "");
+  return {
+    url: `${base}${path.startsWith("/") ? path : `/${path}`}`,
+    path: path.startsWith("/") ? path : `/${path}`,
+    fileName: data.fileName,
+    mimeType: data.mimeType,
+    size: data.size,
+  };
 }

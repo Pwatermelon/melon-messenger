@@ -18,9 +18,14 @@ function extFromMime(mime: string): string {
     "image/webp": ".webp",
     "video/mp4": ".mp4",
     "video/webm": ".webm",
+    "video/quicktime": ".mov",
+    "video/x-msvideo": ".avi",
+    "video/x-matroska": ".mkv",
     "audio/webm": ".webm",
     "audio/ogg": ".ogg",
     "audio/mpeg": ".mp3",
+    "application/pdf": ".pdf",
+    "application/zip": ".zip",
   };
   return map[mime] ?? "";
 }
