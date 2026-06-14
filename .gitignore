@@ -3,7 +3,7 @@ dist/
 .env
 .env.*
 !.env.example
-!deploy/.env.prod.example
+!deploy/.env.example
 uploads/
 *.log
 .DS_Store

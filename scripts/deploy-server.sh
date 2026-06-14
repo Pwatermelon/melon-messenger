@@ -2,41 +2,49 @@
 # Pull versioned images from Docker Hub and restart production stack.
 set -euo pipefail
 
-DOCKERHUB_USER="plwatermelon"
-VERSION="${WM_VERSION:-${WM_IMAGE_TAG:-}}"
+if ! command -v docker >/dev/null 2>&1; then
+  echo "ERROR: docker not found. Run: bash scripts/install-docker.sh"
+  exit 127
+fi
 
+if ! docker compose version >/dev/null 2>&1; then
+  echo "ERROR: docker compose plugin not found."
+  exit 127
+fi
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "${ROOT}"
+
+VERSION="${WM_VERSION:-${WM_IMAGE_TAG:-}}"
 if [[ -z "$VERSION" ]]; then
   echo "Set WM_VERSION (e.g. 1.0.0) — same as commit message 'ver 1.0.0'"
   exit 1
 fi
 
-COMPOSE="docker compose -f deploy/docker-compose.yml --env-file .env.prod"
-
-if [[ ! -f .env.prod ]]; then
-  echo "Missing .env.prod — should be synced from CI secret PROD_ENV_FILE or copied manually."
+if [[ ! -f .env ]]; then
+  echo "Missing ${ROOT}/.env — copy deploy/.env.example or sync from GitHub PROD_ENV_FILE"
   exit 1
 fi
 
-# Persist deployed version in .env.prod (for manual restarts without CI)
-if grep -q '^WM_VERSION=' .env.prod; then
-  sed -i "s/^WM_VERSION=.*/WM_VERSION=${VERSION}/" .env.prod
+# docker compose сам читает .env из текущей директории
+COMPOSE="docker compose -f deploy/docker-compose.yml"
+
+if grep -q '^WM_VERSION=' .env; then
+  sed -i "s/^WM_VERSION=.*/WM_VERSION=${VERSION}/" .env
 else
-  echo "WM_VERSION=${VERSION}" >> .env.prod
+  echo "WM_VERSION=${VERSION}" >> .env
 fi
 
 export WM_VERSION="${VERSION}"
 
 echo "==> Deploying ver ${VERSION}"
-echo "    API: ${DOCKERHUB_USER}/watermelon-messenger-api:${VERSION}"
-echo "    Web: ${DOCKERHUB_USER}/watermelon-messenger-web:${VERSION}"
+echo "    API: plwatermelon/watermelon-messenger-api:${VERSION}"
+echo "    Web: plwatermelon/watermelon-messenger-web:${VERSION}"
 
-echo "==> Pulling api + web..."
 $COMPOSE pull api web
-
-echo "==> Restarting stack..."
 $COMPOSE up -d --remove-orphans
 
-DOMAIN="$(grep -E '^WM_DOMAIN=' .env.prod | cut -d= -f2- | tr -d '"' || echo watermelon-messenger.ru)"
+DOMAIN="$(grep -E '^WM_DOMAIN=' .env | cut -d= -f2- | tr -d '"' || echo watermelon-messenger.ru)"
 echo "==> Waiting for https://${DOMAIN}/api/health ..."
 for i in $(seq 1 30); do
   if curl -sfk "https://${DOMAIN}/api/health" >/dev/null 2>&1; then

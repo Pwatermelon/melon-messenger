@@ -17,7 +17,7 @@ git push origin main
 
 1. Unit-тесты + сборка web + smoke `/health`
 2. Docker-образы → Docker Hub с тегом `:X.Y.Z`
-3. Rsync конфигов + `.env.prod` на сервер → deploy
+3. Rsync конфигов + `.env` на сервер → deploy
 
 Playwright/E2E **не** используются в релизе. `E2E_TEST_SECRET` на prod **не задаётся**.
 
@@ -26,7 +26,7 @@ Playwright/E2E **не** используются в релизе. `E2E_TEST_SECR
 | Secret | Назначение |
 |--------|------------|
 | `DOCKERHUB_TOKEN` | Access token Docker Hub (аккаунт **plwatermelon**) |
-| `PROD_ENV_FILE` | **Полное содержимое** `.env.prod` (многострочный) |
+| `PROD_ENV_FILE` | **Полное содержимое** `.env` (многострочный) |
 | `DEPLOY_SSH_HOST` | IP/хост сервера |
 | `DEPLOY_SSH_USER` | SSH-пользователь |
 | `DEPLOY_SSH_KEY` | Приватный SSH-ключ |
@@ -36,30 +36,36 @@ Playwright/E2E **не** используются в релизе. `E2E_TEST_SECR
 
 ```bash
 # локально заполните .env.prod по шаблону
-cp deploy/.env.prod.example .env.prod
-nano .env.prod
+cp deploy/.env.example .env
+nano .env
 
 # скопируйте содержимое в GitHub → Settings → Secrets → PROD_ENV_FILE
 # (вставьте весь файл целиком)
 ```
 
-При каждом релизе секрет перезаписывает `.env.prod` на сервере.
+При каждом релизе секрет перезаписывает `.env` на сервере.
 
 ## Первичная настройка сервера
 
 ```bash
-sudo apt update && sudo apt install -y docker.io docker-compose-plugin
-sudo usermod -aG docker $USER
+ssh ubuntu@195.209.218.182   # твой IP
 
-# каталог создаётся автоматически при первом деплое из CI
-# или вручную:
+# Docker + compose v2 (обязательно до деплоя!)
+# get.docker.com падает на Ubuntu 20.04 — см. scripts/install-docker.sh
+bash scripts/install-docker.sh
+
+newgrp docker
+docker --version && docker compose version
+
 sudo mkdir -p /opt/watermelon-messenger/{deploy,scripts}
-sudo chown $USER:$USER /opt/watermelon-messenger
+sudo chown -R $USER:$USER /opt/watermelon-messenger
 ```
+
+`DEPLOY_SSH_USER` (например `ubuntu`) должен **владеть** каталогом — иначе rsync из CI получит `Permission denied`.
 
 ### TLS (Let's Encrypt)
 
-**В `.env.prod` нужен только email** — паролей у certbot нет:
+**В `.env` нужен только email** — паролей у certbot нет:
 
 ```env
 WM_DOMAIN=watermelon-messenger.ru
@@ -70,7 +76,7 @@ CERTBOT_EMAIL=you@example.com
 
 ```bash
 cd /opt/watermelon-messenger
-./scripts/certbot-init.sh   # читает WM_DOMAIN и CERTBOT_EMAIL из .env.prod
+./scripts/certbot-init.sh   # читает WM_DOMAIN и CERTBOT_EMAIL из .env
 ```
 
 **Продление** — автоматически: контейнер `certbot` в `deploy/docker-compose.yml` каждые 12 часов делает `certbot renew` через webroot. Доп. настройки не нужны.
@@ -86,7 +92,7 @@ cd /opt/watermelon-messenger
 
 ```bash
 DEPLOY_HOST=your.server DEPLOY_USER=root DEPLOY_PATH=/opt/watermelon-messenger \
-  PROD_ENV_FILE=.env.prod ./scripts/sync-prod-config.sh
+  ENV_FILE=.env ./scripts/sync-prod-config.sh
 
 ssh user@host "cd /opt/watermelon-messenger && WM_VERSION=1.0.0 ./scripts/deploy-server.sh"
 ```
@@ -95,7 +101,7 @@ ssh user@host "cd /opt/watermelon-messenger && WM_VERSION=1.0.0 ./scripts/deploy
 
 ```
 /opt/watermelon-messenger/
-├── .env.prod              ← из PROD_ENV_FILE (секреты)
+├── .env                   ← секреты (из PROD_ENV_FILE)
 ├── deploy/
 │   ├── docker-compose.yml
 │   ├── nginx.prod.conf

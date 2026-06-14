@@ -1,7 +1,7 @@
 # Production overlay for local prod testing (build from source).
 # Prefer deploy/docker-compose.yml on the server (pull from Docker Hub).
 #
-# docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml --env-file .env.prod up -d --build
+# docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
 
 services:
   api:

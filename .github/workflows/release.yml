@@ -152,7 +152,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare .env.prod from secret
+      - name: Prepare .env from secret
         env:
           PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE }}
         run: |
@@ -160,7 +160,7 @@ jobs:
             echo "::error::GitHub secret PROD_ENV_FILE is required for deploy"
             exit 1
           fi
-          printf '%s\n' "$PROD_ENV_FILE" > .env.prod.bundle
+          printf '%s\n' "$PROD_ENV_FILE" > .env.bundle
 
       - name: Install SSH key
         run: |
@@ -179,13 +179,15 @@ jobs:
           REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}"
 
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
-            "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p ${DEPLOY_PATH}/deploy ${DEPLOY_PATH}/scripts"
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "mkdir -p ${DEPLOY_PATH}/deploy ${DEPLOY_PATH}/scripts && \
+             (sudo chown -R \$(whoami):\$(whoami) ${DEPLOY_PATH} 2>/dev/null || chown -R \$(whoami):\$(whoami) ${DEPLOY_PATH} 2>/dev/null || true)"
 
           rsync -avz -e "$RSYNC_SSH" \
             deploy/docker-compose.yml \
             deploy/nginx.prod.conf \
             deploy/nginx.bootstrap.conf \
-            deploy/.env.prod.example \
+            deploy/.env.example \
             "${REMOTE}/deploy/"
 
           rsync -avz -e "$RSYNC_SSH" \
@@ -193,11 +195,12 @@ jobs:
             scripts/certbot-init.sh \
             scripts/backup-postgres.sh \
             scripts/sync-prod-config.sh \
+            scripts/install-docker.sh \
             "${REMOTE}/scripts/"
 
           rsync -avz -e "$RSYNC_SSH" \
-            .env.prod.bundle \
-            "${REMOTE}/.env.prod"
+            .env.bundle \
+            "${REMOTE}/.env"
 
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
             "${DEPLOY_USER}@${DEPLOY_HOST}" \
