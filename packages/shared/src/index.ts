@@ -3,6 +3,8 @@
 export type ChatType = "dm" | "group";
 export type SubscriptionTier = "free" | "platinum";
 
+export * from "./birthday";
+
 export interface User {
   id: string;
   email?: string;
@@ -15,6 +17,13 @@ export interface User {
   subscriptionTier?: SubscriptionTier;
   subscriptionExpiresAt?: string | null;
   yandexId?: string | null;
+  yandexLogin?: string | null;
+  birthday?: string | null;
+  birthdayVisible?: boolean;
+  birthdayLabel?: string | null;
+  birthdayAge?: number | null;
+  isBirthdayToday?: boolean;
+  avatarHistory?: string[];
   betaApproved?: boolean;
   isAdmin?: boolean;
 }

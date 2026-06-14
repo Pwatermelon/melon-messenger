@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getAdminUsers, approveUser, revokeUser, type AdminUser } from "../api";
 import { BrandIcon } from "../components/BrandIcon";
+import { logoutViaYandex } from "../lib/yandexLogout";
 
 export default function AdminPanel() {
   const { user, logout } = useAuth();
-  const navigate = useNavigate();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -87,7 +87,7 @@ export default function AdminPanel() {
         </div>
         <div className="admin-header-actions">
           <Link to="/" className="admin-link">Мессенджер</Link>
-          <button type="button" onClick={() => { logout(); navigate("/login"); }}>Выйти</button>
+          <button type="button" onClick={() => logoutViaYandex(logout)}>Выйти</button>
         </div>
       </header>
 

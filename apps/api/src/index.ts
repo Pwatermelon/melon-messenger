@@ -36,6 +36,9 @@ async function main() {
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio text`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS cover_url text`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photos text`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthday varchar(10)`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthday_visible boolean NOT NULL DEFAULT false`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_history text`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_expires_at timestamptz`);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS payments (

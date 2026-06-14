@@ -1,9 +1,10 @@
 import { Elysia } from "elysia";
-import { eq, and, inArray, desc } from "drizzle-orm";
+import { eq, and, inArray, desc, sql } from "drizzle-orm";
 import { authPlugin, requireAuth } from "../auth";
 import { db, users, chats, chatMembers } from "../db";
 import { getMessages as scyllaGetMessages, deleteChatMessages } from "../services/scylla";
 import { toPublicProfile } from "../lib/userDto";
+import { usersShareChat } from "../lib/chatAccess";
 
 function toUser(u: typeof users.$inferSelect) {
   return toPublicProfile(u);
@@ -11,8 +12,45 @@ function toUser(u: typeof users.$inferSelect) {
 
 export const chatRoutes = new Elysia({ prefix: "/chats" })
   .use(authPlugin)
+  .get("/users/by-login/:login", async ({ user, params, set }) => {
+    const viewer = requireAuth(set)(user);
+    const login = (params as { login?: string }).login?.trim().toLowerCase();
+    if (!login) {
+      set.status = 404;
+      return { error: "User not found" };
+    }
+    const [target] = await db
+      .select()
+      .from(users)
+      .where(sql`lower(${users.yandexLogin}) = ${login}`)
+      .limit(1);
+    if (!target) {
+      set.status = 404;
+      return { error: "User not found" };
+    }
+    const includeBirthday = await usersShareChat(viewer.id, target.id);
+    return toPublicProfile(target, includeBirthday);
+  })
+  .get("/users/search/:query", async ({ user, params, set }) => {
+    requireAuth(set)(user);
+    const q = decodeURIComponent((params as { query?: string }).query ?? "").trim().toLowerCase();
+    if (!q) {
+      set.status = 404;
+      return { error: "User not found" };
+    }
+    const [target] = await db
+      .select()
+      .from(users)
+      .where(sql`lower(${users.yandexLogin}) = ${q}`)
+      .limit(1);
+    if (!target) {
+      set.status = 404;
+      return { error: "User not found" };
+    }
+    return toPublicProfile(target, false);
+  })
   .get("/users/:id", async ({ user, params, set }) => {
-    const u = requireAuth(set)(user);
+    const viewer = requireAuth(set)(user);
     const id = (params as { id?: string }).id?.trim();
     if (!id) {
       set.status = 404;
@@ -23,7 +61,8 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       set.status = 404;
       return { error: "User not found" };
     }
-    return toPublicProfile(target);
+    const includeBirthday = target.birthdayVisible || viewer.id === target.id;
+    return toPublicProfile(target, includeBirthday);
   })
   .get("/", async ({ user, set }) => {
     const u = requireAuth(set)(user);

@@ -2,6 +2,7 @@ import * as jose from "jose";
 import { eq } from "drizzle-orm";
 import { db, users } from "../db";
 import { toPrivateProfile } from "../lib/userDto";
+import { parseYandexBirthday } from "@melon/shared";
 
 export const YANDEX_CLIENT_ID = process.env.YANDEX_CLIENT_ID ?? "";
 export const YANDEX_CLIENT_SECRET = process.env.YANDEX_CLIENT_SECRET ?? "";
@@ -42,6 +43,7 @@ interface YandexUserInfo {
   default_email?: string;
   default_avatar_id?: string;
   real_name?: string;
+  birthday?: string | null;
 }
 
 function isAdminYandex(info: YandexUserInfo): boolean {
@@ -82,6 +84,7 @@ export function buildYandexAuthorizeUrl(redirectUri: string, state?: string): st
     redirect_uri: redirectUri,
   });
   if (state) params.set("state", state);
+  params.set("force_confirm", "yes");
   return `https://oauth.yandex.ru/authorize?${params}`;
 }
 
@@ -150,6 +153,7 @@ export async function exchangeYandexCode(
     100
   );
   const avatarUrl = yandexAvatarUrl(info.default_avatar_id);
+  const birthday = parseYandexBirthday(info.birthday);
   const makeAdmin = isAdminYandex(info);
 
   let [user] = await db.select().from(users).where(eq(users.yandexId, yandexId)).limit(1);
@@ -162,6 +166,7 @@ export async function exchangeYandexCode(
           yandexId,
           yandexLogin: yandexLogin ?? byEmail.yandexLogin,
           avatarUrl: avatarUrl ?? byEmail.avatarUrl,
+          birthday: birthday ?? byEmail.birthday,
           isAdmin: makeAdmin || byEmail.isAdmin,
           betaApproved: makeAdmin || byEmail.betaApproved,
         })
@@ -176,6 +181,7 @@ export async function exchangeYandexCode(
           yandexId,
           yandexLogin,
           avatarUrl,
+          birthday,
           subscriptionTier: "free",
           betaApproved: makeAdmin,
           isAdmin: makeAdmin,
@@ -186,6 +192,7 @@ export async function exchangeYandexCode(
     const updates: Partial<typeof users.$inferInsert> = {};
     if (yandexLogin && yandexLogin !== user.yandexLogin) updates.yandexLogin = yandexLogin;
     if (avatarUrl && !user.avatarUrl) updates.avatarUrl = avatarUrl;
+    if (birthday && birthday !== user.birthday) updates.birthday = birthday;
     if (makeAdmin && !user.isAdmin) {
       updates.isAdmin = true;
       updates.betaApproved = true;

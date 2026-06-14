@@ -59,15 +59,7 @@ export default function Login() {
               Войти через Яндекс ID
             </a>
           )}
-
-          <p className="login-security">
-            Сообщения передаются по защищённому каналу (TLS/WSS) и хранятся на сервере в зашифрованном виде.
-          </p>
         </div>
-
-        <a href="/platinum" className="login-platinum-link">
-          ✦ Узнать про подписку Platinum
-        </a>
       </div>
     </div>
   );

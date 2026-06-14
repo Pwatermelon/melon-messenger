@@ -2,14 +2,11 @@ import { test, expect } from "@playwright/test";
 import { cleanupE2EUser, createE2ESession, injectSession } from "./helpers";
 
 test.describe("Chat", () => {
-  let aliceId = "";
-  let bobId = "";
+  let bobLogin = "";
 
   test.beforeAll(async () => {
-    const alice = await createE2ESession({ username: "alice-e2e", betaApproved: true });
     const bob = await createE2ESession({ username: "bob-e2e", betaApproved: true });
-    aliceId = alice.user.id;
-    bobId = bob.user.id;
+    bobLogin = bob.user.yandexLogin ?? "bob-e2e";
   });
 
   test.afterAll(async () => {
@@ -27,7 +24,7 @@ test.describe("Chat", () => {
 
     await page.getByTestId("new-chat-btn").click();
     await page.getByTestId("new-dm-btn").click();
-    await page.getByTestId("dm-user-id-input").fill(bobId);
+    await page.getByTestId("dm-user-id-input").fill(bobLogin);
     await page.getByTestId("dm-lookup-btn").click();
     await expect(page.getByTestId("dm-start-btn")).toBeVisible({ timeout: 10_000 });
     await page.getByTestId("dm-start-btn").click();

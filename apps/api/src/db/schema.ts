@@ -14,8 +14,13 @@ export const users = pgTable("users", {
   bio: text("bio"),
   /** JSON array of upload paths */
   profilePhotos: text("profile_photos"),
+  /** JSON array of previous avatar upload paths (newest first) */
+  avatarHistory: text("avatar_history"),
   yandexId: varchar("yandex_id", { length: 64 }).unique(),
   yandexLogin: varchar("yandex_login", { length: 64 }),
+  /** Yandex birthday YYYY-MM-DD (year may be 0000) */
+  birthday: varchar("birthday", { length: 10 }),
+  birthdayVisible: boolean("birthday_visible").notNull().default(false),
   subscriptionTier: varchar("subscription_tier", { length: 20 }).notNull().default("free"),
   subscriptionExpiresAt: timestamp("subscription_expires_at", { withTimezone: true }),
   betaApproved: boolean("beta_approved").notNull().default(false),

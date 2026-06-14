@@ -3,7 +3,7 @@ import { jwt } from "@elysiajs/jwt";
 import * as jose from "jose";
 import { db, users } from "../db";
 import { eq } from "drizzle-orm";
-import { toPrivateProfile } from "../lib/userDto";
+import { toPrivateProfile, parseAvatarHistory } from "../lib/userDto";
 import {
   buildYandexAuthorizeUrl,
   createOAuthState,
@@ -120,13 +120,28 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       coverUrl?: string | null;
       bio?: string | null;
       profilePhotos?: string[];
+      avatarHistory?: string[];
+      birthdayVisible?: boolean;
     };
     const updates: Partial<typeof users.$inferInsert> = {};
     if (typeof body.username === "string" && body.username.trim().length > 0) {
       updates.username = body.username.trim().slice(0, 100);
     }
     if (body.avatarUrl !== undefined) {
-      updates.avatarUrl = typeof body.avatarUrl === "string" ? body.avatarUrl.trim() || null : null;
+      const newUrl =
+        typeof body.avatarUrl === "string" ? body.avatarUrl.trim() || null : null;
+      if (newUrl && newUrl !== u.avatarUrl && u.avatarUrl) {
+        const history = parseAvatarHistory(u.avatarHistory);
+        updates.avatarHistory = JSON.stringify(
+          [u.avatarUrl, ...history.filter((h) => h !== newUrl && h !== u.avatarUrl)].slice(0, 24)
+        );
+      }
+      updates.avatarUrl = newUrl;
+    }
+    if (Array.isArray(body.avatarHistory)) {
+      updates.avatarHistory = JSON.stringify(
+        body.avatarHistory.filter((p) => typeof p === "string").slice(0, 24)
+      );
     }
     if (body.coverUrl !== undefined) {
       updates.coverUrl = typeof body.coverUrl === "string" ? body.coverUrl.trim() || null : null;
@@ -138,6 +153,9 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       updates.profilePhotos = JSON.stringify(
         body.profilePhotos.filter((p) => typeof p === "string").slice(0, 12)
       );
+    }
+    if (typeof body.birthdayVisible === "boolean") {
+      updates.birthdayVisible = body.birthdayVisible;
     }
     if (Object.keys(updates).length === 0) return toPrivateProfile(u);
     const [updated] = await db.update(users).set(updates).where(eq(users.id, u.id)).returning();

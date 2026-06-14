@@ -10,7 +10,6 @@ import Platinum from "./pages/Platinum";
 import ChatLayout from "./pages/ChatLayout";
 import ChatRoom from "./pages/ChatRoom";
 import Profile from "./pages/Profile";
-import Settings from "./pages/Settings";
 import IconPreview from "./pages/IconPreview";
 import { BrandIcon } from "./components/BrandIcon";
 
@@ -59,7 +58,7 @@ export default function App() {
         <Route path="/" element={<ChatLayout />}>
           <Route index element={<EmptyChat />} />
           <Route path="chat/:chatId" element={<ChatRoom />} />
-          <Route path="settings" element={<Settings />} />
+          <Route path="settings" element={<Navigate to="/" replace state={{ openSettings: true }} />} />
           <Route path="profile" element={<Profile />} />
           <Route path="profile/:userId" element={<Profile />} />
         </Route>

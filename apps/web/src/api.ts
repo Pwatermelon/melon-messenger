@@ -141,6 +141,28 @@ export async function removeGroupMember(chatId: string, userId: string): Promise
   return res.json();
 }
 
+export async function searchUser(query: string): Promise<User | null> {
+  const q = query.trim();
+  if (!q) return null;
+  const res = await fetch(`${getApiUrl()}/chats/users/search/${encodeURIComponent(q)}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Failed to lookup user");
+  return res.json();
+}
+
+export async function getUserByYandexLogin(login: string): Promise<User | null> {
+  const q = login.trim().toLowerCase();
+  if (!q) return null;
+  const res = await fetch(`${getApiUrl()}/chats/users/by-login/${encodeURIComponent(q)}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Failed to lookup user");
+  return res.json();
+}
+
 export async function getUserById(id: string): Promise<User | null> {
   const res = await fetch(`${getApiUrl()}/chats/users/${encodeURIComponent(id)}`, {
     headers: { Authorization: `Bearer ${getToken()}` },
@@ -155,6 +177,8 @@ export async function updateProfile(updates: {
   coverUrl?: string | null;
   bio?: string | null;
   profilePhotos?: string[];
+  avatarHistory?: string[];
+  birthdayVisible?: boolean;
 }): Promise<User> {
   const res = await fetch(`${getApiUrl()}/auth/me`, {
     method: "PUT",

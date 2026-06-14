@@ -1,32 +1,51 @@
 import { useState, useEffect, useRef } from "react";
-import { Link, Outlet, useNavigate, useParams } from "react-router-dom";
+import { Link, Outlet, useNavigate, useParams, useLocation } from "react-router-dom";
+import SettingsModal from "../components/SettingsModal";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
-import { getChats, createDm, createGroup, getUserById } from "../api";
+import { getChats, createDm, createGroup, searchUser } from "../api";
 import type { Chat } from "@melon/shared";
 import { getUploadsBaseUrl } from "../config";
 import { BrandIcon } from "../components/BrandIcon";
+
+export type ChatLayoutOutletContext = {
+  openSettings: () => void;
+};
 
 export default function ChatLayout() {
   const { user } = useAuth();
   const { subscribe } = useWebSocketContext();
   const navigate = useNavigate();
+  const location = useLocation();
   const { chatId: currentChatId } = useParams();
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [newChatMenuOpen, setNewChatMenuOpen] = useState(false);
   const [dmOpen, setDmOpen] = useState(false);
   const [groupOpen, setGroupOpen] = useState(false);
-  const [dmUserId, setDmUserId] = useState("");
-  const [dmUser, setDmUser] = useState<{ id: string; username: string; avatarUrl: string | null } | null>(null);
+  const [dmLogin, setDmLogin] = useState("");
+  const [dmUser, setDmUser] = useState<{ id: string; username: string; yandexLogin?: string | null; avatarUrl: string | null } | null>(null);
   const [dmLoading, setDmLoading] = useState(false);
   const [dmError, setDmError] = useState("");
   const [groupName, setGroupName] = useState("");
   const [groupSelected, setGroupSelected] = useState<Array<{ id: string; username: string }>>([]);
-  const [groupAddId, setGroupAddId] = useState("");
+  const [groupAddLogin, setGroupAddLogin] = useState("");
   const [groupAddError, setGroupAddError] = useState("");
   const [groupError, setGroupError] = useState("");
+  const [sidebarQuery, setSidebarQuery] = useState("");
+  const [sidebarUser, setSidebarUser] = useState<{ id: string; username: string; yandexLogin?: string | null; avatarUrl: string | null } | null>(null);
+  const [sidebarLoading, setSidebarLoading] = useState(false);
+  const [sidebarError, setSidebarError] = useState("");
   const newChatMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const state = location.state as { openSettings?: boolean } | null;
+    if (state?.openSettings) {
+      setSettingsOpen(true);
+      navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
+    }
+  }, [location.state, location.pathname, location.search, navigate]);
 
   useEffect(() => {
     return subscribe((msg) => {
@@ -84,14 +103,31 @@ export default function ChatLayout() {
     return () => document.removeEventListener("click", close);
   }, [newChatMenuOpen]);
 
+  async function lookupSidebarUser() {
+    const q = sidebarQuery.trim();
+    if (!q) return;
+    setSidebarError("");
+    setSidebarUser(null);
+    setSidebarLoading(true);
+    try {
+      const u = await searchUser(q);
+      if (u) setSidebarUser(u);
+      else setSidebarError("Пользователь не найден");
+    } catch {
+      setSidebarError("Пользователь не найден");
+    } finally {
+      setSidebarLoading(false);
+    }
+  }
+
   async function lookupDmUser() {
-    const id = dmUserId.trim();
-    if (!id) return;
+    const q = dmLogin.trim();
+    if (!q) return;
     setDmError("");
     setDmUser(null);
     setDmLoading(true);
     try {
-      const u = await getUserById(id);
+      const u = await searchUser(q);
       if (u) setDmUser(u);
       else setDmError("Пользователь не найден");
     } catch {
@@ -106,8 +142,10 @@ export default function ChatLayout() {
     try {
       const chat = await createDm(otherUserId);
       setDmOpen(false);
-      setDmUserId("");
+      setDmLogin("");
       setDmUser(null);
+      setSidebarUser(null);
+      setSidebarQuery("");
       setChats((prev) => [chat as Chat, ...prev]);
       navigate(`/chat/${chat.id}`);
     } catch (e) {
@@ -131,7 +169,7 @@ export default function ChatLayout() {
       setGroupOpen(false);
       setGroupName("");
       setGroupSelected([]);
-      setGroupAddId("");
+      setGroupAddLogin("");
       setGroupAddError("");
       setChats((prev) => [chat as Chat, ...prev]);
       navigate(`/chat/${chat.id}`);
@@ -140,20 +178,20 @@ export default function ChatLayout() {
     }
   }
 
-  async function addGroupMemberById() {
-    const id = groupAddId.trim();
-    if (!id) return;
+  async function addGroupMemberByLogin() {
+    const login = groupAddLogin.trim();
+    if (!login) return;
     setGroupAddError("");
     try {
-      const u = await getUserById(id);
+      const u = await searchUser(login);
       if (!u) {
         setGroupAddError("Пользователь не найден");
         return;
       }
       if (u.id === user?.id) return;
       if (groupSelected.some((x) => x.id === u.id)) return;
-      setGroupSelected((prev) => [...prev, u]);
-      setGroupAddId("");
+      setGroupSelected((prev) => [...prev, { id: u.id, username: u.yandexLogin ?? u.username }]);
+      setGroupAddLogin("");
     } catch {
       setGroupAddError("Пользователь не найден");
     }
@@ -200,9 +238,67 @@ export default function ChatLayout() {
             <BrandIcon size={28} className="sidebar-brand-icon" />
             Watermelon
           </h2>
-          <Link to="/settings" className="sidebar-settings-btn" title="Настройки">
+          <button
+            type="button"
+            className="sidebar-settings-btn"
+            title="Настройки"
+            data-testid="settings-btn"
+            onClick={() => setSettingsOpen(true)}
+          >
             ⚙
-          </Link>
+          </button>
+        </div>
+        <div className="sidebar-search">
+          <div className="sidebar-search-row">
+            <input
+              type="search"
+              className="sidebar-search-input"
+              data-testid="sidebar-user-search"
+              placeholder="Логин"
+              value={sidebarQuery}
+              onChange={(e) => { setSidebarQuery(e.target.value); setSidebarError(""); setSidebarUser(null); }}
+              onKeyDown={(e) => e.key === "Enter" && lookupSidebarUser()}
+              spellCheck={false}
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              className="sidebar-search-btn"
+              data-testid="sidebar-user-search-btn"
+              onClick={() => void lookupSidebarUser()}
+              disabled={sidebarLoading || !sidebarQuery.trim()}
+            >
+              {sidebarLoading ? "…" : "Найти"}
+            </button>
+          </div>
+          {sidebarError && <p className="sidebar-search-error">{sidebarError}</p>}
+          {sidebarUser && (
+            <div className="sidebar-search-result" data-testid="sidebar-search-result">
+              <div className="sidebar-search-user">
+                <div className="sidebar-search-avatar">
+                  {sidebarUser.avatarUrl ? (
+                    <img
+                      src={sidebarUser.avatarUrl.startsWith("http") ? sidebarUser.avatarUrl : `${getUploadsBaseUrl()}${sidebarUser.avatarUrl}`}
+                      alt=""
+                    />
+                  ) : (
+                    <span>{(sidebarUser.yandexLogin ?? sidebarUser.username).slice(0, 1).toUpperCase()}</span>
+                  )}
+                </div>
+                <div className="sidebar-search-user-body">
+                  <span className="sidebar-search-name">{sidebarUser.yandexLogin ?? sidebarUser.username}</span>
+                </div>
+              </div>
+              <div className="sidebar-search-actions">
+                <button type="button" className="sidebar-search-action primary" onClick={() => void startDm(sidebarUser.id)}>
+                  Написать
+                </button>
+                <Link to={`/profile/${sidebarUser.id}`} className="sidebar-search-action" onClick={() => { setSidebarUser(null); setSidebarQuery(""); }}>
+                  Профиль
+                </Link>
+              </div>
+            </div>
+          )}
         </div>
         <div className="chat-list">
           {loading ? (
@@ -228,7 +324,6 @@ export default function ChatLayout() {
           )}
         </div>
         <div className="sidebar-footer">
-          <Link to="/platinum" className="sidebar-platinum-link">✦ Platinum</Link>
           <div className="new-chat-wrap" ref={newChatMenuRef}>
             <button
               type="button"
@@ -254,8 +349,10 @@ export default function ChatLayout() {
         </div>
       </aside>
       <main className="main">
-        <Outlet />
+        <Outlet context={{ openSettings: () => setSettingsOpen(true) } satisfies ChatLayoutOutletContext} />
       </main>
+
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
 
       {dmOpen && (
         <div
@@ -268,13 +365,15 @@ export default function ChatLayout() {
               <input
                 type="text"
                 data-testid="dm-user-id-input"
-                placeholder="ID пользователя"
-                value={dmUserId}
-                onChange={(e) => { setDmUserId(e.target.value); setDmError(""); }}
+                placeholder="Логин"
+                value={dmLogin}
+                onChange={(e) => { setDmLogin(e.target.value); setDmError(""); }}
                 onKeyDown={(e) => e.key === "Enter" && lookupDmUser()}
                 autoFocus
+                spellCheck={false}
+                autoComplete="off"
               />
-              <button type="button" data-testid="dm-lookup-btn" onClick={lookupDmUser} disabled={dmLoading || !dmUserId.trim()}>
+              <button type="button" data-testid="dm-lookup-btn" onClick={lookupDmUser} disabled={dmLoading || !dmLogin.trim()}>
                 {dmLoading ? "…" : "Найти"}
               </button>
             </div>
@@ -283,8 +382,8 @@ export default function ChatLayout() {
               <div className="search-result-single">
                 <div className="avatar">{dmUser.avatarUrl ? (
                   <img src={dmUser.avatarUrl.startsWith("http") ? dmUser.avatarUrl : `${getUploadsBaseUrl()}${dmUser.avatarUrl}`} alt="" />
-                ) : dmUser.username.slice(0, 1).toUpperCase()}</div>
-                <span>{dmUser.username}</span>
+                ) : (dmUser.yandexLogin ?? dmUser.username).slice(0, 1).toUpperCase()}</div>
+                <span>{dmUser.yandexLogin ?? dmUser.username}</span>
                 <button
                   type="button"
                   className="btn-primary"
@@ -316,16 +415,18 @@ export default function ChatLayout() {
               onChange={(e) => setGroupName(e.target.value)}
               autoFocus
             />
-            <p className="search-hint">Добавьте участников по ID</p>
+            <p className="search-hint">Добавьте участников по логину</p>
             <div className="search-id-row">
               <input
                 type="text"
-                placeholder="ID пользователя"
-                value={groupAddId}
-                onChange={(e) => { setGroupAddId(e.target.value); setGroupAddError(""); }}
-                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addGroupMemberById())}
+                placeholder="Логин"
+                value={groupAddLogin}
+                onChange={(e) => { setGroupAddLogin(e.target.value); setGroupAddError(""); }}
+                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addGroupMemberByLogin())}
+                spellCheck={false}
+                autoComplete="off"
               />
-              <button type="button" onClick={addGroupMemberById} disabled={!groupAddId.trim()}>
+              <button type="button" onClick={addGroupMemberByLogin} disabled={!groupAddLogin.trim()}>
                 Добавить
               </button>
             </div>

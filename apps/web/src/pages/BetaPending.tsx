@@ -5,6 +5,7 @@ import { BETA_LINKS } from "../config/beta";
 import { getApiUrl } from "../config";
 import type { User } from "@melon/shared";
 import { BrandIcon } from "../components/BrandIcon";
+import { logoutViaYandex } from "../lib/yandexLogout";
 
 export default function BetaPending() {
   const { user, token, logout, updateUser } = useAuth();
@@ -56,7 +57,7 @@ export default function BetaPending() {
           </a>
         </div>
 
-        <button type="button" className="beta-logout-btn" onClick={logout}>
+        <button type="button" className="beta-logout-btn" onClick={() => logoutViaYandex(logout)}>
           Выйти
         </button>
       </div>

@@ -1,19 +1,32 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useOutletContext } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getUserById, updateProfile, uploadFile } from "../api";
 import { getUploadsBaseUrl } from "../config";
 import { compressImage } from "../utils/imageCompress";
 import type { User } from "@melon/shared";
+import type { ChatLayoutOutletContext } from "./ChatLayout";
+import BirthdayInfoBlock from "../components/BirthdayInfoBlock";
+import ImageLightbox from "../components/ImageLightbox";
 
 function mediaUrl(path: string | null | undefined): string | null {
   if (!path) return null;
   return path.startsWith("http") ? path : `${getUploadsBaseUrl()}${path}`;
 }
 
+function buildAvatarPaths(profile: User): string[] {
+  const paths: string[] = [];
+  if (profile.avatarUrl) paths.push(profile.avatarUrl);
+  for (const p of profile.avatarHistory ?? []) {
+    if (!paths.includes(p)) paths.push(p);
+  }
+  return paths;
+}
+
 export default function Profile() {
   const { userId } = useParams<{ userId?: string }>();
   const navigate = useNavigate();
+  const { openSettings } = useOutletContext<ChatLayoutOutletContext>();
   const { user: me, updateUser } = useAuth();
   const isOwn = !userId || userId === me?.id;
   const targetId = userId ?? me?.id;
@@ -23,6 +36,8 @@ export default function Profile() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [bio, setBio] = useState(me?.bio ?? "");
+  const [avatarLightboxIndex, setAvatarLightboxIndex] = useState<number | null>(null);
+  const [photoLightboxIndex, setPhotoLightboxIndex] = useState<number | null>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -110,9 +125,37 @@ export default function Profile() {
 
   async function removePhoto(path: string) {
     const current = profile?.profilePhotos ?? [];
+    const idx = current.indexOf(path);
     const updated = await updateProfile({ profilePhotos: current.filter((p) => p !== path) });
     updateUser(updated);
     setProfile(updated);
+    if (photoLightboxIndex !== null) {
+      const remaining = updated.profilePhotos ?? [];
+      if (remaining.length === 0) setPhotoLightboxIndex(null);
+      else setPhotoLightboxIndex(Math.min(idx >= 0 ? idx : photoLightboxIndex, remaining.length - 1));
+    }
+  }
+
+  async function removeAvatarAt(listIndex: number) {
+    if (!profile || !isOwn) return;
+    const list = buildAvatarPaths(profile);
+    const next = list.filter((_, i) => i !== listIndex);
+    setSaving(true);
+    setMessage("");
+    try {
+      const updated = await updateProfile({
+        avatarUrl: next[0] ?? null,
+        avatarHistory: next.slice(1),
+      });
+      updateUser(updated);
+      setProfile(updated);
+      if (next.length === 0) setAvatarLightboxIndex(null);
+      else setAvatarLightboxIndex(Math.min(listIndex, next.length - 1));
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (loading) {
@@ -135,12 +178,19 @@ export default function Profile() {
   const coverDisplay = mediaUrl(profile.coverUrl);
   const avatarDisplay = mediaUrl(profile.avatarUrl);
   const photos = profile.profilePhotos ?? [];
+  const avatarPaths = buildAvatarPaths(profile);
+  const avatarUrls = avatarPaths.map((p) => mediaUrl(p)).filter(Boolean) as string[];
+  const photoUrls = photos.map((p) => mediaUrl(p)).filter(Boolean) as string[];
 
   return (
     <div className="profile-page">
       <div className="profile-toolbar">
         <button type="button" className="profile-back" onClick={() => navigate(-1)}>← Назад</button>
-        {isOwn && <Link to="/settings" className="profile-settings-link">Настройки</Link>}
+        {isOwn && (
+          <button type="button" className="profile-settings-link" onClick={openSettings}>
+            Настройки
+          </button>
+        )}
       </div>
 
       <div className="profile-cover-wrap">
@@ -172,7 +222,14 @@ export default function Profile() {
       <div className="profile-header">
         <div className="profile-avatar-wrap">
           {avatarDisplay ? (
-            <img src={avatarDisplay} alt="" className="profile-avatar" />
+            <button
+              type="button"
+              className="profile-avatar-btn"
+              onClick={() => avatarUrls.length > 0 && setAvatarLightboxIndex(0)}
+              title="Открыть аватар"
+            >
+              <img src={avatarDisplay} alt="" className="profile-avatar" />
+            </button>
           ) : (
             <div className="profile-avatar-placeholder">{profile.username.slice(0, 1).toUpperCase()}</div>
           )}
@@ -203,7 +260,16 @@ export default function Profile() {
           )}
         </div>
         <h1 className="profile-name">{profile.username}</h1>
-        {!isOwn && <p className="profile-id">ID: {profile.id}</p>}
+        {profile.yandexLogin && (
+          <p className="profile-login">{profile.yandexLogin}</p>
+        )}
+        {profile.birthdayLabel && (
+          <BirthdayInfoBlock
+            label={profile.birthdayLabel}
+            age={profile.birthdayAge}
+            isToday={profile.isBirthdayToday}
+          />
+        )}
       </div>
 
       <div className="profile-section">
@@ -227,7 +293,7 @@ export default function Profile() {
 
       <div className="profile-section">
         <div className="profile-photos-header">
-          <h2>Фото</h2>
+          <h2>Фото {photos.length > 0 ? `(${photos.length})` : ""}</h2>
           {isOwn && (
             <>
               <input
@@ -246,30 +312,70 @@ export default function Profile() {
               </button>
             </>
           )}
+          {!isOwn && photos.length > 0 && (
+            <button type="button" className="profile-view-all-btn" onClick={() => setPhotoLightboxIndex(0)}>
+              Смотреть все
+            </button>
+          )}
         </div>
         {photos.length === 0 ? (
           <p className="profile-empty">Нет фото</p>
         ) : (
-          <div className="profile-photos-grid">
-            {photos.map((p) => {
-              const url = mediaUrl(p);
-              if (!url) return null;
-              return (
-                <div key={p} className="profile-photo-item">
-                  <img src={url} alt="" />
-                  {isOwn && (
-                    <button type="button" className="profile-photo-remove" onClick={() => void removePhoto(p)} aria-label="Удалить">
-                      ×
+          <>
+            <div className="profile-photos-grid">
+              {photos.map((p, i) => {
+                const url = mediaUrl(p);
+                if (!url) return null;
+                return (
+                  <div key={p} className="profile-photo-item">
+                    <button type="button" className="profile-photo-open" onClick={() => setPhotoLightboxIndex(i)}>
+                      <img src={url} alt="" />
                     </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                    {isOwn && (
+                      <button type="button" className="profile-photo-remove" onClick={() => void removePhoto(p)} aria-label="Удалить">
+                        ×
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {isOwn && photos.length > 0 && (
+              <button type="button" className="profile-view-all-btn profile-view-all-btn-block" onClick={() => setPhotoLightboxIndex(0)}>
+                Открыть все фото
+              </button>
+            )}
+          </>
         )}
       </div>
 
       {message && <p className="profile-message">{message}</p>}
+
+      {avatarLightboxIndex !== null && avatarUrls.length > 0 && (
+        <ImageLightbox
+          images={avatarUrls}
+          initialIndex={avatarLightboxIndex}
+          onClose={() => setAvatarLightboxIndex(null)}
+          canDelete={isOwn}
+          onDelete={(i) => void removeAvatarAt(i)}
+          title="Аватары"
+        />
+      )}
+
+      {photoLightboxIndex !== null && photoUrls.length > 0 && (
+        <ImageLightbox
+          images={photoUrls}
+          initialIndex={photoLightboxIndex}
+          onClose={() => setPhotoLightboxIndex(null)}
+          canDelete={isOwn}
+          onDelete={(i) => {
+            const path = photos[i];
+            if (path) void removePhoto(path);
+            else setPhotoLightboxIndex(null);
+          }}
+          title="Фото профиля"
+        />
+      )}
     </div>
   );
 }

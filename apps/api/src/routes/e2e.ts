@@ -39,6 +39,7 @@ export const e2eRoutes = new Elysia({ prefix: "/e2e" })
     };
     const username = (body.username ?? "e2e-user").trim().slice(0, 100);
     const email = (body.email ?? `${username}@e2e.test`).trim().toLowerCase();
+    const yandexLogin = username.toLowerCase();
 
     let [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
     if (!user) {
@@ -48,6 +49,7 @@ export const e2eRoutes = new Elysia({ prefix: "/e2e" })
           email,
           username,
           yandexId: `e2e-${username}`,
+          yandexLogin,
           subscriptionTier: "free",
           betaApproved: body.betaApproved ?? false,
           isAdmin: body.isAdmin ?? false,
@@ -57,6 +59,7 @@ export const e2eRoutes = new Elysia({ prefix: "/e2e" })
       const updates: Partial<typeof users.$inferInsert> = {};
       if (body.betaApproved !== undefined) updates.betaApproved = body.betaApproved;
       if (body.isAdmin !== undefined) updates.isAdmin = body.isAdmin;
+      if (!user.yandexLogin) updates.yandexLogin = yandexLogin;
       if (Object.keys(updates).length > 0) {
         [user] = await db.update(users).set(updates).where(eq(users.id, user.id)).returning();
       }

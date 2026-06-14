@@ -5,7 +5,8 @@ import { useWebSocketContext } from "../context/WebSocketContext";
 import { HoldVoiceRecorder } from "../components/HoldVoiceRecorder";
 import { HoldCircleRecorder } from "../components/HoldCircleRecorder";
 import { VoiceMessagePlayer } from "../components/VoiceMessagePlayer";
-import { getChats, getMessages, uploadFile, addGroupMembers, removeGroupMember, getUserById, deleteChat, updateGroup } from "../api";
+import BirthdayInfoBlock from "../components/BirthdayInfoBlock";
+import { getChats, getMessages, uploadFile, addGroupMembers, removeGroupMember, getUserByYandexLogin, deleteChat, updateGroup } from "../api";
 import { compressImage } from "../utils/imageCompress";
 import type { Chat, Message } from "@melon/shared";
 import type { MessageItem } from "../api";
@@ -27,18 +28,9 @@ export default function ChatRoom() {
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [contactInfoOpen, setContactInfoOpen] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
-  const [groupAddId, setGroupAddId] = useState("");
+  const [groupAddLogin, setGroupAddLogin] = useState("");
   const [groupAddError, setGroupAddError] = useState("");
-  const [idCopiedProfile, setIdCopiedProfile] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  async function copyProfileId(id: string) {
-    try {
-      await navigator.clipboard.writeText(id);
-      setIdCopiedProfile(id);
-      setTimeout(() => setIdCopiedProfile(null), 2000);
-    } catch {}
-  }
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -289,17 +281,17 @@ export default function ChatRoom() {
   }
 
   async function handleAddGroupMember() {
-    if (!chatId || !groupAddId.trim()) return;
+    if (!chatId || !groupAddLogin.trim()) return;
     setGroupAddError("");
     try {
-      const u = await getUserById(groupAddId.trim());
+      const u = await getUserByYandexLogin(groupAddLogin.trim());
       if (!u) {
         setGroupAddError("Пользователь не найден");
         return;
       }
       const updated = await addGroupMembers(chatId, [u.id]);
       setChat(updated as Chat);
-      setGroupAddId("");
+      setGroupAddLogin("");
     } catch (e) {
       setGroupAddError(e instanceof Error ? e.message : "Ошибка");
     }
@@ -344,6 +336,9 @@ export default function ChatRoom() {
           </div>
           <div className="chat-header-name-wrap">
             <h3 className="chat-header-name">{displayName}</h3>
+            {chat?.type === "dm" && otherMember?.isBirthdayToday && (
+              <span className="chat-header-birthday">🎂 Сегодня день рождения</span>
+            )}
             {chat?.type === "group" && (
               <span className="chat-header-meta">{chat.members.length} участников</span>
             )}
@@ -520,15 +515,20 @@ export default function ChatRoom() {
                   )}
                 </div>
                 <p className="contact-info-name">{otherMember.username}</p>
-                <div className="contact-info-id-block">
-                  <span className="contact-info-label">ID</span>
-                  <div className="contact-info-id-row">
-                    <code className="contact-info-code">{otherMember.id}</code>
-                    <button type="button" className="contact-info-copy-btn" onClick={() => copyProfileId(otherMember.id)}>
-                      {idCopiedProfile === otherMember.id ? "Скопировано" : "Скопировать"}
-                    </button>
+                {otherMember.birthdayLabel && (
+                  <BirthdayInfoBlock
+                    label={otherMember.birthdayLabel}
+                    age={otherMember.birthdayAge}
+                    isToday={otherMember.isBirthdayToday}
+                    compact
+                  />
+                )}
+                {otherMember.yandexLogin && (
+                  <div className="contact-info-id-block">
+                    <span className="contact-info-label">Логин</span>
+                    <code className="contact-info-code">{otherMember.yandexLogin}</code>
                   </div>
-                </div>
+                )}
                 <button
                   type="button"
                   className="contact-info-profile-btn"
@@ -570,15 +570,15 @@ export default function ChatRoom() {
                       )}
                     </div>
                     <p className="contact-info-name">{m.username}</p>
-                    <div className="contact-info-id-block">
-                      <span className="contact-info-label">ID</span>
-                      <div className="contact-info-id-row">
-                        <code className="contact-info-code">{m.id}</code>
-                        <button type="button" className="contact-info-copy-btn" onClick={() => copyProfileId(m.id)}>
-                          {idCopiedProfile === m.id ? "Скопировано" : "Скопировать"}
-                        </button>
+                    {m.birthdayLabel && (
+                      <BirthdayInfoBlock label={m.birthdayLabel} age={m.birthdayAge} isToday={m.isBirthdayToday} compact />
+                    )}
+                    {m.yandexLogin && (
+                      <div className="contact-info-id-block">
+                        <span className="contact-info-label">Логин</span>
+                        <code className="contact-info-code">{m.yandexLogin}</code>
                       </div>
-                    </div>
+                    )}
                     <button
                       type="button"
                       className="contact-info-profile-btn"
@@ -670,16 +670,18 @@ export default function ChatRoom() {
                 </ul>
                 {isGroupAdmin && (
                   <div className="contact-info-add-members">
-                    <p className="contact-info-members-label">Добавить по ID</p>
+                    <p className="contact-info-members-label">Добавить по логину</p>
                     <div className="search-id-row">
                       <input
                         type="text"
-                        placeholder="ID пользователя"
-                        value={groupAddId}
-                        onChange={(e) => { setGroupAddId(e.target.value); setGroupAddError(""); }}
+                        placeholder="Логин"
+                        value={groupAddLogin}
+                        onChange={(e) => { setGroupAddLogin(e.target.value); setGroupAddError(""); }}
                         onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddGroupMember())}
+                        spellCheck={false}
+                        autoComplete="off"
                       />
-                      <button type="button" onClick={handleAddGroupMember} disabled={!groupAddId.trim()}>
+                      <button type="button" onClick={handleAddGroupMember} disabled={!groupAddLogin.trim()}>
                         Добавить
                       </button>
                     </div>
