@@ -67,19 +67,14 @@ services:
         condition: service_started
       scylla:
         condition: service_started
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+    # healthcheck убран: в старых образах нет curl, /health отдаёт 503 — web блокировался
 
   web:
     image: plwatermelon/watermelon-messenger-web:${WM_VERSION:?set WM_VERSION}
     restart: always
     depends_on:
       api:
-        condition: service_healthy
+        condition: service_started
     ports:
       - "80:80"
       - "443:443"
