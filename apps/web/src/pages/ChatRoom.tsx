@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
-import { useVoiceRecorder } from "../hooks/useVoiceRecorder";
-import { getChats, getMessages, uploadFile, setPublicKey, addGroupMembers, removeGroupMember, getUserById, deleteChat, updateGroup } from "../api";
-import * as e2e from "../crypto/e2e";
+import { HoldVoiceRecorder } from "../components/HoldVoiceRecorder";
+import { HoldCircleRecorder } from "../components/HoldCircleRecorder";
+import { VoiceMessagePlayer } from "../components/VoiceMessagePlayer";
+import { getChats, getMessages, uploadFile, addGroupMembers, removeGroupMember, getUserById, deleteChat, updateGroup } from "../api";
 import { compressImage } from "../utils/imageCompress";
 import type { Chat, Message } from "@melon/shared";
 import type { MessageItem } from "../api";
@@ -20,8 +21,8 @@ export default function ChatRoom() {
   const [loading, setLoading] = useState(true);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [decryptedContent, setDecryptedContent] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const groupAvatarInputRef = useRef<HTMLInputElement>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [contactInfoOpen, setContactInfoOpen] = useState(false);
@@ -30,7 +31,6 @@ export default function ChatRoom() {
   const [groupAddError, setGroupAddError] = useState("");
   const [idCopiedProfile, setIdCopiedProfile] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const groupAvatarInputRef = useRef<HTMLInputElement>(null);
 
   async function copyProfileId(id: string) {
     try {
@@ -40,7 +40,6 @@ export default function ChatRoom() {
     } catch {}
   }
   const listRef = useRef<HTMLDivElement>(null);
-  const { recording, duration, start: startVoice, stop: stopVoice } = useVoiceRecorder();
 
   useEffect(() => {
     if (!lightboxImage) return;
@@ -63,19 +62,6 @@ export default function ChatRoom() {
   }, [contactInfoOpen, selectedMemberId]);
 
   const otherMember = chat?.type === "dm" ? chat.members.find((m) => m.id !== user?.id) : null;
-  const canEncrypt = Boolean(chat?.type === "dm" && otherMember?.publicKey && e2e.getStoredKeys());
-
-  useEffect(() => {
-    let stored = e2e.getStoredKeys();
-    if (!stored) {
-      e2e.generateKeyPair().then(({ publicKey, privateKey }) => {
-        e2e.storeKeys(publicKey, privateKey);
-        setPublicKey(publicKey).catch(() => {});
-      });
-    } else {
-      setPublicKey(stored.publicKey).catch(() => {});
-    }
-  }, []);
 
   useEffect(() => {
     return subscribe((msg) => {
@@ -128,49 +114,22 @@ export default function ChatRoom() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  useEffect(() => {
-    if (!otherMember?.publicKey || !e2e.getStoredKeys()) return;
-    const keys = e2e.getStoredKeys()!;
-    messages
-      .filter((m) => m.encrypted && m.content && m.senderId !== user?.id && !decryptedContent[m.id])
-      .forEach((m) => {
-        e2e.decrypt(m.content, otherMember.publicKey!, keys.privateKey).then(
-          (plain) => setDecryptedContent((prev) => ({ ...prev, [m.id]: plain })),
-          () => {}
-        );
-      });
-  }, [messages, otherMember?.publicKey, user?.id, decryptedContent]);
-
   async function sendMessage(opts: {
     content: string;
-    messageType?: "text" | "image" | "file" | "video" | "location" | "voice";
+    messageType?: "text" | "image" | "file" | "video" | "location" | "voice" | "circle";
     attachmentUrl?: string | null;
     attachmentMetadata?: { fileName?: string; mimeType?: string; size?: number; duration?: number; lat?: number; lng?: number } | null;
   }) {
     if (!chatId || sending) return;
-    let content = opts.content;
-    let encrypted = false;
-    if (
-      (opts.messageType ?? "text") === "text" &&
-      canEncrypt &&
-      otherMember?.publicKey
-    ) {
-      try {
-        const keys = e2e.getStoredKeys()!;
-        content = await e2e.encrypt(content, otherMember.publicKey, keys.privateKey);
-        encrypted = true;
-      } catch (_) {}
-    }
     setSending(true);
     try {
       send({
         type: "message",
         chatId,
-        content,
+        content: opts.content,
         messageType: opts.messageType ?? "text",
         attachmentUrl: opts.attachmentUrl ?? null,
         attachmentMetadata: opts.attachmentMetadata ?? null,
-        encrypted,
       });
     } finally {
       setSending(false);
@@ -234,8 +193,7 @@ export default function ChatRoom() {
     );
   }
 
-  async function handleVoiceStop() {
-    const { blob, duration: d } = await stopVoice();
+  async function handleVoiceSend(blob: Blob, d: number) {
     const minSize = 200;
     if (blob.size < minSize) return;
     setSending(true);
@@ -257,9 +215,29 @@ export default function ChatRoom() {
     }
   }
 
+  async function handleCircleSend(blob: Blob, d: number) {
+    const minSize = 500;
+    if (blob.size < minSize) return;
+    setSending(true);
+    try {
+      const mime = blob.type || "video/webm";
+      const ext = mime.includes("mp4") ? "mp4" : "webm";
+      const file = new File([blob], `circle.${ext}`, { type: mime });
+      const { path } = await uploadFile(file);
+      await sendMessage({
+        content: "Кружок",
+        messageType: "circle",
+        attachmentUrl: path,
+        attachmentMetadata: { duration: d, mimeType: mime },
+      });
+    } catch (err) {
+      console.error("Circle send failed:", err);
+    } finally {
+      setSending(false);
+    }
+  }
+
   function displayContent(m: Message | MessageItem): string {
-    if (m.encrypted && m.senderId !== user?.id && decryptedContent[m.id]) return decryptedContent[m.id];
-    if (m.encrypted) return "🔒 Зашифрованное сообщение";
     return m.content;
   }
 
@@ -284,7 +262,7 @@ export default function ChatRoom() {
     if (!chatId) return;
     try {
       await deleteChat(chatId);
-      window.dispatchEvent(new Event("melon:refresh-chats"));
+      window.dispatchEvent(new Event("wm:refresh-chats"));
       navigate("/", { replace: true });
     } catch (e) {
       console.error(e);
@@ -302,7 +280,7 @@ export default function ChatRoom() {
       const { path } = await uploadFile(compressed);
       const updated = await updateGroup(chatId, { avatarUrl: path });
       setChat(updated as Chat);
-      window.dispatchEvent(new Event("melon:refresh-chats"));
+      window.dispatchEvent(new Event("wm:refresh-chats"));
     } catch (err) {
       console.error(err);
     } finally {
@@ -333,7 +311,7 @@ export default function ChatRoom() {
       const updated = await removeGroupMember(chatId, memberId);
       setSelectedMemberId(null);
       if (memberId === user?.id) {
-        window.dispatchEvent(new Event("melon:refresh-chats"));
+        window.dispatchEvent(new Event("wm:refresh-chats"));
         navigate("/", { replace: true });
         return;
       }
@@ -384,7 +362,6 @@ export default function ChatRoom() {
             Disconnected. <button type="button" onClick={reconnect} className="link-button">Retry</button> (or log out and log in)
           </span>
         )}
-        {canEncrypt && <span className="e2e-badge">E2E</span>}
       </div>
       <div className="messages" ref={listRef}>
         {loading ? (
@@ -431,15 +408,20 @@ export default function ChatRoom() {
                 </a>
               )}
               {(m.messageType ?? "text") === "voice" && m.attachmentUrl && (
-                <div className="message-voice">
-                  <audio
-                    controls
-                    preload="metadata"
+                <VoiceMessagePlayer
+                  src={m.attachmentUrl.startsWith("http") ? m.attachmentUrl : `${getUploadsBaseUrl()}${m.attachmentUrl}`}
+                  duration={m.attachmentMetadata?.duration}
+                />
+              )}
+              {(m.messageType ?? "text") === "circle" && m.attachmentUrl && (
+                <div className="message-circle-wrap">
+                  <video
+                    className="message-circle"
                     src={m.attachmentUrl.startsWith("http") ? m.attachmentUrl : `${getUploadsBaseUrl()}${m.attachmentUrl}`}
+                    controls
+                    playsInline
+                    preload="metadata"
                   />
-                  {m.attachmentMetadata?.duration != null && (
-                    <span className="message-voice-duration">{m.attachmentMetadata.duration}s</span>
-                  )}
                 </div>
               )}
               <div className="message-time">
@@ -484,19 +466,17 @@ export default function ChatRoom() {
           <input
             type="text"
             className="compose-input"
+            data-testid="compose-input"
             placeholder="Type a message..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={!ready}
           />
-          <button type="submit" className="compose-btn compose-btn-send" disabled={!ready || sending || !input.trim()}>
+          <button type="submit" className="compose-btn compose-btn-send" data-testid="compose-send" disabled={!ready || sending || !input.trim()}>
             Send
           </button>
-          {!recording ? (
-            <button type="button" className="compose-btn compose-btn-icon" onClick={startVoice} disabled={!ready || sending} title="Voice">🎤</button>
-          ) : (
-            <button type="button" className="compose-btn compose-btn-icon voice-stop" onClick={handleVoiceStop} title="Send">{duration}s ✓</button>
-          )}
+          <HoldCircleRecorder disabled={!ready || sending} onSend={handleCircleSend} />
+          <HoldVoiceRecorder disabled={!ready || sending} onSend={handleVoiceSend} />
         </form>
       </div>
       {lightboxImage && (
@@ -551,6 +531,16 @@ export default function ChatRoom() {
                 </div>
                 <button
                   type="button"
+                  className="contact-info-profile-btn"
+                  onClick={() => {
+                    setContactInfoOpen(false);
+                    navigate(`/profile/${otherMember.id}`);
+                  }}
+                >
+                  Открыть профиль
+                </button>
+                <button
+                  type="button"
                   className="contact-info-remove-btn"
                   onClick={handleDeleteChat}
                 >
@@ -589,6 +579,16 @@ export default function ChatRoom() {
                         </button>
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      className="contact-info-profile-btn"
+                      onClick={() => {
+                        setContactInfoOpen(false);
+                        navigate(`/profile/${m.id}`);
+                      }}
+                    >
+                      Открыть профиль
+                    </button>
                         {isGroupAdmin && m.id !== user?.id && (
                       <button
                         type="button"

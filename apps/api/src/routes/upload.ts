@@ -1,5 +1,6 @@
 import { Elysia } from "elysia";
 import { authPlugin, requireAuth } from "../auth";
+import { checkRateLimit, clientKey } from "../middleware/rateLimit";
 import { mkdir } from "fs/promises";
 import { join } from "path";
 
@@ -33,6 +34,12 @@ function extFromMime(mime: string): string {
 export const uploadRoutes = new Elysia({ prefix: "/upload" })
   .use(authPlugin)
   .post("/", async ({ user, request, set }) => {
+    const ip = clientKey(request);
+    const ok = await checkRateLimit(`upload:${ip}`, 60, 20);
+    if (!ok) {
+      set.status = 429;
+      return { error: "Too many uploads. Try again later." };
+    }
     const u = requireAuth(set)(user);
     await ensureUploadDir();
     const formData = await request.formData();

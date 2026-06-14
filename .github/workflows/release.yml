@@ -1,0 +1,215 @@
+name: Release
+
+# Запускается ТОЛЬКО при push в main/master с сообщением коммита "ver X.Y.Z"
+# Пример: git commit -m "ver 1.0.0" && git push origin main
+
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.parse.outputs.release }}
+      version: ${{ steps.parse.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - id: parse
+        run: |
+          SUBJECT="$(git log -1 --pretty=%s)"
+          if [[ "$SUBJECT" =~ ^ver\ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Release ${BASH_REMATCH[1]} — running CI/CD"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "Skip CI/CD — commit message must start with 'ver X.Y.Z' (got: ${SUBJECT})"
+          fi
+
+  unit:
+    runs-on: ubuntu-latest
+    needs: gate
+    if: needs.gate.outputs.release == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - run: bun test apps/api/src/tests/unit.test.ts
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [gate, unit]
+    if: needs.gate.outputs.release == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - run: bun run --cwd apps/web build
+
+  smoke:
+    runs-on: ubuntu-latest
+    needs: [gate, unit]
+    if: needs.gate.outputs.release == 'true'
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: melon
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - name: Start API
+        working-directory: apps/api
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/melon
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: ci-test-secret-minimum-32-characters-long
+          PORT: "3000"
+        run: |
+          bun run src/index.ts &
+          echo $! > /tmp/api.pid
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3000/health && break
+            sleep 2
+          done
+          curl -sf http://localhost:3000/health | grep -q '"status"'
+          curl -sf http://localhost:3000/metrics | grep -q 'uptimeSec'
+      - name: Stop API
+        if: always()
+        run: kill $(cat /tmp/api.pid) 2>/dev/null || true
+
+  docker-push:
+    runs-on: ubuntu-latest
+    needs: [gate, build, smoke]
+    if: needs.gate.outputs.release == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: plwatermelon
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set image tags
+        id: meta
+        run: |
+          VER="${{ needs.gate.outputs.version }}"
+          echo "api=plwatermelon/watermelon-messenger-api" >> "$GITHUB_OUTPUT"
+          echo "web=plwatermelon/watermelon-messenger-web" >> "$GITHUB_OUTPUT"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push API
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.api }}:${{ steps.meta.outputs.version }}
+
+      - name: Build and push Web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.web }}:${{ steps.meta.outputs.version }}
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [gate, docker-push]
+    if: needs.gate.outputs.release == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare .env.prod from secret
+        env:
+          PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE }}
+        run: |
+          if [[ -z "$PROD_ENV_FILE" ]]; then
+            echo "::error::GitHub secret PROD_ENV_FILE is required for deploy"
+            exit 1
+          fi
+          printf '%s\n' "$PROD_ENV_FILE" > .env.prod.bundle
+
+      - name: Install SSH key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.DEPLOY_SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Sync configs and scripts to server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          RSYNC_SSH="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new"
+          REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}"
+
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p ${DEPLOY_PATH}/deploy ${DEPLOY_PATH}/scripts"
+
+          rsync -avz -e "$RSYNC_SSH" \
+            deploy/docker-compose.yml \
+            deploy/nginx.prod.conf \
+            deploy/nginx.bootstrap.conf \
+            deploy/.env.prod.example \
+            "${REMOTE}/deploy/"
+
+          rsync -avz -e "$RSYNC_SSH" \
+            scripts/deploy-server.sh \
+            scripts/certbot-init.sh \
+            scripts/backup-postgres.sh \
+            scripts/sync-prod-config.sh \
+            "${REMOTE}/scripts/"
+
+          rsync -avz -e "$RSYNC_SSH" \
+            .env.prod.bundle \
+            "${REMOTE}/.env.prod"
+
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "chmod +x ${DEPLOY_PATH}/scripts/*.sh"
+
+      - name: Run deploy on server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd ${{ secrets.DEPLOY_PATH }}
+            export WM_VERSION=${{ needs.gate.outputs.version }}
+            ./scripts/deploy-server.sh

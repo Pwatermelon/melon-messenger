@@ -1,8 +1,8 @@
-import type { AttachmentMetadata, MessageType } from "@melon/shared";
+import type { AttachmentMetadata, MessageType, User } from "@melon/shared";
 import { getApiUrl } from "./config";
 
 function getToken(): string | null {
-  return localStorage.getItem("melon_token");
+  return localStorage.getItem("wm_token") ?? localStorage.getItem("melon_token");
 }
 
 export async function getChats(): Promise<
@@ -13,7 +13,7 @@ export async function getChats(): Promise<
     createdAt: string;
     lastMessageAt: string | null;
     lastMessagePreview: string | null;
-    members: Array<{ id: string; username: string; avatarUrl: string | null; publicKey?: string | null; role: string }>;
+    members: Array<{ id: string; username: string; avatarUrl: string | null; subscriptionTier?: string; role: string }>;
   }>
 > {
   const res = await fetch(`${getApiUrl()}/chats`, {
@@ -30,7 +30,7 @@ export async function createDm(userId: string): Promise<{
   createdAt: string;
   lastMessageAt: string | null;
   lastMessagePreview: string | null;
-  members: Array<{ id: string; username: string; avatarUrl: string | null; publicKey?: string | null; role: string }>;
+  members: Array<{ id: string; username: string; avatarUrl: string | null; subscriptionTier?: string; role: string }>;
 }> {
   const res = await fetch(`${getApiUrl()}/chats/dm`, {
     method: "POST",
@@ -68,7 +68,7 @@ const chatResponseType = {
   createdAt: "",
   lastMessageAt: null as string | null,
   lastMessagePreview: null as string | null,
-  members: [] as Array<{ id: string; username: string; avatarUrl: string | null; publicKey?: string | null; role: string }>,
+  members: [] as Array<{ id: string; username: string; avatarUrl: string | null; subscriptionTier?: string; role: string }>,
 };
 
 export type ChatResponse = typeof chatResponseType;
@@ -141,7 +141,7 @@ export async function removeGroupMember(chatId: string, userId: string): Promise
   return res.json();
 }
 
-export async function getUserById(id: string): Promise<{ id: string; username: string; avatarUrl: string | null } | null> {
+export async function getUserById(id: string): Promise<User | null> {
   const res = await fetch(`${getApiUrl()}/chats/users/${encodeURIComponent(id)}`, {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
@@ -149,14 +149,13 @@ export async function getUserById(id: string): Promise<{ id: string; username: s
   return res.json();
 }
 
-export async function updateProfile(updates: { username?: string; avatarUrl?: string | null }): Promise<{
-  id: string;
-  email: string;
-  username: string;
-  avatarUrl: string | null;
-  publicKey: string | null;
-  createdAt: string | undefined;
-}> {
+export async function updateProfile(updates: {
+  username?: string;
+  avatarUrl?: string | null;
+  coverUrl?: string | null;
+  bio?: string | null;
+  profilePhotos?: string[];
+}): Promise<User> {
   const res = await fetch(`${getApiUrl()}/auth/me`, {
     method: "PUT",
     headers: {
@@ -172,6 +171,33 @@ export async function updateProfile(updates: { username?: string; avatarUrl?: st
   return res.json();
 }
 
+export async function createPlatinumPayment(): Promise<{
+  paymentId?: string;
+  confirmationUrl?: string | null;
+  amount?: string;
+  currency?: string;
+  user?: User;
+  devMode?: boolean;
+  message?: string;
+}> {
+  const res = await fetch(`${getApiUrl()}/payments/platinum`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Payment failed");
+  return data;
+}
+
+export async function getPlatinumPaymentStatus(paymentId: string): Promise<{ status: string; user: User }> {
+  const res = await fetch(`${getApiUrl()}/payments/platinum/${encodeURIComponent(paymentId)}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Not found");
+  return data;
+}
+
 export interface MessageItem {
   id: string;
   chatId: string;
@@ -182,7 +208,6 @@ export interface MessageItem {
   messageType?: MessageType;
   attachmentUrl?: string | null;
   attachmentMetadata?: AttachmentMetadata | null;
-  encrypted?: boolean;
 }
 
 export async function getMessages(
@@ -200,18 +225,6 @@ export async function getMessages(
   return res.json();
 }
 
-export async function setPublicKey(publicKey: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/auth/me/public-key`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken()}`,
-    },
-    body: JSON.stringify({ publicKey }),
-  });
-  if (!res.ok) throw new Error("Failed to set public key");
-}
-
 export async function deleteChat(chatId: string): Promise<void> {
   const res = await fetch(`${getApiUrl()}/chats/${encodeURIComponent(chatId)}`, {
     method: "DELETE",
@@ -220,6 +233,47 @@ export async function deleteChat(chatId: string): Promise<void> {
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error ?? "Failed to delete chat");
+  }
+}
+
+export type AdminUser = {
+  id: string;
+  yandexLogin: string;
+  betaApproved: boolean;
+  isAdmin: boolean;
+};
+
+export async function getAdminUsers(q?: string): Promise<AdminUser[]> {
+  const params = q ? `?q=${encodeURIComponent(q)}` : "";
+  const res = await fetch(`${getApiUrl()}/admin/users${params}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Forbidden");
+  }
+  return res.json();
+}
+
+export async function approveUser(userId: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/admin/users/${encodeURIComponent(userId)}/approve`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Failed");
+  }
+}
+
+export async function revokeUser(userId: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/admin/users/${encodeURIComponent(userId)}/revoke`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Failed");
   }
 }
 

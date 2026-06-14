@@ -8,9 +8,10 @@ import { db, users, chatMembers } from "./db";
 import { eq, and } from "drizzle-orm";
 import * as scylla from "./services/scylla";
 import * as redis from "./services/redis";
+import { notifyUser } from "./services/webPush";
 import type { WSClientMessage, WSServerMessage, Message } from "@melon/shared";
 
-const JWT_SECRET = process.env.JWT_SECRET ?? "melon-dev-secret-change-in-prod";
+const JWT_SECRET = process.env.JWT_SECRET ?? "watermelon-dev-secret-change-in-prod";
 const JWT_SECRET_BYTES = new TextEncoder().encode(JWT_SECRET);
 
 type WSData = {
@@ -91,6 +92,9 @@ export const wsHandlers = {
                 email: u.email,
                 username: u.username,
                 avatarUrl: u.avatarUrl,
+                subscriptionTier: u.subscriptionTier ?? "free",
+                betaApproved: u.betaApproved ?? false,
+                isAdmin: u.isAdmin ?? false,
                 createdAt: u.createdAt?.toISOString?.() ?? "",
               },
             });
@@ -121,6 +125,9 @@ export const wsHandlers = {
               email: u.email,
               username: u.username,
               avatarUrl: u.avatarUrl,
+              subscriptionTier: u.subscriptionTier ?? "free",
+              betaApproved: u.betaApproved ?? false,
+              isAdmin: u.isAdmin ?? false,
               createdAt: u.createdAt?.toISOString?.() ?? "",
             },
           };
@@ -153,7 +160,7 @@ export const wsHandlers = {
       }
 
       if (msg.type === "message") {
-        const { chatId, content, messageType, attachmentUrl, attachmentMetadata, encrypted } = msg;
+        const { chatId, content, messageType, attachmentUrl, attachmentMetadata } = msg;
         if (!chatId || content == null) {
           send(ws, { type: "error", error: "chatId and content required" });
           return;
@@ -176,7 +183,6 @@ export const wsHandlers = {
               messageType: messageType ?? "text",
               attachmentUrl: attachmentUrl ?? null,
               attachmentMetadata: attachmentMetadata ?? null,
-              encrypted: encrypted ?? false,
             }
           );
           const [u] = await db.select().from(users).where(eq(users.id, ws.data.userId)).limit(1);
@@ -192,18 +198,29 @@ export const wsHandlers = {
                   email: u.email,
                   username: u.username,
                   avatarUrl: u.avatarUrl,
-                  publicKey: u.publicKey ?? null,
+                  subscriptionTier: u.subscriptionTier ?? "free",
                   createdAt: u.createdAt?.toISOString?.(),
                 }
               : undefined,
             messageType: messageType ?? "text",
             attachmentUrl: attachmentUrl ?? null,
             attachmentMetadata: attachmentMetadata ?? null,
-            encrypted: encrypted ?? false,
           };
           const payload: WSServerMessage = { type: "message", message };
           await redis.publishToChat(chatId, JSON.stringify(payload));
           wsServerRef?.publish(chatTopic(chatId), JSON.stringify(payload));
+
+          const members = await db
+            .select({ userId: chatMembers.userId })
+            .from(chatMembers)
+            .where(eq(chatMembers.chatId, chatId));
+          const preview = content.slice(0, 120) || "Новое сообщение";
+          const title = u?.username ?? "Watermelon";
+          for (const m of members) {
+            if (m.userId !== ws.data.userId) {
+              notifyUser(m.userId, title, preview).catch(() => {});
+            }
+          }
         } catch (e) {
           send(ws, { type: "error", error: String(e) });
         }

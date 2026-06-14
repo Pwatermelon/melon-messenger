@@ -1,0 +1,103 @@
+# Production stack — pull images from Docker Hub, TLS via certbot.
+# Usage on server:
+#   cp deploy/.env.prod.example .env.prod && nano .env.prod
+#   ./scripts/certbot-init.sh   # first time only
+#   docker compose -f deploy/docker-compose.yml --env-file .env.prod up -d
+
+name: watermelon-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.prod}
+      POSTGRES_DB: melon
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+
+  scylla:
+    image: scylladb/scylla:6.0
+    restart: always
+    command: --smp 1 --memory 1G --overprovisioned 1
+    volumes:
+      - scylladata:/var/lib/scylla
+
+  api:
+    image: plwatermelon/watermelon-messenger-api:${WM_VERSION:?set WM_VERSION}
+    restart: always
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/melon
+      REDIS_URL: redis://redis:6379
+      SCYLLA_CONTACT_POINTS: scylla
+      SCYLLA_KEYSPACE: melon
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      MESSAGE_AT_REST_KEY: ${MESSAGE_AT_REST_KEY:?set MESSAGE_AT_REST_KEY}
+      PORT: "3000"
+      WEB_URL: ${WEB_URL:?set WEB_URL}
+      YANDEX_CLIENT_ID: ${YANDEX_CLIENT_ID:?set YANDEX_CLIENT_ID}
+      YANDEX_CLIENT_SECRET: ${YANDEX_CLIENT_SECRET:?set YANDEX_CLIENT_SECRET}
+      YANDEX_REDIRECT_URI: ${YANDEX_REDIRECT_URI:?set YANDEX_REDIRECT_URI}
+      YANDEX_NATIVE_REDIRECT_URI: ${YANDEX_NATIVE_REDIRECT_URI:-watermelon://oauth/yandex}
+      ADMIN_YANDEX_IDS: ${ADMIN_YANDEX_IDS:-}
+      ADMIN_YANDEX_LOGINS: ${ADMIN_YANDEX_LOGINS:-platinumwatermelon}
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
+      PLATINUM_PRICE_RUB: ${PLATINUM_PRICE_RUB:-299}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:?set API_PUBLIC_URL}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@watermelon-messenger.ru}
+      E2E_TEST_SECRET: ""
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      scylla:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  web:
+    image: plwatermelon/watermelon-messenger-web:${WM_VERSION:?set WM_VERSION}
+    restart: always
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - certbot-www:/var/www/certbot:ro
+      - certbot-conf:/etc/letsencrypt:ro
+
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    volumes:
+      - certbot-www:/var/www/certbot
+      - certbot-conf:/etc/letsencrypt
+    entrypoint: /bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done;'
+
+volumes:
+  pgdata:
+  scylladata:
+  certbot-www:
+  certbot-conf:

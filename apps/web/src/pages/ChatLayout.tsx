@@ -5,6 +5,7 @@ import { useWebSocketContext } from "../context/WebSocketContext";
 import { getChats, createDm, createGroup, getUserById } from "../api";
 import type { Chat } from "@melon/shared";
 import { getUploadsBaseUrl } from "../config";
+import { BrandIcon } from "../components/BrandIcon";
 
 export default function ChatLayout() {
   const { user } = useAuth();
@@ -37,7 +38,7 @@ export default function ChatLayout() {
             copy[i] = {
               ...copy[i],
               lastMessageAt: msg.message.createdAt,
-              lastMessagePreview: msg.message.encrypted ? "🔒 Зашифрованное сообщение" : msg.message.content.slice(0, 80),
+              lastMessagePreview: msg.message.content.slice(0, 80),
             };
             const [moved] = copy.splice(i, 1);
             copy.unshift(moved);
@@ -68,8 +69,8 @@ export default function ChatLayout() {
 
   useEffect(() => {
     const onRefresh = () => refreshChats();
-    window.addEventListener("melon:refresh-chats", onRefresh);
-    return () => window.removeEventListener("melon:refresh-chats", onRefresh);
+    window.addEventListener("wm:refresh-chats", onRefresh);
+    return () => window.removeEventListener("wm:refresh-chats", onRefresh);
   }, []);
 
   useEffect(() => {
@@ -192,10 +193,13 @@ export default function ChatLayout() {
   }
 
   return (
-    <div className="layout">
+    <div className="layout" data-testid="messenger-shell">
       <aside className="sidebar">
         <div className="sidebar-header">
-          <h2 className="sidebar-title">Melon</h2>
+          <h2 className="sidebar-title">
+            <BrandIcon size={28} className="sidebar-brand-icon" />
+            Watermelon
+          </h2>
           <Link to="/settings" className="sidebar-settings-btn" title="Настройки">
             ⚙
           </Link>
@@ -224,10 +228,12 @@ export default function ChatLayout() {
           )}
         </div>
         <div className="sidebar-footer">
+          <Link to="/platinum" className="sidebar-platinum-link">✦ Platinum</Link>
           <div className="new-chat-wrap" ref={newChatMenuRef}>
             <button
               type="button"
               className="new-chat-btn"
+              data-testid="new-chat-btn"
               onClick={() => setNewChatMenuOpen((o) => !o)}
               title="Новый чат"
               aria-expanded={newChatMenuOpen}
@@ -236,7 +242,7 @@ export default function ChatLayout() {
             </button>
             {newChatMenuOpen && (
               <div className="new-chat-menu">
-                <button type="button" onClick={() => { setNewChatMenuOpen(false); setDmOpen(true); }}>
+                <button type="button" data-testid="new-dm-btn" onClick={() => { setNewChatMenuOpen(false); setDmOpen(true); }}>
                   Личный чат
                 </button>
                 <button type="button" onClick={() => { setNewChatMenuOpen(false); setGroupError(""); setGroupOpen(true); }}>
@@ -261,13 +267,14 @@ export default function ChatLayout() {
             <div className="search-id-row">
               <input
                 type="text"
+                data-testid="dm-user-id-input"
                 placeholder="ID пользователя"
                 value={dmUserId}
                 onChange={(e) => { setDmUserId(e.target.value); setDmError(""); }}
                 onKeyDown={(e) => e.key === "Enter" && lookupDmUser()}
                 autoFocus
               />
-              <button type="button" onClick={lookupDmUser} disabled={dmLoading || !dmUserId.trim()}>
+              <button type="button" data-testid="dm-lookup-btn" onClick={lookupDmUser} disabled={dmLoading || !dmUserId.trim()}>
                 {dmLoading ? "…" : "Найти"}
               </button>
             </div>
@@ -281,6 +288,7 @@ export default function ChatLayout() {
                 <button
                   type="button"
                   className="btn-primary"
+                  data-testid="dm-start-btn"
                   onClick={(e) => { e.stopPropagation(); startDm(dmUser.id); }}
                 >
                   Написать

@@ -3,7 +3,7 @@ import { jwt } from "@elysiajs/jwt";
 import { db, users } from "./db";
 import { eq } from "drizzle-orm";
 
-const JWT_SECRET = process.env.JWT_SECRET ?? "melon-dev-secret-change-in-prod";
+const JWT_SECRET = process.env.JWT_SECRET ?? "watermelon-dev-secret-change-in-prod";
 
 export const authPlugin = new Elysia({ name: "auth" })
   .use(

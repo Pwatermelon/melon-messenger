@@ -40,8 +40,24 @@ services:
       REDIS_URL: redis://redis:6379
       SCYLLA_CONTACT_POINTS: scylla
       SCYLLA_KEYSPACE: melon
-      JWT_SECRET: melon-docker-secret
+      JWT_SECRET: watermelon-docker-secret
       PORT: "3000"
+      WEB_URL: http://localhost:8080
+      YANDEX_REDIRECT_URI: http://localhost:8080/api/auth/yandex/callback
+      YANDEX_CLIENT_ID: ${YANDEX_CLIENT_ID:-}
+      YANDEX_CLIENT_SECRET: ${YANDEX_CLIENT_SECRET:-}
+      YANDEX_NATIVE_REDIRECT_URI: ${YANDEX_NATIVE_REDIRECT_URI:-watermelon://oauth/yandex}
+      ADMIN_YANDEX_IDS: ${ADMIN_YANDEX_IDS:-}
+      ADMIN_YANDEX_LOGINS: ${ADMIN_YANDEX_LOGINS:-platinumwatermelon}
+      MESSAGE_AT_REST_KEY: ${MESSAGE_AT_REST_KEY:-}
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
+      PLATINUM_PRICE_RUB: ${PLATINUM_PRICE_RUB:-299}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:8080/api}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@watermelon.local}
+      E2E_TEST_SECRET: ${E2E_TEST_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,6 +65,12 @@ services:
         condition: service_started
       scylla:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   web:
     build:

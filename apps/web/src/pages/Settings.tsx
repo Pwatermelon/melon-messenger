@@ -1,13 +1,14 @@
 import { useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { updateProfile, uploadFile } from "../api";
 import { getUploadsBaseUrl } from "../config";
 import { compressImage } from "../utils/imageCompress";
+import { subscribeToPush, unsubscribeFromPush } from "../lib/pushNotifications";
 
 export default function Settings() {
-  const { user, updateUser, logout } = useAuth();
+  const { user, updateUser, logout, token } = useAuth();
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
   const [username, setUsername] = useState(user?.username ?? "");
@@ -15,6 +16,8 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [idCopied, setIdCopied] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function copyId() {
@@ -33,7 +36,7 @@ export default function Settings() {
     try {
       if (navigator.share) {
         await navigator.share({
-          title: "Мой ID в Melon",
+          title: "Мой ID в Watermelon",
           text: user.id,
         });
       } else {
@@ -92,11 +95,36 @@ export default function Settings() {
     navigate("/login", { replace: true });
   }
 
+  async function togglePush() {
+    if (!token) return;
+    setPushLoading(true);
+    setMessage("");
+    try {
+      if (pushEnabled) {
+        await unsubscribeFromPush(token);
+        setPushEnabled(false);
+        setMessage("Push-уведомления отключены");
+      } else {
+        const perm = await Notification.requestPermission();
+        if (perm !== "granted") throw new Error("Разрешите уведомления в браузере");
+        const ok = await subscribeToPush(token);
+        if (!ok) throw new Error("Push недоступен (нужен VAPID_PUBLIC_KEY на сервере)");
+        setPushEnabled(true);
+        setMessage("Push-уведомления включены");
+      }
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Ошибка push");
+    } finally {
+      setPushLoading(false);
+    }
+  }
+
   return (
     <div className="settings-page">
       <h1>Настройки</h1>
       <div className="settings-section">
         <h2>Профиль</h2>
+        <Link to="/profile" className="settings-profile-link">Редактировать профиль →</Link>
         <div className="settings-avatar-row">
           <div className="settings-avatar-wrap">
             {avatarDisplayUrl ? (
@@ -140,6 +168,32 @@ export default function Settings() {
         {message && <p className="settings-message">{message}</p>}
       </div>
       <div className="settings-section">
+        <h2>Подписка</h2>
+        <div className="settings-tier-row">
+          {user?.subscriptionTier === "platinum" ? (
+            <span className="settings-tier settings-tier-platinum">✦ Platinum</span>
+          ) : (
+            <span className="settings-tier">Free</span>
+          )}
+          <button type="button" className="settings-platinum-link" onClick={() => navigate("/platinum")}>
+            {user?.subscriptionTier === "platinum" ? "Подробнее" : "Получить Platinum"}
+          </button>
+        </div>
+      </div>
+      <div className="settings-section">
+        <h2>Уведомления</h2>
+        <button type="button" onClick={() => void togglePush()} disabled={pushLoading}>
+          {pushLoading ? "…" : pushEnabled ? "Отключить push" : "Включить push-уведомления"}
+        </button>
+        <p className="settings-security-note">Работает при открытой вкладке в фоне и настроенном VAPID на сервере.</p>
+      </div>
+      <div className="settings-section">
+        <h2>Безопасность</h2>
+        <p className="settings-security-note">
+          Сообщения передаются по TLS/WSS и хранятся на сервере в зашифрованном виде (AES-256-GCM at-rest).
+        </p>
+      </div>
+      <div className="settings-section">
         <h2>Тема</h2>
         <div className="settings-theme-row">
           <button
@@ -174,6 +228,12 @@ export default function Settings() {
           </button>
         </div>
       </div>
+      {user?.isAdmin && (
+        <div className="settings-section">
+          <h2>Администрирование</h2>
+          <Link to="/admin" className="settings-admin-link">Панель beta-доступа</Link>
+        </div>
+      )}
       <div className="settings-section">
         <button type="button" className="settings-logout" onClick={handleLogout}>
           Выйти

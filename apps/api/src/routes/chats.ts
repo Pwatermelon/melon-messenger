@@ -3,16 +3,10 @@ import { eq, and, inArray, desc } from "drizzle-orm";
 import { authPlugin, requireAuth } from "../auth";
 import { db, users, chats, chatMembers } from "../db";
 import { getMessages as scyllaGetMessages, deleteChatMessages } from "../services/scylla";
+import { toPublicProfile } from "../lib/userDto";
 
 function toUser(u: typeof users.$inferSelect) {
-  return {
-    id: u.id,
-    email: u.email,
-    username: u.username,
-    avatarUrl: u.avatarUrl,
-    publicKey: u.publicKey ?? null,
-    createdAt: u.createdAt?.toISOString?.(),
-  };
+  return toPublicProfile(u);
 }
 
 export const chatRoutes = new Elysia({ prefix: "/chats" })
@@ -20,7 +14,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
   .get("/users/:id", async ({ user, params, set }) => {
     const u = requireAuth(set)(user);
     const id = (params as { id?: string }).id?.trim();
-    if (!id || id === u.id) {
+    if (!id) {
       set.status = 404;
       return { error: "User not found" };
     }
@@ -29,7 +23,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       set.status = 404;
       return { error: "User not found" };
     }
-    return toUser(target);
+    return toPublicProfile(target);
   })
   .get("/", async ({ user, set }) => {
     const u = requireAuth(set)(user);
@@ -56,7 +50,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         try {
           const [first] = await scyllaGetMessages(row.chatId, 1);
           if (first) {
-            lastMessagePreview = first.encrypted ? "🔒 Зашифрованное сообщение" : first.content.slice(0, 80);
+            lastMessagePreview = first.content.slice(0, 80);
             lastMessageAt = first.created_at?.toISOString?.() ?? null;
           }
         } catch {
@@ -201,7 +195,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
     try {
       const [first] = await scyllaGetMessages(chatId, 1);
       if (first) {
-        lastMessagePreview = first.encrypted ? "🔒 Зашифрованное сообщение" : first.content.slice(0, 80);
+        lastMessagePreview = first.content.slice(0, 80);
         lastMessageAt = first.created_at?.toISOString?.() ?? null;
       }
     } catch {}
@@ -256,7 +250,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
     try {
       const [first] = await scyllaGetMessages(chatId, 1);
       if (first) {
-        lastMessagePreview = first.encrypted ? "🔒 Зашифрованное сообщение" : first.content.slice(0, 80);
+        lastMessagePreview = first.content.slice(0, 80);
         lastMessageAt = first.created_at?.toISOString?.() ?? null;
       }
     } catch {}
@@ -298,7 +292,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
     try {
       const [first] = await scyllaGetMessages(chatId, 1);
       if (first) {
-        lastMessagePreview = first.encrypted ? "🔒 Зашифрованное сообщение" : first.content.slice(0, 80);
+        lastMessagePreview = first.content.slice(0, 80);
         lastMessageAt = first.created_at?.toISOString?.() ?? null;
       }
     } catch {}
@@ -349,7 +343,6 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         messageType: (r.message_type as import("@melon/shared").MessageType) ?? "text",
         attachmentUrl: r.attachment_url ?? null,
         attachmentMetadata,
-        encrypted: r.encrypted ?? false,
       };
     });
     return { messages: messages.slice().reverse() };
@@ -419,7 +412,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
     try {
       const [first] = await scyllaGetMessages(chatId, 1);
       if (first) {
-        lastMessagePreview = first.encrypted ? "🔒 Зашифрованное сообщение" : first.content.slice(0, 80);
+        lastMessagePreview = first.content.slice(0, 80);
         lastMessageAt = first.created_at?.toISOString?.() ?? null;
       }
     } catch {}

@@ -67,5 +67,23 @@ export function useVoiceRecorder() {
     });
   }, []);
 
-  return { recording, duration, start, stop };
+  const cancel = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    const recorder = mediaRecorderRef.current;
+    if (recorder) {
+      recorder.onstop = null;
+      if (recorder.state !== "inactive") recorder.stop();
+      recorder.stream.getTracks().forEach((t) => t.stop());
+    }
+    chunksRef.current = [];
+    mediaRecorderRef.current = null;
+    setRecording(false);
+    setDuration(0);
+    durationRef.current = 0;
+  }, []);
+
+  return { recording, duration, start, stop, cancel };
 }

@@ -1,0 +1,209 @@
+import * as jose from "jose";
+import { eq } from "drizzle-orm";
+import { db, users } from "../db";
+import { toPrivateProfile } from "../lib/userDto";
+
+export const YANDEX_CLIENT_ID = process.env.YANDEX_CLIENT_ID ?? "";
+export const YANDEX_CLIENT_SECRET = process.env.YANDEX_CLIENT_SECRET ?? "";
+export const YANDEX_REDIRECT_URI =
+  process.env.YANDEX_REDIRECT_URI ?? "http://localhost:3000/auth/yandex/callback";
+export const YANDEX_NATIVE_REDIRECT_URI =
+  process.env.YANDEX_NATIVE_REDIRECT_URI ?? "watermelon://oauth/yandex";
+const JWT_SECRET = process.env.JWT_SECRET ?? "watermelon-dev-secret-change-in-prod";
+
+const ADMIN_YANDEX_IDS = (process.env.ADMIN_YANDEX_IDS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+const ADMIN_YANDEX_LOGINS = (process.env.ADMIN_YANDEX_LOGINS ?? "platinumwatermelon")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
+const ALLOWED_REDIRECT_URIS = new Set(
+  [
+    YANDEX_REDIRECT_URI,
+    YANDEX_NATIVE_REDIRECT_URI,
+    ...(process.env.YANDEX_ALLOWED_REDIRECT_URIS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+  ].filter(Boolean)
+);
+
+interface YandexTokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+}
+
+interface YandexUserInfo {
+  id: string;
+  login?: string;
+  display_name?: string;
+  default_email?: string;
+  default_avatar_id?: string;
+  real_name?: string;
+}
+
+function isAdminYandex(info: YandexUserInfo): boolean {
+  const yandexId = String(info.id);
+  if (ADMIN_YANDEX_IDS.includes(yandexId)) return true;
+  const login = info.login?.trim().toLowerCase();
+  if (login && ADMIN_YANDEX_LOGINS.includes(login)) return true;
+  return false;
+}
+
+function yandexAvatarUrl(avatarId?: string): string | null {
+  if (!avatarId) return null;
+  return `https://avatars.yandex.net/get-yapic/${avatarId}/islands-200`;
+}
+
+function normalizeYandexLogin(login?: string): string | null {
+  const trimmed = login?.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, 64);
+}
+
+export function isYandexConfigured(): boolean {
+  return Boolean(YANDEX_CLIENT_ID && YANDEX_CLIENT_SECRET);
+}
+
+export function resolveRedirectUri(requested?: string | null): string {
+  const uri = requested?.trim() || YANDEX_REDIRECT_URI;
+  if (!ALLOWED_REDIRECT_URIS.has(uri)) {
+    throw new Error("redirect_uri not allowed");
+  }
+  return uri;
+}
+
+export function buildYandexAuthorizeUrl(redirectUri: string, state?: string): string {
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: YANDEX_CLIENT_ID,
+    redirect_uri: redirectUri,
+  });
+  if (state) params.set("state", state);
+  return `https://oauth.yandex.ru/authorize?${params}`;
+}
+
+export async function createOAuthState(): Promise<string> {
+  const secret = new TextEncoder().encode(JWT_SECRET);
+  return new jose.SignJWT({ purpose: "yandex_oauth", rnd: crypto.randomUUID() })
+    .setProtectedHeader({ alg: "HS256" })
+    .setExpirationTime("15m")
+    .sign(secret);
+}
+
+export async function verifyOAuthState(state: string | null | undefined): Promise<boolean> {
+  if (!state) return false;
+  try {
+    const secret = new TextEncoder().encode(JWT_SECRET);
+    const { payload } = await jose.jwtVerify(state, secret);
+    return payload.purpose === "yandex_oauth";
+  } catch {
+    return false;
+  }
+}
+
+export async function signAppJwt(userId: string): Promise<string> {
+  const secret = new TextEncoder().encode(JWT_SECRET);
+  return new jose.SignJWT({ sub: userId })
+    .setProtectedHeader({ alg: "HS256" })
+    .setExpirationTime("30d")
+    .sign(secret);
+}
+
+export async function exchangeYandexCode(
+  code: string,
+  redirectUri: string
+): Promise<{ token: string; user: ReturnType<typeof toPrivateProfile> }> {
+  if (!isYandexConfigured()) throw new Error("Yandex OAuth not configured");
+
+  const tokenRes = await fetch("https://oauth.yandex.ru/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      client_id: YANDEX_CLIENT_ID,
+      client_secret: YANDEX_CLIENT_SECRET,
+      redirect_uri: redirectUri,
+    }),
+  });
+  if (!tokenRes.ok) {
+    const text = await tokenRes.text();
+    console.error("[Yandex OAuth] token exchange failed:", text);
+    throw new Error("Token exchange failed");
+  }
+  const tokenData = (await tokenRes.json()) as YandexTokenResponse;
+
+  const infoRes = await fetch("https://login.yandex.ru/info?format=json", {
+    headers: { Authorization: `OAuth ${tokenData.access_token}` },
+  });
+  if (!infoRes.ok) throw new Error("User info failed");
+  const info = (await infoRes.json()) as YandexUserInfo;
+
+  const yandexId = String(info.id);
+  const yandexLogin = normalizeYandexLogin(info.login);
+  const email = info.default_email ?? `${info.login ?? yandexId}@yandex.ru`;
+  const username = (info.display_name ?? info.real_name ?? info.login ?? `user_${yandexId.slice(0, 8)}`).slice(
+    0,
+    100
+  );
+  const avatarUrl = yandexAvatarUrl(info.default_avatar_id);
+  const makeAdmin = isAdminYandex(info);
+
+  let [user] = await db.select().from(users).where(eq(users.yandexId, yandexId)).limit(1);
+  if (!user) {
+    const [byEmail] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    if (byEmail) {
+      [user] = await db
+        .update(users)
+        .set({
+          yandexId,
+          yandexLogin: yandexLogin ?? byEmail.yandexLogin,
+          avatarUrl: avatarUrl ?? byEmail.avatarUrl,
+          isAdmin: makeAdmin || byEmail.isAdmin,
+          betaApproved: makeAdmin || byEmail.betaApproved,
+        })
+        .where(eq(users.id, byEmail.id))
+        .returning();
+    } else {
+      [user] = await db
+        .insert(users)
+        .values({
+          email,
+          username,
+          yandexId,
+          yandexLogin,
+          avatarUrl,
+          subscriptionTier: "free",
+          betaApproved: makeAdmin,
+          isAdmin: makeAdmin,
+        })
+        .returning();
+    }
+  } else {
+    const updates: Partial<typeof users.$inferInsert> = {};
+    if (yandexLogin && yandexLogin !== user.yandexLogin) updates.yandexLogin = yandexLogin;
+    if (avatarUrl && !user.avatarUrl) updates.avatarUrl = avatarUrl;
+    if (makeAdmin && !user.isAdmin) {
+      updates.isAdmin = true;
+      updates.betaApproved = true;
+    }
+    if (Object.keys(updates).length > 0) {
+      [user] = await db.update(users).set(updates).where(eq(users.id, user.id)).returning();
+    }
+  }
+
+  const token = await signAppJwt(user!.id);
+  return { token, user: toPrivateProfile(user!) };
+}
+
+export function getOAuthConfig() {
+  return {
+    clientId: YANDEX_CLIENT_ID || null,
+    webRedirectUri: YANDEX_REDIRECT_URI,
+    nativeRedirectUri: YANDEX_NATIVE_REDIRECT_URI,
+    configured: isYandexConfigured(),
+  };
+}

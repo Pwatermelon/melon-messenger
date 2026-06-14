@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, pgEnum, primaryKey } from "drizzle-orm/pg-core";
+import { pgTable, uuid, varchar, text, timestamp, pgEnum, primaryKey, boolean } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
 export const chatTypeEnum = pgEnum("chat_type", ["dm", "group"]);
@@ -7,11 +7,39 @@ export const memberRoleEnum = pgEnum("member_role", ["member", "admin"]);
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: varchar("email", { length: 255 }).notNull().unique(),
-  passwordHash: varchar("password_hash", { length: 255 }).notNull(),
+  passwordHash: varchar("password_hash", { length: 255 }),
   username: varchar("username", { length: 100 }).notNull(),
   avatarUrl: text("avatar_url"),
-  /** X25519 public key (base64) for E2E */
-  publicKey: text("public_key"),
+  coverUrl: text("cover_url"),
+  bio: text("bio"),
+  /** JSON array of upload paths */
+  profilePhotos: text("profile_photos"),
+  yandexId: varchar("yandex_id", { length: 64 }).unique(),
+  yandexLogin: varchar("yandex_login", { length: 64 }),
+  subscriptionTier: varchar("subscription_tier", { length: 20 }).notNull().default("free"),
+  subscriptionExpiresAt: timestamp("subscription_expires_at", { withTimezone: true }),
+  betaApproved: boolean("beta_approved").notNull().default(false),
+  isAdmin: boolean("is_admin").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const payments = pgTable("payments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  yookassaPaymentId: varchar("yookassa_payment_id", { length: 64 }),
+  amount: varchar("amount", { length: 20 }).notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("RUB"),
+  status: varchar("status", { length: 32 }).notNull().default("pending"),
+  plan: varchar("plan", { length: 32 }).notNull().default("platinum"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  endpoint: text("endpoint").notNull(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -36,6 +64,16 @@ export const chatMembers = pgTable(
 
 export const usersRelations = relations(users, ({ many }) => ({
   chatMembers: many(chatMembers),
+  payments: many(payments),
+  pushSubscriptions: many(pushSubscriptions),
+}));
+
+export const pushSubscriptionsRelations = relations(pushSubscriptions, ({ one }) => ({
+  user: one(users, { fields: [pushSubscriptions.userId], references: [users.id] }),
+}));
+
+export const paymentsRelations = relations(payments, ({ one }) => ({
+  user: one(users, { fields: [payments.userId], references: [users.id] }),
 }));
 
 export const chatsRelations = relations(chats, ({ many }) => ({
@@ -49,5 +87,7 @@ export const chatMembersRelations = relations(chatMembers, ({ one }) => ({
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+export type Payment = typeof payments.$inferSelect;
+export type PushSubscription = typeof pushSubscriptions.$inferSelect;
 export type Chat = typeof chats.$inferSelect;
 export type ChatMember = typeof chatMembers.$inferInsert;
