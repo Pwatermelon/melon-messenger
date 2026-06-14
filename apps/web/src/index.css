@@ -1566,6 +1566,14 @@ a {
   font-weight: 600;
   font-size: 1rem;
   transition: transform 0.15s, box-shadow 0.15s;
+  text-decoration: none;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.yandex-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .yandex-btn:hover {

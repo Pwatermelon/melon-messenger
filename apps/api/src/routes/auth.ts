@@ -52,7 +52,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         return { authorizeUrl: url, redirectUri, state };
       }
 
-      set.redirect = url;
+      return Response.redirect(url, 302);
     } catch (e) {
       set.status = 400;
       return { error: e instanceof Error ? e.message : "Invalid redirect_uri" };
@@ -81,26 +81,23 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       return { error: e instanceof Error ? e.message : "OAuth failed" };
     }
   })
-  .get("/yandex/callback", async ({ query, set }) => {
+  .get("/yandex/callback", async ({ query }) => {
     const q = query as { code?: string; state?: string; error?: string };
     if (q.error || !q.code) {
-      set.redirect = `${WEB_URL}/login?error=yandex_denied`;
-      return;
+      return Response.redirect(`${WEB_URL}/login?error=yandex_denied`, 302);
     }
     if (!(await verifyOAuthState(q.state))) {
-      set.redirect = `${WEB_URL}/login?error=yandex_failed`;
-      return;
+      return Response.redirect(`${WEB_URL}/login?error=yandex_failed`, 302);
     }
     if (!isYandexConfigured()) {
-      set.redirect = `${WEB_URL}/login?error=yandex_not_configured`;
-      return;
+      return Response.redirect(`${WEB_URL}/login?error=yandex_not_configured`, 302);
     }
     try {
       const { token } = await exchangeYandexCode(q.code, YANDEX_REDIRECT_URI);
-      set.redirect = `${WEB_URL}/auth/callback?token=${encodeURIComponent(token)}`;
+      return Response.redirect(`${WEB_URL}/auth/callback?token=${encodeURIComponent(token)}`, 302);
     } catch (e) {
       console.error("[Yandex OAuth callback]", e);
-      set.redirect = `${WEB_URL}/login?error=yandex_failed`;
+      return Response.redirect(`${WEB_URL}/login?error=yandex_failed`, 302);
     }
   })
   .get("/me", async ({ request, set }) => {

@@ -13,7 +13,7 @@ const ERRORS: Record<string, string> = {
 export default function Login() {
   const [params] = useSearchParams();
   const errorCode = params.get("error");
-  const { loginWithYandex, user } = useAuth();
+  const { user } = useAuth();
   const [oauthReady, setOauthReady] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -48,15 +48,17 @@ export default function Login() {
             <p className="auth-error">{ERRORS[errorCode]}</p>
           )}
 
-          <button
-            type="button"
-            className="yandex-btn"
-            onClick={loginWithYandex}
-            disabled={oauthReady === false}
-          >
-            <span className="yandex-btn-icon">Я</span>
-            {oauthReady === false ? "Yandex OAuth не настроен" : "Войти через Яндекс ID"}
-          </button>
+          {oauthReady === false ? (
+            <button type="button" className="yandex-btn" disabled>
+              <span className="yandex-btn-icon">Я</span>
+              Yandex OAuth не настроен
+            </button>
+          ) : (
+            <a href="/api/auth/yandex" className="yandex-btn">
+              <span className="yandex-btn-icon">Я</span>
+              Войти через Яндекс ID
+            </a>
+          )}
 
           <p className="login-security">
             Сообщения передаются по защищённому каналу (TLS/WSS) и хранятся на сервере в зашифрованном виде.
