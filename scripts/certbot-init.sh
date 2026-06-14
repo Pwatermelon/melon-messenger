@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-# First-time Let's Encrypt certificate (reads WM_DOMAIN + CERTBOT_EMAIL from .env).
+# Let's Encrypt: apex + www. Reads WM_DOMAIN, CERTBOT_EMAIL from .env.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-${ROOT}/.env}"
-COMPOSE="docker compose -f deploy/docker-compose.yml --env-file ${ENV_FILE}"
-
 cd "${ROOT}"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -22,26 +20,53 @@ if [[ -z "${EMAIL}" || "${EMAIL}" == "you@example.com" ]]; then
   exit 1
 fi
 
+COMPOSE="docker compose -f deploy/docker-compose.yml --env-file ${ENV_FILE}"
 PROJECT="${COMPOSE_PROJECT_NAME:-watermelon-prod}"
 CERT_VOL="${PROJECT}_certbot-conf"
-WWW_VOL="${PROJECT}_certbot-www"
 
-echo "==> Domain: ${DOMAIN}, email: ${EMAIL}"
-$COMPOSE up -d postgres redis scylla api
-$COMPOSE stop web 2>/dev/null || true
+cert_exists() {
+  docker run --rm -v "${CERT_VOL}:/etc/letsencrypt:ro" alpine \
+    test -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+}
 
-docker volume create "${CERT_VOL}" 2>/dev/null || true
-docker volume create "${WWW_VOL}" 2>/dev/null || true
+set_nginx_conf() {
+  local conf="$1"
+  if grep -q '^WM_NGINX_CONF=' "${ENV_FILE}"; then
+    sed -i "s/^WM_NGINX_CONF=.*/WM_NGINX_CONF=${conf}/" "${ENV_FILE}"
+  else
+    echo "WM_NGINX_CONF=${conf}" >> "${ENV_FILE}"
+  fi
+  export WM_NGINX_CONF="${conf}"
+}
 
-docker run --rm -p 80:80 \
-  -v "${CERT_VOL}:/etc/letsencrypt" \
-  -v "${WWW_VOL}:/var/www/certbot" \
-  certbot/certbot certonly --standalone \
+echo "==> Domain: ${DOMAIN} + www.${DOMAIN}"
+echo "==> Starting stack (HTTP mode for ACME)..."
+set_nginx_conf "nginx.http.conf"
+$COMPOSE up -d
+
+echo "==> Requesting certificate (webroot)..."
+$COMPOSE run --rm --entrypoint certbot certbot certonly \
+  --webroot -w /var/www/certbot \
   -d "${DOMAIN}" \
+  -d "www.${DOMAIN}" \
   --email "${EMAIL}" \
   --agree-tos \
   --no-eff-email \
-  --non-interactive
+  --non-interactive \
+  ${FORCE_RENEW:+--force-renewal}
 
-$COMPOSE up -d
-echo "==> Done. Open https://${DOMAIN}"
+if ! cert_exists; then
+  echo "ERROR: Certificate not found after certbot. Check DNS A-records for ${DOMAIN} and www.${DOMAIN}"
+  exit 1
+fi
+
+echo "==> Enabling HTTPS (nginx.prod.conf)..."
+set_nginx_conf "nginx.prod.conf"
+$COMPOSE up -d --force-recreate web
+
+echo "==> Reload nginx..."
+docker compose -f deploy/docker-compose.yml --env-file "${ENV_FILE}" exec web nginx -s reload 2>/dev/null || true
+
+echo "==> Done."
+echo "    https://${DOMAIN}"
+echo "    https://www.${DOMAIN} → redirects to apex"

@@ -186,6 +186,7 @@ jobs:
           rsync -avz -e "$RSYNC_SSH" \
             deploy/docker-compose.yml \
             deploy/nginx.prod.conf \
+            deploy/nginx.http.conf \
             deploy/nginx.bootstrap.conf \
             deploy/.env.example \
             "${REMOTE}/deploy/"
