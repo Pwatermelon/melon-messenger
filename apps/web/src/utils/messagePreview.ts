@@ -5,7 +5,11 @@ export function messagePreviewText(
 ): string {
   const mt = m.messageType ?? "text";
   switch (mt) {
-    case "image":
+    case "image": {
+      const album = m.attachmentMetadata?.attachments;
+      if (album && album.length > 1) {
+        return `${album.length} фото`;
+      }
       if (
         m.attachmentMetadata?.mimeType === "image/gif" ||
         /\.gif$/i.test(m.attachmentUrl?.split("?")[0] ?? "") ||
@@ -14,6 +18,7 @@ export function messagePreviewText(
         return "GIF";
       }
       return "Фотография";
+    }
     case "voice":
       return "Голосовое сообщение";
     case "circle":

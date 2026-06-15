@@ -1,21 +1,12 @@
 import type { users } from "../db/schema";
 import { formatBirthdayLabel, getBirthdayAge, isBirthdayToday } from "@melon/shared";
+import { canonicalUploadsPath } from "../services/mediaAccess";
 
 export function parseProfilePhotos(raw: string | null | undefined): string[] {
   if (!raw) return [];
   try {
     const arr = JSON.parse(raw) as unknown;
     return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string").slice(0, 12) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function parseAvatarHistory(raw: string | null | undefined): string[] {
-  if (!raw) return [];
-  try {
-    const arr = JSON.parse(raw) as unknown;
-    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string").slice(0, 24) : [];
   } catch {
     return [];
   }
@@ -38,8 +29,15 @@ function sanitizeProfileMedia(u: {
 }) {
   const crop = u.avatarUrl ?? null;
   const avatarHistory = (u.avatarHistory ?? []).filter((p) => p && p !== crop);
-  const avatarPaths = new Set([crop, ...avatarHistory].filter((p): p is string => Boolean(p)));
-  const profilePhotos = (u.profilePhotos ?? []).filter((p) => !avatarPaths.has(p));
+  const avatarPaths = new Set(
+    [crop, ...avatarHistory]
+      .map((p) => (p ? canonicalUploadsPath(p) : null))
+      .filter((p): p is string => Boolean(p))
+  );
+  const profilePhotos = (u.profilePhotos ?? []).filter((p) => {
+    const canonical = canonicalUploadsPath(p);
+    return canonical ? !avatarPaths.has(canonical) : true;
+  });
   return { avatarHistory, profilePhotos };
 }
 

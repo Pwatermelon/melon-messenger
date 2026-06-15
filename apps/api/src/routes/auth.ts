@@ -4,7 +4,12 @@ import * as jose from "jose";
 import { db, users } from "../db";
 import { eq } from "drizzle-orm";
 import { toPrivateProfile, parseAvatarHistory, parseProfilePhotos } from "../lib/userDto";
-import { ensureProfileMediaRegistered, signUserMedia } from "../services/mediaAccess";
+import {
+  canonicalUploadsPath,
+  ensureProfileMediaRegistered,
+  normalizeMediaPathList,
+  signUserMedia,
+} from "../services/mediaAccess";
 import {
   buildYandexAuthorizeUrl,
   createOAuthState,
@@ -107,7 +112,14 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       set.status = 401;
       return { error: "Unauthorized" };
     }
-    return signUserMedia(toPrivateProfile(u), u.id);
+    const dto = toPrivateProfile(u);
+    await ensureProfileMediaRegistered(u.id, [
+      dto.avatarUrl,
+      dto.coverUrl,
+      ...dto.profilePhotos,
+      ...dto.avatarHistory,
+    ]);
+    return signUserMedia(dto, u.id);
   })
   .put("/me", async ({ request, set }) => {
     const u = await verifyBearerUser(request);
@@ -129,24 +141,24 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       updates.username = body.username.trim().slice(0, 100);
     }
     if (body.avatarUrl !== undefined) {
-      const newUrl =
-        typeof body.avatarUrl === "string" ? body.avatarUrl.trim() || null : null;
-      updates.avatarUrl = newUrl;
+      const raw = typeof body.avatarUrl === "string" ? body.avatarUrl.trim() : "";
+      updates.avatarUrl = raw ? canonicalUploadsPath(raw) : null;
     }
     if (Array.isArray(body.avatarHistory)) {
       updates.avatarHistory = JSON.stringify(
-        body.avatarHistory.filter((p) => typeof p === "string").slice(0, 24)
+        normalizeMediaPathList(body.avatarHistory.filter((p) => typeof p === "string")).slice(0, 24)
       );
     }
     if (body.coverUrl !== undefined) {
-      updates.coverUrl = typeof body.coverUrl === "string" ? body.coverUrl.trim() || null : null;
+      const raw = typeof body.coverUrl === "string" ? body.coverUrl.trim() : "";
+      updates.coverUrl = raw ? canonicalUploadsPath(raw) : null;
     }
     if (body.bio !== undefined) {
       updates.bio = typeof body.bio === "string" ? body.bio.trim().slice(0, 500) || null : null;
     }
     if (Array.isArray(body.profilePhotos)) {
       updates.profilePhotos = JSON.stringify(
-        body.profilePhotos.filter((p) => typeof p === "string").slice(0, 12)
+        normalizeMediaPathList(body.profilePhotos.filter((p) => typeof p === "string")).slice(0, 12)
       );
     }
     if (typeof body.birthdayVisible === "boolean") {

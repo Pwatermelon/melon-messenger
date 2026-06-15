@@ -36,6 +36,8 @@ export default function ImageLightbox({
   if (images.length === 0) return null;
 
   const current = images[index] ?? images[0];
+  const canPrev = index > 0;
+  const canNext = index < images.length - 1;
 
   return (
     <div
@@ -48,6 +50,37 @@ export default function ImageLightbox({
       <button type="button" className="lightbox-close" onClick={onClose} aria-label="Закрыть">
         ×
       </button>
+      {images.length > 1 && (
+        <>
+          <button
+            type="button"
+            className="lightbox-nav lightbox-nav-prev"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (canPrev) setIndex((i) => i - 1);
+            }}
+            disabled={!canPrev}
+            aria-label="Предыдущее"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            className="lightbox-nav lightbox-nav-next"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (canNext) setIndex((i) => i + 1);
+            }}
+            disabled={!canNext}
+            aria-label="Следующее"
+          >
+            ›
+          </button>
+          <div className="lightbox-counter" aria-live="polite">
+            {index + 1} / {images.length}
+          </div>
+        </>
+      )}
       <div className="lightbox-gallery-body" onClick={(e) => e.stopPropagation()}>
         <div className="lightbox-content">
           <img src={current} alt="" className="lightbox-img" />

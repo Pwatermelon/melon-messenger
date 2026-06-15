@@ -1,5 +1,22 @@
 import { getApiUrl } from "../config";
 
+/** Strip signed URLs back to `/uploads/{filename}` before saving to profile. */
+export function canonicalStoragePath(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed) return trimmed;
+  const uploads = trimmed.match(/\/uploads\/([^/?#]+)/);
+  if (uploads?.[1]) return `/uploads/${uploads[1]}`;
+  const media = trimmed.match(/\/media\/([^/?#]+)/);
+  if (media?.[1]) {
+    try {
+      return `/uploads/${decodeURIComponent(media[1])}`;
+    } catch {
+      return `/uploads/${media[1]}`;
+    }
+  }
+  return trimmed;
+}
+
 /** Turn API-signed or storage path into a browser-loadable URL */
 export function mediaUrl(path: string | null | undefined): string {
   if (!path) return "";

@@ -14,10 +14,41 @@ export type MediaVisibility = "chat" | "profile";
 export function filenameFromPath(path: string | null | undefined): string | null {
   if (!path) return null;
   const p = path.trim();
-  const m = p.match(/\/uploads\/([^/?#]+)/) ?? p.match(/^uploads\/([^/?#]+)/);
-  if (m?.[1]) return m[1].replace(/\.\./g, "").replace(/\//g, "");
-  if (!p.includes("/") && !p.startsWith("http")) return p.replace(/\.\./g, "").replace(/\//g, "");
+  let m = p.match(/\/uploads\/([^/?#]+)/) ?? p.match(/^uploads\/([^/?#]+)/);
+  if (m?.[1]) return sanitizeMediaFilename(m[1]);
+  m = p.match(/\/media\/([^/?#]+)/);
+  if (m?.[1]) {
+    try {
+      return sanitizeMediaFilename(decodeURIComponent(m[1]));
+    } catch {
+      return sanitizeMediaFilename(m[1]);
+    }
+  }
+  if (!p.includes("/") && !p.startsWith("http")) return sanitizeMediaFilename(p);
   return null;
+}
+
+function sanitizeMediaFilename(name: string): string {
+  return name.replace(/\.\./g, "").replace(/\//g, "");
+}
+
+/** Canonical storage path — always `/uploads/{filename}`, never signed URLs. */
+export function canonicalUploadsPath(path: string | null | undefined): string | null {
+  const filename = filenameFromPath(path);
+  if (!filename) return null;
+  return uploadsPathFromKey(filename);
+}
+
+export function normalizeMediaPathList(paths: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of paths) {
+    const canonical = canonicalUploadsPath(raw);
+    if (!canonical || seen.has(canonical)) continue;
+    seen.add(canonical);
+    out.push(canonical);
+  }
+  return out;
 }
 
 export async function registerMediaFile(
@@ -40,9 +71,25 @@ export async function grantMediaToChat(filename: string, chatId: string): Promis
   await db.insert(mediaChatGrants).values({ filename, chatId }).onConflictDoNothing();
 }
 
-export async function grantMediaFromAttachment(attachmentUrl: string | null | undefined, chatId: string): Promise<void> {
-  const filename = filenameFromPath(attachmentUrl);
-  if (filename) await grantMediaToChat(filename, chatId);
+import type { AttachmentMetadata } from "@melon/shared";
+
+export async function grantMediaFromAttachment(
+  attachmentUrl: string | null | undefined,
+  chatId: string,
+  attachmentMetadata?: AttachmentMetadata | null
+): Promise<void> {
+  const paths = new Set<string>();
+  const primary = attachmentUrl ? canonicalUploadsPath(attachmentUrl) : null;
+  if (primary) paths.add(primary);
+  for (const item of attachmentMetadata?.attachments ?? []) {
+    if (!item.url) continue;
+    const canonical = canonicalUploadsPath(item.url);
+    if (canonical) paths.add(canonical);
+  }
+  for (const path of paths) {
+    const filename = filenameFromPath(path);
+    if (filename) await grantMediaToChat(filename, chatId);
+  }
 }
 
 export async function canAccessMedia(userId: string, filename: string): Promise<boolean> {
@@ -91,8 +138,12 @@ export async function verifyMediaAccessToken(
 
 export async function signMediaPath(path: string | null | undefined, userId: string): Promise<string | null> {
   if (!path) return null;
-  if (path.startsWith("http://") || path.startsWith("https://")) return path;
-  const filename = filenameFromPath(path);
+  const canonical = canonicalUploadsPath(path);
+  if (!canonical) {
+    if (path.startsWith("http://") || path.startsWith("https://")) return path;
+    return null;
+  }
+  const filename = filenameFromPath(canonical);
   if (!filename) return null;
   const ok = await canAccessMedia(userId, filename);
   if (!ok) return null;
@@ -102,19 +153,86 @@ export async function signMediaPath(path: string | null | undefined, userId: str
   return `${prefix}/media/${encodeURIComponent(filename)}?access=${access}`;
 }
 
+export function normalizeAttachmentMetadataForStorage(
+  metadata: AttachmentMetadata | null | undefined
+): AttachmentMetadata | null {
+  if (!metadata) return null;
+  const next: AttachmentMetadata = { ...metadata };
+  if (next.attachments?.length) {
+    next.attachments = next.attachments
+      .map((a) => ({
+        ...a,
+        url: (a.url ? canonicalUploadsPath(a.url) : null) ?? a.url,
+      }))
+      .filter((a): a is typeof a & { url: string } => Boolean(a.url));
+  }
+  return next;
+}
+
+export function normalizeMessageAttachmentUrl(
+  attachmentUrl: string | null | undefined,
+  metadata: AttachmentMetadata | null | undefined
+): string | null {
+  if (attachmentUrl) {
+    const canonical = canonicalUploadsPath(attachmentUrl);
+    if (canonical) return canonical;
+  }
+  for (const item of metadata?.attachments ?? []) {
+    if (!item.url) continue;
+    const canonical = canonicalUploadsPath(item.url);
+    if (canonical) return canonical;
+  }
+  return attachmentUrl ?? null;
+}
+
 export async function signMediaPaths(
   paths: Array<string | null | undefined>,
   userId: string
 ): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
-  const unique = [...new Set(paths.map((p) => p?.trim()).filter(Boolean))] as string[];
+  const canonicalSet = new Set<string>();
+  const originals: string[] = [];
+  for (const raw of paths) {
+    const trimmed = raw?.trim();
+    if (!trimmed) continue;
+    originals.push(trimmed);
+    const canonical = canonicalUploadsPath(trimmed);
+    if (canonical) canonicalSet.add(canonical);
+  }
   await Promise.all(
-    unique.map(async (path) => {
+    [...canonicalSet].map(async (path) => {
       const signed = await signMediaPath(path, userId);
       if (signed) out[path] = signed;
     })
   );
+  for (const original of originals) {
+    const signed = resolveSignedMediaPath(original, out);
+    if (signed) out[original] = signed;
+  }
   return out;
+}
+
+export async function signAttachmentMetadata(
+  metadata: AttachmentMetadata | null | undefined,
+  viewerId: string
+): Promise<AttachmentMetadata | null | undefined> {
+  if (!metadata?.attachments?.length) return metadata;
+  const paths = metadata.attachments.map((a) => a.url).filter(Boolean);
+  const signed = await signMediaPaths(paths, viewerId);
+  return {
+    ...metadata,
+    attachments: metadata.attachments.map((a) => ({
+      ...a,
+      url: resolveSignedMediaPath(a.url, signed) ?? a.url,
+    })),
+  };
+}
+
+function resolveSignedMediaPath(path: string | null | undefined, signed: Record<string, string>): string | null {
+  if (!path) return null;
+  const canonical = canonicalUploadsPath(path);
+  if (canonical && signed[canonical]) return signed[canonical];
+  return signed[path] ?? null;
 }
 
 export function collectUserMediaPaths(u: {
@@ -135,19 +253,20 @@ export function collectUserMediaPaths(u: {
 export async function signUserMedia<T extends Record<string, unknown>>(user: T, viewerId: string): Promise<T> {
   const paths = collectUserMediaPaths(user as Parameters<typeof collectUserMediaPaths>[0]);
   const signed = await signMediaPaths(paths, viewerId);
+  const mapPath = (p: string) => resolveSignedMediaPath(p, signed) ?? p;
   const next = { ...user } as T & {
     avatarUrl?: string | null;
     coverUrl?: string | null;
     profilePhotos?: string[];
     avatarHistory?: string[];
   };
-  if (typeof next.avatarUrl === "string" && signed[next.avatarUrl]) next.avatarUrl = signed[next.avatarUrl];
-  if (typeof next.coverUrl === "string" && signed[next.coverUrl]) next.coverUrl = signed[next.coverUrl];
+  if (typeof next.avatarUrl === "string") next.avatarUrl = mapPath(next.avatarUrl);
+  if (typeof next.coverUrl === "string") next.coverUrl = mapPath(next.coverUrl);
   if (Array.isArray(next.profilePhotos)) {
-    next.profilePhotos = next.profilePhotos.map((p) => signed[p] ?? p);
+    next.profilePhotos = next.profilePhotos.map(mapPath);
   }
   if (Array.isArray(next.avatarHistory)) {
-    next.avatarHistory = next.avatarHistory.map((p) => signed[p] ?? p);
+    next.avatarHistory = next.avatarHistory.map(mapPath);
   }
   return next as T;
 }

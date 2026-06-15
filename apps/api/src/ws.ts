@@ -209,7 +209,7 @@ export const wsHandlers = {
               attachmentMetadata: attachmentMetadata ?? null,
             }
           );
-          await grantMediaFromAttachment(attachmentUrl, chatId);
+          await grantMediaFromAttachment(attachmentUrl, chatId, attachmentMetadata ?? null);
           const mt = messageType ?? "text";
           if (mt !== "system") {
             await incrementUnreadForChat(chatId, ws.data.userId).catch((err) => {

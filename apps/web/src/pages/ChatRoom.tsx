@@ -13,7 +13,17 @@ import BirthdayInfoBlock from "../components/BirthdayInfoBlock";
 import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo, IconBack, IconChevronDown } from "../components/Icons";
 import { getChat, getChats, getMessages, uploadFile, addGroupMembers, removeGroupMember, getUserByYandexLogin, deleteChat, updateGroup, deleteMessage, editMessage, forwardMessage, signMediaPaths, markChatReadApi } from "../api";
 import { extFromBlobType } from "../utils/mediaMime";
-import { compressImage, isGifFile } from "../utils/imageCompress";
+import { compressImage, isGifFileDeep } from "../utils/imageCompress";
+import ImageLightbox from "../components/ImageLightbox";
+import { MessageMediaGallery } from "../components/MessageMediaGallery";
+import {
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  applySignedPathsToMessage,
+  chunkFiles,
+  collectMessageMediaPaths,
+  isAlbumImageFile,
+} from "../utils/messageAttachments";
+import type { MessageAttachment } from "@melon/shared";
 import type { Chat, Message, AttachmentMetadata } from "@melon/shared";
 import type { MessageItem } from "../api";
 import { getWsUrl } from "../config";
@@ -53,9 +63,11 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const [groupAvatarCropFile, setGroupAvatarCropFile] = useState<File | null>(null);
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
-  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
   const [fileDragActive, setFileDragActive] = useState(false);
   const [contactInfoOpen, setContactInfoOpen] = useState(false);
+  const [deleteChatConfirmOpen, setDeleteChatConfirmOpen] = useState(false);
+  const [deleteChatBusy, setDeleteChatBusy] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [groupAddLogin, setGroupAddLogin] = useState("");
   const [groupAddError, setGroupAddError] = useState("");
@@ -75,6 +87,8 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const [forwardChats, setForwardChats] = useState<Chat[]>([]);
   const [forwarding, setForwarding] = useState(false);
   const [replyDraft, setReplyDraft] = useState<Message | null>(null);
+  const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<number | null>(null);
   const [editDraft, setEditDraft] = useState<Message | null>(null);
   const composeInputRef = useRef<HTMLInputElement>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -133,13 +147,28 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   }
 
   useEffect(() => {
-    if (!lightboxImage) return;
+    if (!deleteChatConfirmOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setLightboxImage(null);
+      if (e.key === "Escape" && !deleteChatBusy) setDeleteChatConfirmOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [lightboxImage]);
+  }, [deleteChatConfirmOpen, deleteChatBusy]);
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightbox(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightbox]);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) window.clearTimeout(highlightTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!contactInfoOpen) return;
@@ -164,6 +193,8 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     serverUnreadCountRef.current = 0;
     setServerUnreadCount(0);
     setUnreadJumpCount(0);
+    setDeleteChatConfirmOpen(false);
+    setDeleteChatBusy(false);
   }, [chatId]);
 
   useEffect(() => {
@@ -255,7 +286,6 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
       if (msg.type === "message" && msg.message.chatId === chatId) {
         const incoming = msg.message;
         const fromOther = incoming.senderId !== user?.id;
-        const attach = incoming.attachmentUrl;
         const afterAppend = (next: Message[]) => {
           if (fromOther && !stickToBottomRef.current) {
             serverUnreadCountRef.current += 1;
@@ -266,12 +296,13 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
           }
           return next;
         };
-        if (attach && !attach.includes("access=")) {
-          void signMediaPaths([attach]).then((urls) => {
-            const signed = urls[attach];
+        const paths = collectMessageMediaPaths(incoming);
+        const needsSign = paths.some((p) => p && !p.includes("access="));
+        if (needsSign && paths.length) {
+          void signMediaPaths(paths).then((signed) => {
             setMessages((prev) => {
               if (prev.some((m) => m.id === incoming.id)) return prev;
-              return afterAppend([...prev, { ...incoming, attachmentUrl: signed ?? attach }]);
+              return afterAppend([...prev, applySignedPathsToMessage(incoming, signed)]);
             });
           });
           return;
@@ -629,10 +660,20 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     }
   }
 
+  function flashMessage(messageId: string) {
+    if (highlightTimerRef.current) window.clearTimeout(highlightTimerRef.current);
+    setHighlightMessageId(messageId);
+    highlightTimerRef.current = window.setTimeout(() => {
+      setHighlightMessageId(null);
+      highlightTimerRef.current = null;
+    }, 2200);
+  }
+
   function scrollToMessage(messageId: string, block: "start" | "center" | "end" = "center") {
     const list = listRef.current;
     if (!list) return;
-    scrollListToMessage(list, messageId, block, 16);
+    const found = scrollListToMessage(list, messageId, block, 16);
+    if (found) flashMessage(messageId);
     requestAnimationFrame(() => {
       refreshUnreadJumpCount();
       tryMarkReadFromScroll();
@@ -672,37 +713,106 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     inputEl.click();
   }
 
+  async function uploadSingleFile(file: File, withReply: boolean) {
+    const isGif = await isGifFileDeep(file);
+    const isImage = file.type.startsWith("image/") && !isGif;
+    const toUpload = isImage ? await compressImage(file) : file;
+    const { path, fileName, mimeType, size } = await uploadFile(toUpload);
+    const type = isGif || isImage ? "image" : file.type.startsWith("video/") ? "video" : "file";
+    dispatchMessage(
+      {
+        content: isGif ? "GIF" : type === "image" ? "Фотография" : file.name,
+        messageType: type,
+        attachmentUrl: path,
+        attachmentMetadata:
+          isGif
+            ? { fileName: file.name || "animation.gif", mimeType: "image/gif", size: file.size }
+            : type === "image"
+            ? { fileName: "Фотография", mimeType: toUpload.type, size: toUpload.size }
+            : { fileName: file.name ?? fileName, mimeType: mimeType ?? file.type, size: size ?? file.size },
+      },
+      withReply
+    );
+  }
+
+  async function uploadAlbumFiles(files: File[], withReply: boolean) {
+    const attachments: MessageAttachment[] = [];
+    for (const file of files) {
+      const isGif = await isGifFileDeep(file);
+      const toUpload = isGif ? file : await compressImage(file);
+      const { path, fileName, mimeType, size } = await uploadFile(toUpload);
+      attachments.push({
+        url: path,
+        fileName: file.name || fileName,
+        mimeType: isGif ? "image/gif" : mimeType || toUpload.type || "image/jpeg",
+        size: size ?? file.size,
+      });
+    }
+    const count = attachments.length;
+    const hasGif = attachments.some((a) => a.mimeType === "image/gif");
+    dispatchMessage(
+      {
+        content: count === 1 ? (hasGif ? "GIF" : "Фотография") : `${count} фото`,
+        messageType: "image",
+        attachmentUrl: attachments[0]!.url,
+        attachmentMetadata: {
+          attachments,
+          mimeType: attachments[0]!.mimeType,
+          fileName: attachments[0]!.fileName,
+        },
+      },
+      withReply
+    );
+  }
+
   async function uploadFiles(files: File[]) {
     if (!files.length || !chatId || sending || !ready) return;
     setSending(true);
     try {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i]!;
-        const isGif = isGifFile(file);
-        const isImage = file.type.startsWith("image/") && !isGif;
-        const toUpload = isImage ? await compressImage(file) : file;
-        const { path, fileName, mimeType, size } = await uploadFile(toUpload);
-        const type = isGif || isImage ? "image" : file.type.startsWith("video/") ? "video" : "file";
-        dispatchMessage(
-          {
-            content: isGif ? "GIF" : type === "image" ? "Фотография" : file.name,
-            messageType: type,
-            attachmentUrl: path,
-            attachmentMetadata:
-              isGif
-                ? { fileName: file.name || "animation.gif", mimeType: "image/gif", size: file.size }
-                : type === "image"
-                ? { fileName: "Фотография", mimeType: toUpload.type, size: toUpload.size }
-                : { fileName: file.name ?? fileName, mimeType: mimeType ?? file.type, size: size ?? file.size },
-          },
-          i === 0
-        );
+      const album: File[] = [];
+      const other: File[] = [];
+      for (const f of files) {
+        if (isAlbumImageFile(f)) album.push(f);
+        else other.push(f);
+      }
+      const albumChunks = chunkFiles(album, MAX_ATTACHMENTS_PER_MESSAGE);
+      let first = true;
+      for (const chunk of albumChunks) {
+        if (chunk.length > 0) {
+          await uploadAlbumFiles(chunk, first);
+          first = false;
+        }
+      }
+      for (const file of other) {
+        await uploadSingleFile(file, first);
+        first = false;
       }
       setReplyDraft(null);
     } catch (err) {
       console.error(err);
     } finally {
       setSending(false);
+    }
+  }
+
+  function handleComposePaste(e: React.ClipboardEvent) {
+    if (!chatId || sending || !ready || editDraft) return;
+    const fromFiles = Array.from(e.clipboardData.files ?? []);
+    if (fromFiles.length > 0) {
+      e.preventDefault();
+      void uploadFiles(fromFiles);
+      return;
+    }
+    const items = Array.from(e.clipboardData.items ?? []);
+    const pasted: File[] = [];
+    for (const item of items) {
+      if (item.kind !== "file") continue;
+      const file = item.getAsFile();
+      if (file) pasted.push(file);
+    }
+    if (pasted.length > 0) {
+      e.preventDefault();
+      void uploadFiles(pasted);
     }
   }
 
@@ -913,11 +1023,16 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     if (!chatId || !forwardTarget) return;
     setForwarding(true);
     try {
-      const msg = await forwardMessage(targetChatId, chatId, forwardTarget.id);
+      let msg = (await forwardMessage(targetChatId, chatId, forwardTarget.id)) as Message;
       if (targetChatId === chatId) {
+        const paths = collectMessageMediaPaths(msg);
+        if (paths.length && paths.some((p) => p && !p.includes("access="))) {
+          const signed = await signMediaPaths(paths);
+          msg = applySignedPathsToMessage(msg, signed);
+        }
         setMessages((prev) => {
           if (prev.some((x) => x.id === msg.id)) return prev;
-          return [...prev, msg as Message];
+          return [...prev, msg];
         });
       }
       setForwardTarget(null);
@@ -929,15 +1044,24 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     }
   }
 
-  async function handleDeleteChat() {
-    if (!chatId) return;
+  async function confirmDeleteChat() {
+    if (!chatId || deleteChatBusy) return;
+    setDeleteChatBusy(true);
     try {
       await deleteChat(chatId);
+      setDeleteChatConfirmOpen(false);
+      setContactInfoOpen(false);
       window.dispatchEvent(new Event("wm:refresh-chats"));
       onClose();
     } catch (e) {
       console.error(e);
+    } finally {
+      setDeleteChatBusy(false);
     }
+  }
+
+  function requestDeleteChat() {
+    setDeleteChatConfirmOpen(true);
   }
 
   function handleGroupAvatarPick(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1140,7 +1264,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
               )}
             <div
               data-message-id={m.id}
-              className={`message-row ${own ? "own" : "incoming"}${selectionMode ? " selection-mode" : ""}`}
+              className={`message-row ${own ? "own" : "incoming"}${selectionMode ? " selection-mode" : ""}${highlightMessageId === m.id ? " message-row-target-highlight" : ""}`}
               onClick={(e) => onMessageRowClick(e, m)}
             >
               <div
@@ -1196,21 +1320,12 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
               {(m.messageType ?? "text") === "text" && (
                 <p className="message-content">{linkifyText(displayContent(m))}</p>
               )}
-              {(m.messageType ?? "text") === "image" && m.attachmentUrl && (() => {
-                const imgUrl = mediaUrl(m.attachmentUrl);
-                const isGif =
-                  m.attachmentMetadata?.mimeType === "image/gif" ||
-                  /\.gif$/i.test(m.attachmentUrl.split("?")[0] ?? "") ||
-                  m.content === "GIF";
-                return (
-                  <div className="message-image-wrap">
-                    <button type="button" className="message-image-btn" onClick={() => setLightboxImage(imgUrl)}>
-                      <img src={imgUrl} alt="" className="message-image" />
-                    </button>
-                    <span className="message-image-caption">{isGif ? "GIF" : "Фотография"}</span>
-                  </div>
-                );
-              })()}
+              {(m.messageType ?? "text") === "image" && m.attachmentUrl && (
+                <MessageMediaGallery
+                  message={m}
+                  onOpenLightbox={(urls, index) => setLightbox({ urls, index })}
+                />
+              )}
               {(m.messageType ?? "text") === "file" && m.attachmentUrl && (
                 <a
                   href={mediaDownloadUrl(m.attachmentUrl, m.attachmentMetadata?.fileName)}
@@ -1317,7 +1432,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
           onChange={handleFileSelect}
           style={{ display: "none" }}
         />
-        <form onSubmit={handleSubmit} className="compose-form compose-form-inline">
+        <form onSubmit={handleSubmit} className="compose-form compose-form-inline" onPaste={handleComposePaste}>
           <div className="compose-attach-wrap">
             <button
               type="button"
@@ -1348,6 +1463,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
             placeholder={editDraft ? "Изменить сообщение…" : "Сообщение…"}
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onPaste={handleComposePaste}
             disabled={!ready}
           />
           {input.trim() || editDraft ? (
@@ -1360,19 +1476,13 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
         </form>
       </div>
       </div>
-      {lightboxImage && (
-        <div
-          className="lightbox"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Просмотр изображения"
-          onClick={() => setLightboxImage(null)}
-        >
-          <button type="button" className="lightbox-close" onClick={() => setLightboxImage(null)} aria-label="Закрыть">×</button>
-          <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
-            <img src={lightboxImage} alt="" className="lightbox-img" />
-          </div>
-        </div>
+      {lightbox && (
+        <ImageLightbox
+          images={lightbox.urls}
+          initialIndex={lightbox.index}
+          onClose={() => setLightbox(null)}
+          title="Фото"
+        />
       )}
 
       {contactInfoOpen && chat && (
@@ -1428,7 +1538,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
                 <button
                   type="button"
                   className="contact-info-remove-btn"
-                  onClick={handleDeleteChat}
+                  onClick={requestDeleteChat}
                 >
                   Удалить чат
                 </button>
@@ -1445,7 +1555,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
                 <button
                   type="button"
                   className="contact-info-remove-btn"
-                  onClick={handleDeleteChat}
+                  onClick={requestDeleteChat}
                 >
                   Удалить чат
                 </button>
@@ -1604,13 +1714,58 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
                   <button
                     type="button"
                     className="contact-info-remove-btn"
-                    onClick={handleDeleteChat}
+                    onClick={requestDeleteChat}
                   >
                     Удалить группу
                   </button>
                 )}
               </>
             ) : null}
+          </div>
+        </div>
+      )}
+
+      {deleteChatConfirmOpen && (
+        <div
+          className="search-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !deleteChatBusy) setDeleteChatConfirmOpen(false);
+          }}
+        >
+          <div className="search-modal confirm-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <button
+              type="button"
+              className="modal-close"
+              onClick={() => !deleteChatBusy && setDeleteChatConfirmOpen(false)}
+              disabled={deleteChatBusy}
+              aria-label="Закрыть"
+            >
+              ×
+            </button>
+            <h3>{chat?.type === "group" ? "Удалить группу?" : "Удалить чат?"}</h3>
+            <p className="confirm-modal-text">
+              {chat?.type === "group"
+                ? "Группа и вся история сообщений будут удалены для всех участников. Это действие нельзя отменить."
+                : "Чат и все сообщения будут удалены и у вас, и у собеседника. Это действие нельзя отменить."}
+            </p>
+            <div className="confirm-modal-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setDeleteChatConfirmOpen(false)}
+                disabled={deleteChatBusy}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="btn confirm-btn-danger"
+                onClick={() => void confirmDeleteChat()}
+                disabled={deleteChatBusy}
+              >
+                {deleteChatBusy ? "…" : chat?.type === "group" ? "Удалить группу" : "Удалить чат"}
+              </button>
+            </div>
           </div>
         </div>
       )}

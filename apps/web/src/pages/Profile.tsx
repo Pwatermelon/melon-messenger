@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useOutletContext } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getUserById, updateProfile, uploadFile, getContacts, addContact, removeContact } from "../api";
-import { mediaUrl as resolveMediaUrl } from "../utils/mediaUrl";
+import { mediaUrl as resolveMediaUrl, canonicalStoragePath } from "../utils/mediaUrl";
 import { compressImage } from "../utils/imageCompress";
 import type { User } from "@melon/shared";
 import type { ChatLayoutOutletContext } from "./ChatLayout";
@@ -35,9 +35,22 @@ function buildAvatarLightboxPaths(profile: User): string[] {
 
 function buildProfilePhotoPaths(profile: User): string[] {
   const avatarPaths = new Set(
-    [profile.avatarUrl, ...(profile.avatarHistory ?? [])].filter((p): p is string => Boolean(p))
+    [profile.avatarUrl, ...(profile.avatarHistory ?? [])]
+      .map((p) => (p ? canonicalStoragePath(p) : null))
+      .filter((p): p is string => Boolean(p))
   );
-  return (profile.profilePhotos ?? []).filter((p) => !avatarPaths.has(p));
+  return (profile.profilePhotos ?? []).filter((p) => {
+    const canonical = canonicalStoragePath(p);
+    return canonical ? !avatarPaths.has(canonical) : true;
+  });
+}
+
+function profilePhotosForSave(profile: User): string[] {
+  return buildProfilePhotoPaths(profile).map(canonicalStoragePath);
+}
+
+function avatarHistoryForSave(profile: User): string[] {
+  return (profile.avatarHistory ?? []).map(canonicalStoragePath);
 }
 
 export default function Profile({ modal, onClose, userIdProp, onOpenSettings, onAddContact, onContactChange, onStartDm }: ProfileProps = {}) {
@@ -174,11 +187,18 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
       const cropped = await compressImage(croppedFile);
       const { path: cropPath } = await uploadFile(cropped, { purpose: "profile" });
 
-      let history = [...(profile?.avatarHistory ?? [])];
+      let history = avatarHistoryForSave(profile!);
       if (originalFile) {
         const original = await compressImage(originalFile);
         const { path: fullPath } = await uploadFile(original, { purpose: "profile" });
-        history = [fullPath, ...history.filter((h) => h !== fullPath && h !== cropPath)];
+        history = [
+          fullPath,
+          ...history.filter(
+            (h) =>
+              canonicalStoragePath(h) !== canonicalStoragePath(fullPath) &&
+              canonicalStoragePath(h) !== canonicalStoragePath(cropPath)
+          ),
+        ];
       }
 
       const updated = await updateProfile({
@@ -218,7 +238,7 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
     try {
       const compressed = await compressImage(file);
       const { path } = await uploadFile(compressed, { purpose: "profile" });
-      const current = profile?.profilePhotos ?? [];
+      const current = profilePhotosForSave(profile!);
       const updated = await updateProfile({ profilePhotos: [...current, path].slice(0, 12) });
       updateUser(updated);
       setProfile(updated);
@@ -231,10 +251,11 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
   }
 
   async function removePhoto(path: string) {
-    const current = buildProfilePhotoPaths(profile!);
-    const idx = current.indexOf(path);
+    const display = buildProfilePhotoPaths(profile!);
+    const idx = display.indexOf(path);
+    const target = canonicalStoragePath(path);
     const updated = await updateProfile({
-      profilePhotos: current.filter((p) => p !== path),
+      profilePhotos: profilePhotosForSave(profile!).filter((p) => canonicalStoragePath(p) !== target),
     });
     updateUser(updated);
     setProfile(updated);
@@ -253,7 +274,7 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
     setMessage("");
     try {
       const updated = await updateProfile({
-        avatarHistory: next,
+        avatarHistory: next.map(canonicalStoragePath),
       });
       updateUser(updated);
       setProfile(updated);

@@ -43,6 +43,14 @@ export interface Chat {
 /** Message content type */
 export type MessageType = "text" | "image" | "file" | "video" | "location" | "voice" | "circle" | "system";
 
+/** Single file in a message (album supports up to 5) */
+export interface MessageAttachment {
+  url: string;
+  fileName?: string;
+  mimeType?: string;
+  size?: number;
+}
+
 /** Attachment metadata (JSON) */
 export interface AttachmentMetadata {
   fileName?: string;
@@ -51,6 +59,7 @@ export interface AttachmentMetadata {
   duration?: number;
   lat?: number;
   lng?: number;
+  attachments?: MessageAttachment[];
   forwardedFrom?: { userId: string; username: string };
   replyTo?: {
     messageId: string;

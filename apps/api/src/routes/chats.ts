@@ -10,9 +10,13 @@ import { toPublicProfile } from "../lib/userDto";
 import { usersShareChat } from "../lib/chatAccess";
 import {
   ensureChatAvatarRegistered,
+  ensureProfileMediaRegistered,
   grantMediaFromAttachment,
   grantMediaToChat,
+  normalizeAttachmentMetadataForStorage,
+  normalizeMessageAttachmentUrl,
   signMediaPath,
+  signAttachmentMetadata,
   signUserMedia,
   filenameFromPath,
 } from "../services/mediaAccess";
@@ -48,9 +52,10 @@ async function rowToMessageDto(
   viewerId: string,
   sender?: Awaited<ReturnType<typeof signUserMedia<ReturnType<typeof toUser>>>>
 ): Promise<MessageDto> {
-  const attachmentMetadata = parseAttachmentMetadata(r.attachment_metadata);
+  const attachmentMetadataRaw = parseAttachmentMetadata(r.attachment_metadata);
   const rawUrl = r.attachment_url ?? null;
   const attachmentUrl = rawUrl ? (await signMediaPath(rawUrl, viewerId)) ?? rawUrl : null;
+  const attachmentMetadata = (await signAttachmentMetadata(attachmentMetadataRaw, viewerId)) ?? attachmentMetadataRaw;
   return {
     id: r.message_id,
     chatId: r.chat_id,
@@ -190,7 +195,14 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       return { error: "User not found" };
     }
     const includeBirthday = target.birthdayVisible || viewer.id === target.id;
-    return signUserMedia(toPublicProfile(target, includeBirthday), viewer.id);
+    const dto = toPublicProfile(target, includeBirthday);
+    await ensureProfileMediaRegistered(target.id, [
+      dto.avatarUrl,
+      dto.coverUrl,
+      ...dto.profilePhotos,
+      ...dto.avatarHistory,
+    ]);
+    return signUserMedia(dto, viewer.id);
   })
   .get("/", async ({ user, set }) => {
     const u = requireAuth(set)(user);
@@ -706,30 +718,34 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
     }
     const [originalSender] = await db.select().from(users).where(eq(users.id, row.sender_id)).limit(1);
     const originalMeta = parseAttachmentMetadata(row.attachment_metadata) ?? {};
+    const { replyTo: _replyTo, ...metaWithoutReply } = originalMeta;
     const forwardedFrom = originalMeta.forwardedFrom ?? {
       userId: row.sender_id,
       username: originalSender?.username ?? originalSender?.yandexLogin ?? "Пользователь",
     };
-    const attachmentMetadata: AttachmentMetadata = { ...originalMeta, forwardedFrom };
+    const attachmentMetadata =
+      normalizeAttachmentMetadataForStorage({ ...metaWithoutReply, forwardedFrom }) ?? { forwardedFrom };
+    const attachmentUrl = normalizeMessageAttachmentUrl(row.attachment_url, attachmentMetadata);
     const { messageId: newId, createdAt } = await scyllaInsertMessage(targetChatId, u.id, row.content, {
       messageType: (row.message_type as MessageType) ?? "text",
-      attachmentUrl: row.attachment_url ?? null,
+      attachmentUrl,
       attachmentMetadata,
     });
-    await grantMediaFromAttachment(row.attachment_url, targetChatId);
+    await grantMediaFromAttachment(attachmentUrl, targetChatId, attachmentMetadata);
     const [senderUser] = await db.select().from(users).where(eq(users.id, u.id)).limit(1);
-    const message: MessageDto = {
+    const sender = senderUser ? await signUserMedia(toUser(senderUser), u.id) : undefined;
+    const wsMessage: MessageDto = {
       id: newId,
       chatId: targetChatId,
       senderId: u.id,
       content: row.content,
       createdAt: createdAt.toISOString(),
-      sender: senderUser ? toUser(senderUser) : undefined,
+      sender,
       messageType: (row.message_type as MessageType) ?? "text",
-      attachmentUrl: row.attachment_url ?? null,
+      attachmentUrl,
       attachmentMetadata,
     };
-    await publishChatEvent(targetChatId, { type: "message", message });
+    await publishChatEvent(targetChatId, { type: "message", message: wsMessage });
     await incrementUnreadForChat(targetChatId, u.id).catch(() => {});
     const members = await db
       .select({ userId: chatMembers.userId })
@@ -742,6 +758,20 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         notifyUser(m.userId, title, preview).catch(() => {});
       }
     }
+    const message = await rowToMessageDto(
+      {
+        message_id: newId,
+        chat_id: targetChatId,
+        sender_id: u.id,
+        content: row.content,
+        created_at: createdAt,
+        message_type: row.message_type,
+        attachment_url: attachmentUrl,
+        attachment_metadata: JSON.stringify(attachmentMetadata),
+      },
+      u.id,
+      sender
+    );
     return { message };
   })
   .put("/:id", async ({ user, params, body, set }) => {
