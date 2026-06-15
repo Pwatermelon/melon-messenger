@@ -1,43 +1,110 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { cropImageFile, type CropArea } from "../utils/imageCrop";
+
+type Variant = "avatar" | "cover";
 
 type Props = {
   file: File;
-  aspect: number;
+  variant: Variant;
   title: string;
-  outputWidth: number;
-  outputHeight: number;
-  onConfirm: (file: File) => void;
+  onConfirm: (cropped: File, original?: File) => void;
   onCancel: () => void;
 };
 
-const VIEW_W = 320;
+type Layout = {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+  displayW: number;
+  displayH: number;
+};
 
-function clampOffset(
-  offset: number,
-  viewport: number,
-  imageSize: number
-): number {
-  if (imageSize <= viewport) return (viewport - imageSize) / 2;
-  return Math.min(0, Math.max(viewport - imageSize, offset));
+type CropRect = { x: number; y: number; w: number; h: number };
+
+const AVATAR_VIEW = 300;
+const COVER_VIEW_W = 320;
+const COVER_ASPECT = 4.5;
+
+function viewSize(variant: Variant): { w: number; h: number; aspect: number } {
+  if (variant === "avatar") return { w: AVATAR_VIEW, h: AVATAR_VIEW, aspect: 1 };
+  return { w: COVER_VIEW_W, h: Math.round(COVER_VIEW_W / COVER_ASPECT), aspect: COVER_ASPECT };
 }
 
-export default function ImageCropModal({
-  file,
-  aspect,
-  title,
-  outputWidth,
-  outputHeight,
-  onConfirm,
-  onCancel,
-}: Props) {
-  const viewH = Math.round(VIEW_W / aspect);
+function computeLayout(nw: number, nh: number, viewW: number, viewH: number): Layout {
+  const scale = Math.min(viewW / nw, viewH / nh);
+  const displayW = nw * scale;
+  const displayH = nh * scale;
+  return {
+    scale,
+    offsetX: (viewW - displayW) / 2,
+    offsetY: (viewH - displayH) / 2,
+    displayW,
+    displayH,
+  };
+}
+
+function clampCrop(rect: CropRect, layout: Layout, aspect: number): CropRect {
+  let { x, y, w } = rect;
+  const minW = variantMinSize(aspect);
+  const maxW = Math.min(layout.displayW, layout.displayH * aspect);
+  w = Math.max(minW, Math.min(maxW, w));
+  const clampedH = w / aspect;
+  x = Math.max(layout.offsetX, Math.min(layout.offsetX + layout.displayW - w, x));
+  y = Math.max(layout.offsetY, Math.min(layout.offsetY + layout.displayH - clampedH, y));
+  return { x, y, w, h: clampedH };
+}
+
+function variantMinSize(aspect: number): number {
+  return aspect === 1 ? 64 : 80;
+}
+
+function initialCrop(layout: Layout, aspect: number): CropRect {
+  const maxW = Math.min(layout.displayW, layout.displayH * aspect) * 0.75;
+  const w = Math.max(variantMinSize(aspect), maxW);
+  const h = w / aspect;
+  return clampCrop(
+    {
+      x: layout.offsetX + (layout.displayW - w) / 2,
+      y: layout.offsetY + (layout.displayH - h) / 2,
+      w,
+      h,
+    },
+    layout,
+    aspect
+  );
+}
+
+function cropToNatural(rect: CropRect, layout: Layout): CropArea {
+  return {
+    x: (rect.x - layout.offsetX) / layout.scale,
+    y: (rect.y - layout.offsetY) / layout.scale,
+    width: rect.w / layout.scale,
+    height: rect.h / layout.scale,
+  };
+}
+
+export default function ImageCropModal({ file, variant, title, onConfirm, onCancel }: Props) {
+  const { w: viewW, h: viewH, aspect } = viewSize(variant);
+  const outputW = variant === "avatar" ? 512 : 1200;
+  const outputH = variant === "avatar" ? 512 : Math.round(1200 / COVER_ASPECT);
+
   const [previewUrl, setPreviewUrl] = useState("");
   const [natural, setNatural] = useState({ w: 0, h: 0 });
-  const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [layout, setLayout] = useState<Layout | null>(null);
+  const [crop, setCrop] = useState<CropRect | null>(null);
   const [busy, setBusy] = useState(false);
-  const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+
+  const dragRef = useRef<{
+    mode: "move" | "resize";
+    startX: number;
+    startY: number;
+    startCrop: CropRect;
+  } | null>(null);
+
+  const dragHandlersRef = useRef({
+    onMove: (_e: PointerEvent) => {},
+    onUp: (_e: PointerEvent) => {},
+  });
 
   useEffect(() => {
     const url = URL.createObjectURL(file);
@@ -45,99 +112,91 @@ export default function ImageCropModal({
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
-  const fitScale = useCallback(
-    (nw: number, nh: number) => Math.max(VIEW_W / nw, viewH / nh),
-    [viewH]
-  );
-
   useEffect(() => {
     if (!previewUrl) return;
     const img = new Image();
     img.onload = () => {
       const nw = img.naturalWidth;
       const nh = img.naturalHeight;
-      const s = fitScale(nw, nh);
-      const dw = nw * s;
-      const dh = nh * s;
+      const l = computeLayout(nw, nh, viewW, viewH);
       setNatural({ w: nw, h: nh });
-      setScale(s);
-      setOffset({
-        x: clampOffset((VIEW_W - dw) / 2, VIEW_W, dw),
-        y: clampOffset((viewH - dh) / 2, viewH, dh),
-      });
+      setLayout(l);
+      setCrop(initialCrop(l, aspect));
     };
     img.src = previewUrl;
-  }, [previewUrl, fitScale, viewH]);
+  }, [previewUrl, viewW, viewH, aspect]);
 
-  const displayW = natural.w * scale;
-  const displayH = natural.h * scale;
+  const endDrag = useCallback(() => {
+    dragRef.current = null;
+    document.removeEventListener("pointermove", dragHandlersRef.current.onMove);
+    document.removeEventListener("pointerup", dragHandlersRef.current.onUp);
+    document.removeEventListener("pointercancel", dragHandlersRef.current.onUp);
+  }, []);
 
-  function cropAreaFromView(): CropArea {
-    const x = (-offset.x) / scale;
-    const y = (-offset.y) / scale;
-    const width = VIEW_W / scale;
-    const height = viewH / scale;
-    return {
-      x: Math.max(0, Math.min(natural.w - width, x)),
-      y: Math.max(0, Math.min(natural.h - height, y)),
-      width: Math.min(width, natural.w),
-      height: Math.min(height, natural.h),
+  useEffect(() => {
+    dragHandlersRef.current.onMove = (e: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag || !layout) return;
+      e.preventDefault();
+      const dx = e.clientX - drag.startX;
+      const dy = e.clientY - drag.startY;
+      if (drag.mode === "move") {
+        setCrop(clampCrop(
+          {
+            ...drag.startCrop,
+            x: drag.startCrop.x + dx,
+            y: drag.startCrop.y + dy,
+          },
+          layout,
+          aspect
+        ));
+      } else {
+        const newW = drag.startCrop.w + dx;
+        setCrop(clampCrop(
+          {
+            x: drag.startCrop.x,
+            y: drag.startCrop.y,
+            w: newW,
+            h: newW / aspect,
+          },
+          layout,
+          aspect
+        ));
+      }
     };
-  }
+    dragHandlersRef.current.onUp = () => endDrag();
+  }, [layout, aspect, endDrag]);
 
-  function onPointerDown(e: React.PointerEvent) {
+  useEffect(() => () => endDrag(), [endDrag]);
+
+  function startDrag(e: React.PointerEvent, mode: "move" | "resize") {
+    if (!crop || !layout) return;
     e.preventDefault();
     e.stopPropagation();
-    dragRef.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  }
-
-  function onPointerMove(e: React.PointerEvent) {
-    if (!dragRef.current) return;
-    e.preventDefault();
-    const dx = e.clientX - dragRef.current.x;
-    const dy = e.clientY - dragRef.current.y;
-    setOffset({
-      x: clampOffset(dragRef.current.ox + dx, VIEW_W, displayW),
-      y: clampOffset(dragRef.current.oy + dy, viewH, displayH),
-    });
-  }
-
-  function onPointerUp(e: React.PointerEvent) {
-    dragRef.current = null;
-    try {
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
-  }
-
-  function onZoomChange(next: number) {
-    const s = Math.max(fitScale(natural.w, natural.h), Math.min(fitScale(natural.w, natural.h) * 3, next));
-    const cx = VIEW_W / 2;
-    const cy = viewH / 2;
-    const ratio = s / scale;
-    const nx = cx - (cx - offset.x) * ratio;
-    const ny = cy - (cy - offset.y) * ratio;
-    setScale(s);
-    setOffset({
-      x: clampOffset(nx, VIEW_W, natural.w * s),
-      y: clampOffset(ny, viewH, natural.h * s),
-    });
+    dragRef.current = {
+      mode,
+      startX: e.clientX,
+      startY: e.clientY,
+      startCrop: { ...crop },
+    };
+    document.addEventListener("pointermove", dragHandlersRef.current.onMove, { passive: false });
+    document.addEventListener("pointerup", dragHandlersRef.current.onUp, { passive: false });
+    document.addEventListener("pointercancel", dragHandlersRef.current.onUp, { passive: false });
   }
 
   async function handleConfirm() {
-    if (!natural.w) return;
+    if (!layout || !crop || !natural.w) return;
     setBusy(true);
     try {
-      const cropped = await cropImageFile(file, cropAreaFromView(), outputWidth, outputHeight);
-      onConfirm(cropped);
+      const area = cropToNatural(crop, layout);
+      const cropped = await cropImageFile(file, area, outputW, outputH);
+      onConfirm(cropped, variant === "avatar" ? file : undefined);
     } finally {
       setBusy(false);
     }
   }
 
-  const minScale = natural.w ? fitScale(natural.w, natural.h) : 1;
+  const circle = variant === "avatar";
 
   return (
     <div className="search-overlay image-crop-overlay" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
@@ -146,43 +205,40 @@ export default function ImageCropModal({
           ×
         </button>
         <h3>{title}</h3>
-        <p className="image-crop-hint">Перетащите и масштабируйте фото</p>
-        <div
-          className="image-crop-viewport"
-          style={{ width: VIEW_W, height: viewH }}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-        >
-          {previewUrl && (
+        <p className="image-crop-hint">
+          {circle ? "Переместите круг и потяните за угол" : "Переместите рамку и потяните за угол"}
+        </p>
+        <div className="image-crop-viewport" style={{ width: viewW, height: viewH }}>
+          {previewUrl && layout && (
             <img
               src={previewUrl}
               alt=""
               className="image-crop-image"
               style={{
-                width: displayW,
-                height: displayH,
-                transform: `translate(${offset.x}px, ${offset.y}px)`,
+                width: layout.displayW,
+                height: layout.displayH,
+                left: layout.offsetX,
+                top: layout.offsetY,
               }}
               draggable={false}
             />
           )}
-          <div className="image-crop-frame" aria-hidden />
+          {crop && (
+            <div
+              className={`image-crop-selection${circle ? " image-crop-selection-circle" : ""}`}
+              style={{ left: crop.x, top: crop.y, width: crop.w, height: crop.h }}
+              onPointerDown={(e) => startDrag(e, "move")}
+            >
+              <div
+                className="image-crop-handle"
+                onPointerDown={(e) => startDrag(e, "resize")}
+                aria-hidden
+              />
+            </div>
+          )}
         </div>
-        <label className="image-crop-zoom">
-          Масштаб
-          <input
-            type="range"
-            min={minScale}
-            max={minScale * 3}
-            step={0.01}
-            value={scale}
-            onChange={(e) => onZoomChange(Number(e.target.value))}
-          />
-        </label>
         <div className="image-crop-actions">
-          <button type="button" className="btn" onClick={() => void handleConfirm()} disabled={busy || !natural.w}>
+          <button type="button" className="btn" onClick={() => void handleConfirm()} disabled={busy || !crop}>
             {busy ? "…" : "Применить"}
           </button>
         </div>

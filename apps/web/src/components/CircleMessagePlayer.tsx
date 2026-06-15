@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IconPlay, IconPause } from "./Icons";
-import { canPlayMediaUrl, mimeFromMediaUrl } from "../utils/mediaMime";
+import { canPlayMediaUrl } from "../utils/mediaMime";
 import { claimMediaPlayback, releaseMediaPlayback } from "../utils/mediaPlayback";
 
 const OUTER = 220;
@@ -8,7 +8,6 @@ const RING = 5;
 const RING_HIT = 28;
 const R = (OUTER - RING) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * R;
-const VIDEO_R = 94;
 
 type Props = {
   src: string;
@@ -41,8 +40,6 @@ export function CircleMessagePlayer({ src, duration: metaDuration }: Props) {
   const [duration, setDuration] = useState(metaDuration ?? 0);
   const [error, setError] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
-
-  const mime = mimeFromMediaUrl(src, "video");
 
   const stopPlayback = useCallback(() => {
     const video = videoRef.current;
@@ -194,15 +191,8 @@ export function CircleMessagePlayer({ src, duration: metaDuration }: Props) {
     }
   }
 
-  function handleRingPointerDown(e: React.PointerEvent<SVGSVGElement>) {
+  function handleRingPointerDown(e: React.PointerEvent<SVGCircleElement>) {
     if (unsupported) return;
-    const rect = ringRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const dist = Math.hypot(e.clientX - cx, e.clientY - cy);
-    if (dist < VIDEO_R - 8) return;
-
     e.preventDefault();
     e.stopPropagation();
     const video = videoRef.current;
@@ -232,12 +222,11 @@ export function CircleMessagePlayer({ src, duration: metaDuration }: Props) {
         <video
           ref={videoRef}
           className="circle-player-video"
+          src={src}
           playsInline
           preload="metadata"
           muted={false}
-        >
-          <source src={src} type={mime} />
-        </video>
+        />
         <span className={`circle-player-overlay${playing ? " is-playing" : ""}`}>
           {unsupported ? (
             <span className="circle-player-error" title="Safari не воспроизводит WebM">!</span>
@@ -257,7 +246,6 @@ export function CircleMessagePlayer({ src, duration: metaDuration }: Props) {
         height={OUTER}
         viewBox={`0 0 ${OUTER} ${OUTER}`}
         aria-hidden
-        onPointerDown={handleRingPointerDown}
       >
         <circle
           cx={cx}
@@ -266,6 +254,7 @@ export function CircleMessagePlayer({ src, duration: metaDuration }: Props) {
           className="circle-player-ring-hit"
           fill="none"
           strokeWidth={RING_HIT}
+          onPointerDown={handleRingPointerDown}
         />
         <circle cx={cx} cy={cx} r={R} className="circle-player-ring-bg" fill="none" strokeWidth={RING} />
         <circle

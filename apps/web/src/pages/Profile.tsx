@@ -132,13 +132,27 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
     }
   }
 
-  async function uploadAvatar(file: File) {
+  async function uploadAvatar(croppedFile: File, originalFile?: File) {
     setSaving(true);
     setMessage("");
     try {
-      const compressed = await compressImage(file);
-      const { path } = await uploadFile(compressed, { purpose: "profile" });
-      const updated = await updateProfile({ avatarUrl: path });
+      const cropped = await compressImage(croppedFile);
+      const { path: cropPath } = await uploadFile(cropped, { purpose: "profile" });
+
+      let history = [...(profile?.avatarHistory ?? [])];
+      if (originalFile) {
+        const original = await compressImage(originalFile);
+        const { path: fullPath } = await uploadFile(original, { purpose: "profile" });
+        if (profile?.avatarUrl && profile.avatarUrl !== cropPath) {
+          history = [profile.avatarUrl, ...history.filter((h) => h !== profile.avatarUrl)];
+        }
+        history = [fullPath, ...history.filter((h) => h !== fullPath && h !== cropPath)];
+      }
+
+      const updated = await updateProfile({
+        avatarUrl: cropPath,
+        ...(originalFile ? { avatarHistory: history.slice(0, 24) } : {}),
+      });
       updateUser(updated);
       setProfile(updated);
       setMessage("Аватар обновлён");
@@ -477,14 +491,12 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
   const cropModal = cropFile ? (
     <ImageCropModal
       file={cropFile.file}
-      aspect={cropFile.kind === "avatar" ? 1 : 4.5}
+      variant={cropFile.kind}
       title={cropFile.kind === "avatar" ? "Аватар" : "Обложка"}
-      outputWidth={cropFile.kind === "avatar" ? 512 : 1200}
-      outputHeight={cropFile.kind === "avatar" ? 512 : 267}
-      onConfirm={(f) => {
+      onConfirm={(cropped, original) => {
         const kind = cropFile.kind;
         setCropFile(null);
-        void (kind === "avatar" ? uploadAvatar(f) : uploadCover(f));
+        void (kind === "avatar" ? uploadAvatar(cropped, original) : uploadCover(cropped));
       }}
       onCancel={() => setCropFile(null)}
     />

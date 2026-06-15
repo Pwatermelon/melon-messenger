@@ -56,14 +56,28 @@ export default function SettingsModal({ onClose }: Props) {
     setCropFile(file);
   }
 
-  async function uploadAvatar(file: File) {
+  async function uploadAvatar(croppedFile: File, originalFile?: File) {
     setSaving(true);
     setMessage("");
     try {
-      const compressed = await compressImage(file);
-      const { url } = await uploadFile(compressed, { purpose: "profile" });
-      const path = url.startsWith("http") ? new URL(url).pathname : url;
-      const updated = await updateProfile({ avatarUrl: path });
+      const cropped = await compressImage(croppedFile);
+      const { url } = await uploadFile(cropped, { purpose: "profile" });
+      const cropPath = url.startsWith("http") ? new URL(url).pathname : url;
+
+      const payload: { avatarUrl: string; avatarHistory?: string[] } = { avatarUrl: cropPath };
+      if (originalFile && user) {
+        const original = await compressImage(originalFile);
+        const fullRes = await uploadFile(original, { purpose: "profile" });
+        const fullPath = fullRes.url.startsWith("http") ? new URL(fullRes.url).pathname : fullRes.url;
+        let history = [...(user.avatarHistory ?? [])];
+        if (user.avatarUrl && user.avatarUrl !== cropPath) {
+          history = [user.avatarUrl, ...history.filter((h) => h !== user.avatarUrl)];
+        }
+        history = [fullPath, ...history.filter((h) => h !== fullPath && h !== cropPath)];
+        payload.avatarHistory = history.slice(0, 24);
+      }
+
+      const updated = await updateProfile(payload);
       setAvatarUrl(updated.avatarUrl ?? null);
       updateUser(updated as Parameters<typeof updateUser>[0]);
       setMessage("Аватар обновлён");
@@ -137,13 +151,11 @@ export default function SettingsModal({ onClose }: Props) {
       {cropFile && (
         <ImageCropModal
           file={cropFile}
-          aspect={1}
+          variant="avatar"
           title="Аватар"
-          outputWidth={512}
-          outputHeight={512}
-          onConfirm={(f) => {
+          onConfirm={(cropped, original) => {
             setCropFile(null);
-            void uploadAvatar(f);
+            void uploadAvatar(cropped, original);
           }}
           onCancel={() => setCropFile(null)}
         />

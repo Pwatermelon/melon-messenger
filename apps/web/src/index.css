@@ -3002,14 +3002,14 @@ a {
   inset: 0;
   z-index: 2;
   touch-action: none;
-  cursor: pointer;
-  pointer-events: all;
+  pointer-events: none;
 }
 
 .circle-player-ring-hit {
   stroke: transparent;
   pointer-events: stroke;
   cursor: pointer;
+  touch-action: none;
 }
 
 .circle-player-ring-bg,
@@ -4005,40 +4005,39 @@ a {
   border-radius: 8px;
   background: #000;
   touch-action: none;
-  cursor: grab;
-}
-
-.image-crop-viewport:active {
-  cursor: grabbing;
+  user-select: none;
 }
 
 .image-crop-image {
   position: absolute;
-  top: 0;
-  left: 0;
   user-select: none;
   pointer-events: none;
 }
 
-.image-crop-frame {
+.image-crop-selection {
   position: absolute;
-  inset: 0;
+  box-sizing: border-box;
   border: 2px solid #fff;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
-  pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  cursor: move;
+  touch-action: none;
 }
 
-.image-crop-zoom {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  margin: 0 1rem 0.75rem;
-  font-size: 0.85rem;
-  color: var(--muted);
+.image-crop-selection-circle {
+  border-radius: 50%;
 }
 
-.image-crop-zoom input[type="range"] {
-  width: 100%;
+.image-crop-handle {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--accent);
+  cursor: nwse-resize;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
 
 .image-crop-actions {
