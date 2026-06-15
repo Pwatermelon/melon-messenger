@@ -13,3 +13,17 @@ export function pickVoiceMime(): string {
   }
   return "";
 }
+
+export function pickCircleMime(): string {
+  const types = [
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm",
+    "video/mp4",
+    "video/mp4;codecs=avc1",
+  ];
+  for (const t of types) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return "";
+}

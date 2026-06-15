@@ -3,6 +3,8 @@
 #   cp deploy/.env.example .env && nano .env
 #   ./scripts/certbot-init.sh   # first time only
 #   docker compose -f deploy/docker-compose.yml --env-file .env up -d
+#
+# Наружу только web (80/443). Postgres, Redis, Scylla, MinIO — только внутри docker-сети.
 
 name: watermelon-prod
 
@@ -33,6 +35,38 @@ services:
     volumes:
       - scylladata:/var/lib/scylla
 
+  minio:
+    image: minio/minio:latest
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  minio-init:
+    image: minio/mc:latest
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      S3_BUCKET: ${S3_BUCKET:-watermelon-media}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+      mc mb --ignore-existing local/$$S3_BUCKET
+      "
+
   api:
     image: plwatermelon/watermelon-messenger-api:${WM_VERSION:?set WM_VERSION}
     restart: always
@@ -60,6 +94,12 @@ services:
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@watermelon-messenger.ru}
       E2E_TEST_SECRET: ""
+      MEDIA_STORAGE: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-watermelon-media}
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,6 +107,8 @@ services:
         condition: service_started
       scylla:
         condition: service_started
+      minio-init:
+        condition: service_completed_successfully
     # healthcheck убран: в старых образах нет curl, /health отдаёт 503 — web блокировался
 
   web:
@@ -94,5 +136,6 @@ services:
 volumes:
   pgdata:
   scylladata:
+  miniodata:
   certbot-www:
   certbot-conf:

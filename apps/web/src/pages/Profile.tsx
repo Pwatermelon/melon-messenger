@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useOutletContext } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getUserById, updateProfile, uploadFile } from "../api";
-import { getUploadsBaseUrl } from "../config";
+import { mediaUrl as resolveMediaUrl } from "../utils/mediaUrl";
 import { compressImage } from "../utils/imageCompress";
 import type { User } from "@melon/shared";
 import type { ChatLayoutOutletContext } from "./ChatLayout";
@@ -17,9 +17,9 @@ type ProfileProps = {
   onAddContact?: (userId: string) => Promise<void>;
 };
 
-function mediaUrl(path: string | null | undefined): string | null {
+function mediaFullUrl(path: string | null | undefined): string | null {
   if (!path) return null;
-  return path.startsWith("http") ? path : `${getUploadsBaseUrl()}${path}`;
+  return resolveMediaUrl(path);
 }
 
 function buildAvatarPaths(profile: User): string[] {
@@ -88,7 +88,7 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
     setMessage("");
     try {
       const compressed = await compressImage(file);
-      const { path } = await uploadFile(compressed);
+      const { path } = await uploadFile(compressed, { purpose: "profile" });
       const updated = await updateProfile({ avatarUrl: path });
       updateUser(updated);
       setProfile(updated);
@@ -105,7 +105,7 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
     setMessage("");
     try {
       const compressed = await compressImage(file);
-      const { path } = await uploadFile(compressed);
+      const { path } = await uploadFile(compressed, { purpose: "profile" });
       const updated = await updateProfile({ coverUrl: path });
       updateUser(updated);
       setProfile(updated);
@@ -122,7 +122,7 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
     setMessage("");
     try {
       const compressed = await compressImage(file);
-      const { path } = await uploadFile(compressed);
+      const { path } = await uploadFile(compressed, { purpose: "profile" });
       const current = profile?.profilePhotos ?? [];
       const updated = await updateProfile({ profilePhotos: [...current, path].slice(0, 12) });
       updateUser(updated);
@@ -187,19 +187,25 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
     );
   }
 
-  const coverDisplay = mediaUrl(profile.coverUrl);
-  const avatarDisplay = mediaUrl(profile.avatarUrl);
+  const coverDisplay = mediaFullUrl(profile.coverUrl);
+  const avatarDisplay = mediaFullUrl(profile.avatarUrl);
   const photos = profile.profilePhotos ?? [];
   const avatarPaths = buildAvatarPaths(profile);
-  const avatarUrls = avatarPaths.map((p) => mediaUrl(p)).filter(Boolean) as string[];
-  const photoUrls = photos.map((p) => mediaUrl(p)).filter(Boolean) as string[];
+  const avatarUrls = avatarPaths.map((p) => mediaFullUrl(p)).filter(Boolean) as string[];
+  const photoUrls = photos.map((p) => mediaFullUrl(p)).filter(Boolean) as string[];
+
+  const hasToolbarActions =
+    (!isOwn && !!addContactFn && !!profile) || (isOwn && !!openSettings);
 
   const body = (
     <div className={`profile-page${modal ? " profile-page-modal" : ""}`}>
-      <div className="profile-toolbar">
-        <button type="button" className="profile-back" onClick={() => (onClose ? onClose() : navigate(-1))}>
-          {modal ? "×" : "← Назад"}
-        </button>
+      {(!modal || hasToolbarActions) && (
+      <div className={`profile-toolbar${modal ? " profile-toolbar-modal" : ""}`}>
+        {!modal && (
+          <button type="button" className="profile-back" onClick={() => navigate(-1)}>
+            ← Назад
+          </button>
+        )}
         <div className="profile-toolbar-actions">
           {!isOwn && addContactFn && profile && (
             <button
@@ -218,6 +224,7 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
           )}
         </div>
       </div>
+      )}
 
       <div className="profile-cover-wrap">
         {coverDisplay ? (
@@ -350,7 +357,7 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
           <>
             <div className="profile-photos-grid">
               {photos.map((p, i) => {
-                const url = mediaUrl(p);
+                const url = mediaFullUrl(p);
                 if (!url) return null;
                 return (
                   <div key={p} className="profile-photo-item">
@@ -412,6 +419,9 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
         onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       >
         <div className="profile-modal" onClick={(e) => e.stopPropagation()}>
+          <button type="button" className="profile-modal-close" onClick={onClose} aria-label="Закрыть">
+            ×
+          </button>
           {body}
         </div>
       </div>

@@ -3,7 +3,8 @@ import { jwt } from "@elysiajs/jwt";
 import * as jose from "jose";
 import { db, users } from "../db";
 import { eq } from "drizzle-orm";
-import { toPrivateProfile, parseAvatarHistory } from "../lib/userDto";
+import { toPrivateProfile, parseAvatarHistory, parseProfilePhotos } from "../lib/userDto";
+import { ensureProfileMediaRegistered } from "../services/mediaAccess";
 import {
   buildYandexAuthorizeUrl,
   createOAuthState,
@@ -159,6 +160,12 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     }
     if (Object.keys(updates).length === 0) return toPrivateProfile(u);
     const [updated] = await db.update(users).set(updates).where(eq(users.id, u.id)).returning();
+    await ensureProfileMediaRegistered(updated!.id, [
+      updated!.avatarUrl,
+      updated!.coverUrl,
+      ...parseProfilePhotos(updated!.profilePhotos),
+      ...parseAvatarHistory(updated!.avatarHistory),
+    ]);
     return toPrivateProfile(updated!);
   })
   .post("/logout", () => ({ ok: true }));

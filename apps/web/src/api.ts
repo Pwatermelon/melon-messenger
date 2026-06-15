@@ -358,9 +358,29 @@ export async function revokeUser(userId: string): Promise<void> {
   }
 }
 
-export async function uploadFile(file: File): Promise<{ url: string; path: string; fileName: string; mimeType: string; size: number }> {
+export async function signMediaPaths(paths: string[]): Promise<Record<string, string>> {
+  const unique = [...new Set(paths.filter(Boolean))];
+  if (!unique.length) return {};
+  const res = await fetch(`${getApiUrl()}/media/sign`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ paths: unique }),
+  });
+  if (!res.ok) return {};
+  const data = (await res.json()) as { urls?: Record<string, string> };
+  return data.urls ?? {};
+}
+
+export async function uploadFile(
+  file: File,
+  opts?: { purpose?: "chat" | "profile" }
+): Promise<{ url: string; path: string; fileName: string; mimeType: string; size: number }> {
   const form = new FormData();
   form.append("file", file);
+  if (opts?.purpose) form.append("purpose", opts.purpose);
   const res = await fetch(`${getApiUrl()}/upload`, {
     method: "POST",
     headers: { Authorization: `Bearer ${getToken()}` },

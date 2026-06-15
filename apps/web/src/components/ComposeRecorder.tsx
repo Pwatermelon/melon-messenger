@@ -8,6 +8,8 @@ type Gesture = "none" | "cancel" | "lock";
 
 const HOLD_MS = 220;
 const MOVE_PX = 12;
+const MIN_VOICE_BYTES = 200;
+const MIN_CIRCLE_BYTES = 200;
 
 interface ComposeRecorderProps {
   disabled?: boolean;
@@ -28,12 +30,15 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
   const [locked, setLocked] = useState(false);
   const [gesture, setGesture] = useState<Gesture>("none");
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [recordError, setRecordError] = useState<string | null>(null);
 
   const btnRef = useRef<HTMLButtonElement>(null);
   const pointerIdRef = useRef<number | null>(null);
   const originRef = useRef({ x: 0, y: 0 });
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdActivatedRef = useRef(false);
   const recordingStartedRef = useRef(false);
+  const startPromiseRef = useRef<Promise<boolean> | null>(null);
   const movedRef = useRef(false);
   const gestureRef = useRef<Gesture>("none");
   const previewRef = useRef<HTMLVideoElement>(null);
@@ -58,6 +63,10 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
   }, [circle.previewStream]);
 
   useEffect(() => {
+    if (circle.error) setRecordError(circle.error);
+  }, [circle.error]);
+
+  useEffect(() => {
     if (activeMode === "circle" && circle.recording && circle.duration >= maxDuration) {
       void finishSend();
     }
@@ -73,7 +82,11 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
   function updateAnchor() {
     const rect = btnRef.current?.getBoundingClientRect();
     if (!rect) return;
-    setAnchor({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+    const rawX = rect.left + rect.width / 2;
+    const pad = 100;
+    const x = Math.min(window.innerWidth - pad, Math.max(pad, rawX));
+    const y = rect.top + rect.height / 2;
+    setAnchor({ x, y });
   }
 
   async function finishSend() {
@@ -84,8 +97,11 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
     setLocked(false);
     setGesture("none");
     setAnchor(null);
-    if (isVoice && blob.size >= 200) await onVoiceSend(blob, d);
-    if (!isVoice && blob.size >= 500) await onCircleSend(blob, d);
+    holdActivatedRef.current = false;
+    recordingStartedRef.current = false;
+    const min = isVoice ? MIN_VOICE_BYTES : MIN_CIRCLE_BYTES;
+    if (isVoice && blob.size >= min) await onVoiceSend(blob, d);
+    if (!isVoice && blob.size >= min) await onCircleSend(blob, d);
     sendingRef.current = false;
   }
 
@@ -94,17 +110,37 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
     holdTimerRef.current = null;
     voice.cancel();
     circle.cancel();
+    holdActivatedRef.current = false;
     recordingStartedRef.current = false;
+    startPromiseRef.current = null;
     setLocked(false);
     setGesture("none");
     setAnchor(null);
   }
 
-  async function startRecording() {
-    recordingStartedRef.current = true;
+  async function startRecording(): Promise<boolean> {
     updateAnchor();
-    if (activeMode === "voice") await voice.start();
-    else await circle.start();
+    setRecordError(null);
+    const p = (async () => {
+      if (activeMode === "voice") return voice.start();
+      return circle.start();
+    })();
+    startPromiseRef.current = p;
+    try {
+      const ok = await p;
+      if (ok) recordingStartedRef.current = true;
+      else {
+        setAnchor(null);
+        setRecordError("Не удалось начать запись");
+      }
+      return ok;
+    } catch {
+      setAnchor(null);
+      setRecordError("Не удалось начать запись");
+      return false;
+    } finally {
+      startPromiseRef.current = null;
+    }
   }
 
   function handlePointerDown(e: React.PointerEvent<HTMLButtonElement>) {
@@ -114,9 +150,12 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
     pointerIdRef.current = e.pointerId;
     originRef.current = { x: e.clientX, y: e.clientY };
     movedRef.current = false;
+    holdActivatedRef.current = false;
     recordingStartedRef.current = false;
     setGesture("none");
+    setRecordError(null);
     holdTimerRef.current = setTimeout(() => {
+      holdActivatedRef.current = true;
       void startRecording();
     }, HOLD_MS);
   }
@@ -142,7 +181,11 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
     } catch {}
     pointerIdRef.current = null;
 
-    if (!recordingStartedRef.current && !movedRef.current) {
+    if (startPromiseRef.current) {
+      await startPromiseRef.current;
+    }
+
+    if (!holdActivatedRef.current && !movedRef.current) {
       persistMode(activeMode === "voice" ? "circle" : "voice");
       return;
     }
@@ -155,18 +198,23 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
     if (g === "lock") {
       setLocked(true);
       setGesture("none");
+      holdActivatedRef.current = false;
       return;
     }
-    if (recording && !locked) {
+    if (recordingStartedRef.current && recording && !locked) {
       await finishSend();
+    } else if (holdActivatedRef.current) {
+      cancelRecording();
     }
+    holdActivatedRef.current = false;
   }
 
   function handlePointerCancel() {
     if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
     holdTimerRef.current = null;
-    if (!locked && recordingStartedRef.current) cancelRecording();
+    if (!locked && (holdActivatedRef.current || recordingStartedRef.current)) cancelRecording();
     pointerIdRef.current = null;
+    holdActivatedRef.current = false;
     if (!locked) setGesture("none");
   }
 
@@ -175,7 +223,7 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
     : undefined;
 
   return (
-    <>
+    <div className="compose-record-wrap">
       {active && (
         <div
           className={`record-overlay record-overlay-${activeMode}`}
@@ -184,7 +232,7 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
         >
           {activeMode === "circle" && (
             <div className={`record-circle-preview ${gesture === "cancel" ? "record-circle-cancel" : ""}`}>
-              <video ref={previewRef} className="record-circle-video" muted playsInline />
+              <video ref={previewRef} className="record-circle-video" muted playsInline autoPlay />
               <div className="record-circle-ring" />
               <span className="record-circle-timer">{duration}s / {maxDuration}s</span>
             </div>
@@ -192,13 +240,16 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
           <div
             className={`record-hint-panel ${gesture === "cancel" ? "record-hint-cancel" : ""} ${gesture === "lock" ? "record-hint-lock" : ""}`}
           >
-            <span className={`record-hint record-hint-left ${gesture === "cancel" ? "active" : ""}`}>Отмена</span>
+            <span className={`record-hint record-hint-left ${gesture === "cancel" ? "active" : ""}`}>← Отмена</span>
             <span className="record-hint-timer">{duration}s</span>
             <span className={`record-hint record-hint-right ${gesture === "lock" ? "active" : ""}`}>
-              {locked ? "Заблокировано" : "Вверх — без удержания"}
+              {locked ? "Заблокировано" : "↑ Без удержания"}
             </span>
           </div>
         </div>
+      )}
+      {recordError && !active && (
+        <span className="compose-record-error" role="alert">{recordError}</span>
       )}
       {locked ? (
         <button
@@ -226,6 +277,6 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
           {activeMode === "voice" ? <IconMic size={22} /> : <IconCircle size={22} />}
         </button>
       )}
-    </>
+    </div>
   );
 }

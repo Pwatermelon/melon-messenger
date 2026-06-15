@@ -1,6 +1,5 @@
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
-import { join, extname } from "path";
 import { sql } from "drizzle-orm";
 import { paymentRoutes } from "./routes/payments";
 import { pushRoutes } from "./routes/push";
@@ -10,7 +9,8 @@ import { authRoutes } from "./routes/auth";
 import { adminRoutes } from "./routes/admin";
 import { chatRoutes } from "./routes/chats";
 import { contactRoutes } from "./routes/contacts";
-import { uploadRoutes, UPLOAD_DIR } from "./routes/upload";
+import { uploadRoutes } from "./routes/upload";
+import { mediaRoutes } from "./routes/media";
 import { wsHandlers, setWSServer, setupRedisSubscriber } from "./ws";
 import { initScylla } from "./services/scylla";
 import { db } from "./db";
@@ -18,23 +18,6 @@ import { validateProductionEnv } from "./lib/envCheck";
 import { e2eRoutes, isE2eEnabled } from "./routes/e2e";
 
 const PORT = Number(process.env.PORT) || 3000;
-
-const UPLOAD_MIME: Record<string, string> = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-  ".mp4": "video/mp4",
-  ".webm": "video/webm",
-  ".mov": "video/quicktime",
-  ".m4a": "audio/mp4",
-  ".aac": "audio/aac",
-  ".ogg": "audio/ogg",
-  ".mp3": "audio/mpeg",
-  ".pdf": "application/pdf",
-  ".zip": "application/zip",
-};
 
 async function main() {
   validateProductionEnv();
@@ -88,6 +71,22 @@ async function main() {
         PRIMARY KEY (user_id, contact_user_id)
       )
     `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS media_files (
+        filename varchar(255) PRIMARY KEY,
+        owner_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        visibility varchar(16) NOT NULL DEFAULT 'chat',
+        created_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS media_chat_grants (
+        filename varchar(255) NOT NULL REFERENCES media_files(filename) ON DELETE CASCADE,
+        chat_id uuid NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (filename, chat_id)
+      )
+    `);
   } catch (e) {
     console.warn("Schema migration (optional):", e);
   }
@@ -114,32 +113,6 @@ async function main() {
     .use(cors({ origin: true, credentials: true }))
     .use(healthRoutes)
     .use(rateLimitPlugin({ prefix: "global", windowSec: 60, max: 300 }))
-    .get("/uploads/:filename", async ({ params, set }) => {
-      const filename = params.filename.replace(/\.\./g, "").replace(/\//g, "");
-      if (!filename) {
-        set.status = 400;
-        return "Bad request";
-      }
-      const path = join(UPLOAD_DIR, filename);
-      try {
-        const file = Bun.file(path);
-        if (!(await file.exists())) {
-          set.status = 404;
-          return "Not found";
-        }
-        const ext = extname(filename).toLowerCase();
-        const contentType = UPLOAD_MIME[ext] ?? file.type ?? "application/octet-stream";
-        return new Response(file, {
-          headers: {
-            "Cache-Control": "public, max-age=86400",
-            "Content-Type": contentType,
-          },
-        });
-      } catch {
-        set.status = 404;
-        return "Not found";
-      }
-    })
     .use(rateLimitPlugin({ prefix: "auth", windowSec: 60, max: 30 }))
     .use(authRoutes)
     .use(adminRoutes)
@@ -149,6 +122,7 @@ async function main() {
     .use(chatRoutes)
     .use(contactRoutes)
     .use(uploadRoutes)
+    .use(mediaRoutes)
     .ws("/ws", wsHandlers);
 
   app.listen({ port: PORT, hostname: "0.0.0.0" });

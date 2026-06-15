@@ -9,12 +9,13 @@ import { MessageContextMenu } from "../components/MessageContextMenu";
 import { ForwardMessageModal } from "../components/ForwardMessageModal";
 import BirthdayInfoBlock from "../components/BirthdayInfoBlock";
 import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo } from "../components/Icons";
-import { getChats, getMessages, uploadFile, addGroupMembers, removeGroupMember, getUserByYandexLogin, deleteChat, updateGroup, deleteMessage, forwardMessage } from "../api";
+import { getChats, getMessages, uploadFile, addGroupMembers, removeGroupMember, getUserByYandexLogin, deleteChat, updateGroup, deleteMessage, forwardMessage, signMediaPaths } from "../api";
 import { extFromBlobType } from "../utils/mediaMime";
 import { compressImage } from "../utils/imageCompress";
 import type { Chat, Message } from "@melon/shared";
 import type { MessageItem } from "../api";
-import { getUploadsBaseUrl, getWsUrl } from "../config";
+import { getWsUrl } from "../config";
+import { mediaUrl } from "../utils/mediaUrl";
 import type { ChatLayoutOutletContext } from "./ChatLayout";
 
 export default function ChatRoom() {
@@ -84,9 +85,21 @@ export default function ChatRoom() {
   useEffect(() => {
     return subscribe((msg) => {
       if (msg.type === "message" && msg.message.chatId === chatId) {
+        const incoming = msg.message;
+        const attach = incoming.attachmentUrl;
+        if (attach && !attach.includes("access=")) {
+          void signMediaPaths([attach]).then((urls) => {
+            const signed = urls[attach];
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === incoming.id)) return prev;
+              return [...prev, { ...incoming, attachmentUrl: signed ?? attach }];
+            });
+          });
+          return;
+        }
         setMessages((prev) => {
-          if (prev.some((m) => m.id === msg.message.id)) return prev;
-          return [...prev, msg.message];
+          if (prev.some((m) => m.id === incoming.id)) return prev;
+          return [...prev, incoming];
         });
       }
       if (msg.type === "message_deleted" && msg.chatId === chatId) {
@@ -237,7 +250,7 @@ export default function ChatRoom() {
   }
 
   async function handleCircleSend(blob: Blob, d: number) {
-    const minSize = 500;
+    const minSize = 200;
     if (blob.size < minSize) return;
     setSending(true);
     try {
@@ -279,10 +292,8 @@ export default function ChatRoom() {
 
   const isGroupAdmin = Boolean(chat?.type === "group" && chat.members.find((m) => m.id === user?.id)?.role === "admin");
 
-  function canDeleteMessage(m: Message): boolean {
-    if (!user) return false;
-    if (m.senderId === user.id) return true;
-    return isGroupAdmin;
+  function canDeleteMessage(_m: Message): boolean {
+    return Boolean(user && chatId);
   }
 
   function toggleMessageSelect(messageId: string) {
@@ -461,7 +472,7 @@ export default function ChatRoom() {
             {(() => {
               const url = headerAvatarUrl();
               return url ? (
-                <img src={url.startsWith("http") ? url : `${getUploadsBaseUrl()}${url}`} alt="" />
+                <img src={mediaUrl(url)} alt="" />
               ) : (
                 headerAvatarLetter()
               );
@@ -542,7 +553,7 @@ export default function ChatRoom() {
                 <p className="message-content">{displayContent(m)}</p>
               )}
               {(m.messageType ?? "text") === "image" && m.attachmentUrl && (() => {
-                const imgUrl = m.attachmentUrl.startsWith("http") ? m.attachmentUrl : `${getUploadsBaseUrl()}${m.attachmentUrl}`;
+                const imgUrl = mediaUrl(m.attachmentUrl);
                 return (
                   <div className="message-image-wrap">
                     <button type="button" className="message-image-btn" onClick={() => setLightboxImage(imgUrl)}>
@@ -553,12 +564,12 @@ export default function ChatRoom() {
                 );
               })()}
               {(m.messageType ?? "text") === "file" && m.attachmentUrl && (
-                <a href={m.attachmentUrl.startsWith("http") ? m.attachmentUrl : `${getUploadsBaseUrl()}${m.attachmentUrl}`} target="_blank" rel="noopener noreferrer" className="message-file">
+                <a href={mediaUrl(m.attachmentUrl)} target="_blank" rel="noopener noreferrer" className="message-file">
                   📎 {m.attachmentMetadata?.fileName ?? "File"}
                 </a>
               )}
               {(m.messageType ?? "text") === "video" && m.attachmentUrl && (
-                <video src={m.attachmentUrl.startsWith("http") ? m.attachmentUrl : `${getUploadsBaseUrl()}${m.attachmentUrl}`} controls className="message-video" />
+                <video src={mediaUrl(m.attachmentUrl)} controls className="message-video" />
               )}
               {(m.messageType ?? "text") === "location" && m.attachmentMetadata?.lat != null && (
                 <a
@@ -572,18 +583,20 @@ export default function ChatRoom() {
               )}
               {(m.messageType ?? "text") === "voice" && m.attachmentUrl && (
                 <VoiceMessagePlayer
-                  src={m.attachmentUrl.startsWith("http") ? m.attachmentUrl : `${getUploadsBaseUrl()}${m.attachmentUrl}`}
+                  src={mediaUrl(m.attachmentUrl)}
                   duration={m.attachmentMetadata?.duration}
                 />
               )}
               {(m.messageType ?? "text") === "circle" && m.attachmentUrl && (
                 <CircleMessagePlayer
-                  src={m.attachmentUrl.startsWith("http") ? m.attachmentUrl : `${getUploadsBaseUrl()}${m.attachmentUrl}`}
+                  src={mediaUrl(m.attachmentUrl)}
                   duration={m.attachmentMetadata?.duration}
                 />
               )}
               <div className="message-time">
-                {m.createdAt ? new Date(m.createdAt).toLocaleTimeString() : ""}
+                {m.createdAt
+                  ? new Date(m.createdAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
+                  : ""}
               </div>
             </div>
               {!own && selectable && (
@@ -679,7 +692,7 @@ export default function ChatRoom() {
                 <div className="contact-info-avatar-wrap">
                   {otherMember.avatarUrl ? (
                     <img
-                      src={otherMember.avatarUrl.startsWith("http") ? otherMember.avatarUrl : `${getUploadsBaseUrl()}${otherMember.avatarUrl}`}
+                      src={mediaUrl(otherMember.avatarUrl)}
                       alt=""
                       className="contact-info-avatar"
                     />
@@ -741,7 +754,7 @@ export default function ChatRoom() {
                     <div className="contact-info-avatar-wrap">
                       {m.avatarUrl ? (
                         <img
-                          src={m.avatarUrl.startsWith("http") ? m.avatarUrl : `${getUploadsBaseUrl()}${m.avatarUrl}`}
+                          src={mediaUrl(m.avatarUrl)}
                           alt=""
                           className="contact-info-avatar"
                         />
@@ -797,7 +810,7 @@ export default function ChatRoom() {
                   <div className="contact-info-group-avatar">
                     {chat.avatarUrl ? (
                       <img
-                        src={chat.avatarUrl.startsWith("http") ? chat.avatarUrl : `${getUploadsBaseUrl()}${chat.avatarUrl}`}
+                        src={mediaUrl(chat.avatarUrl)}
                         alt=""
                       />
                     ) : (
@@ -835,7 +848,7 @@ export default function ChatRoom() {
                       >
                         <div className="contact-info-member-avatar">
                           {m.avatarUrl ? (
-                            <img src={m.avatarUrl.startsWith("http") ? m.avatarUrl : `${getUploadsBaseUrl()}${m.avatarUrl}`} alt="" />
+                            <img src={mediaUrl(m.avatarUrl)} alt="" />
                           ) : (
                             (m.username ?? "?").slice(0, 1).toUpperCase()
                           )}

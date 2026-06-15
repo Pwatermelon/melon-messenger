@@ -1,5 +1,6 @@
 import type { Chat } from "@melon/shared";
-import { getUploadsBaseUrl } from "../config";
+import { mediaUrl } from "../utils/mediaUrl";
+import { userDisplayName } from "../utils/userDisplay";
 
 type Props = {
   chats: Chat[];
@@ -13,7 +14,7 @@ type Props = {
 function chatLabel(chat: Chat, userId?: string): string {
   if (chat.type === "group") return chat.name ?? "Группа";
   const other = chat.members.find((m) => m.id !== userId);
-  return other?.yandexLogin ?? other?.username ?? "Диалог";
+  return other ? userDisplayName(other) : "Диалог";
 }
 
 function chatAvatar(chat: Chat, userId?: string): string | null {
@@ -46,7 +47,7 @@ export function ForwardMessageModal({ chats, userId, currentChatId, onSelect, on
                 >
                   <span className="forward-chat-avatar">
                     {avatar ? (
-                      <img src={avatar.startsWith("http") ? avatar : `${getUploadsBaseUrl()}${avatar}`} alt="" />
+                      <img src={mediaUrl(avatar)} alt="" />
                     ) : (
                       label.slice(0, 1).toUpperCase()
                     )}

@@ -8,6 +8,7 @@ import { notifyUser } from "../services/webPush";
 import type { AttachmentMetadata, Message as MessageDto, MessageType } from "@melon/shared";
 import { toPublicProfile } from "../lib/userDto";
 import { usersShareChat } from "../lib/chatAccess";
+import { grantMediaFromAttachment, signMediaPath, signUserMedia } from "../services/mediaAccess";
 
 function toUser(u: typeof users.$inferSelect) {
   return toPublicProfile(u);
@@ -41,10 +42,10 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       return { error: "User not found" };
     }
     const includeBirthday = await usersShareChat(viewer.id, target.id);
-    return toPublicProfile(target, includeBirthday);
+    return signUserMedia(toPublicProfile(target, includeBirthday), viewer.id);
   })
   .get("/users/search/:query", async ({ user, params, set }) => {
-    requireAuth(set)(user);
+    const viewer = requireAuth(set)(user);
     const q = decodeURIComponent((params as { query?: string }).query ?? "").trim().toLowerCase();
     if (!q) {
       set.status = 404;
@@ -59,7 +60,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       set.status = 404;
       return { error: "User not found" };
     }
-    return toPublicProfile(target, false);
+    return signUserMedia(toPublicProfile(target, false), viewer.id);
   })
   .get("/users/:id", async ({ user, params, set }) => {
     const viewer = requireAuth(set)(user);
@@ -74,7 +75,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       return { error: "User not found" };
     }
     const includeBirthday = target.birthdayVisible || viewer.id === target.id;
-    return toPublicProfile(target, includeBirthday);
+    return signUserMedia(toPublicProfile(target, includeBirthday), viewer.id);
   })
   .get("/", async ({ user, set }) => {
     const u = requireAuth(set)(user);
@@ -119,7 +120,18 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         };
       })
     );
-    return result;
+    const signed = await Promise.all(
+      result.map(async (chat) => {
+        const avatarUrl = chat.avatarUrl
+          ? (await signMediaPath(chat.avatarUrl, u.id)) ?? chat.avatarUrl
+          : chat.avatarUrl;
+        const members = await Promise.all(
+          chat.members.map(async (m) => signUserMedia(m, u.id))
+        );
+        return { ...chat, avatarUrl, members };
+      })
+    );
+    return signed;
   })
   .post("/dm", async ({ user, body, set }) => {
     const u = requireAuth(set)(user);
@@ -379,23 +391,27 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       const list = await db.select().from(users).where(inArray(users.id, userIds));
       list.forEach((us) => userMap.set(us.id, us));
     }
-    const messages = rows.map((r) => {
-      let attachmentMetadata = null;
-      try {
-        if (r.attachment_metadata) attachmentMetadata = JSON.parse(r.attachment_metadata) as import("@melon/shared").AttachmentMetadata;
-      } catch {}
-      return {
-        id: r.message_id,
-        chatId: r.chat_id,
-        senderId: r.sender_id,
-        content: r.content,
-        createdAt: r.created_at?.toISOString?.(),
-        sender: userMap.get(r.sender_id) ? toUser(userMap.get(r.sender_id)!) : undefined,
-        messageType: (r.message_type as import("@melon/shared").MessageType) ?? "text",
-        attachmentUrl: r.attachment_url ?? null,
-        attachmentMetadata,
-      };
-    });
+    const messages = await Promise.all(
+      rows.map(async (r) => {
+        let attachmentMetadata = null;
+        try {
+          if (r.attachment_metadata) attachmentMetadata = JSON.parse(r.attachment_metadata) as import("@melon/shared").AttachmentMetadata;
+        } catch {}
+        const rawUrl = r.attachment_url ?? null;
+        const attachmentUrl = rawUrl ? (await signMediaPath(rawUrl, u.id)) ?? rawUrl : null;
+        return {
+          id: r.message_id,
+          chatId: r.chat_id,
+          senderId: r.sender_id,
+          content: r.content,
+          createdAt: r.created_at?.toISOString?.(),
+          sender: userMap.get(r.sender_id) ? toUser(userMap.get(r.sender_id)!) : undefined,
+          messageType: (r.message_type as import("@melon/shared").MessageType) ?? "text",
+          attachmentUrl,
+          attachmentMetadata,
+        };
+      })
+    );
     return { messages: messages.slice().reverse() };
   })
   .delete("/:id/messages/:messageId", async ({ user, params, set }) => {
@@ -414,12 +430,6 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
     if (!row) {
       set.status = 404;
       return { error: "Message not found" };
-    }
-    const [chatRow] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1);
-    const canDelete = row.sender_id === u.id || (chatRow?.type === "group" && member.role === "admin");
-    if (!canDelete) {
-      set.status = 403;
-      return { error: "Cannot delete this message" };
     }
     await scyllaDeleteMessage(chatId, messageId);
     await publishChatEvent(chatId, { type: "message_deleted", chatId, messageId });
@@ -470,6 +480,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       attachmentUrl: row.attachment_url ?? null,
       attachmentMetadata,
     });
+    await grantMediaFromAttachment(row.attachment_url, targetChatId);
     const [senderUser] = await db.select().from(users).where(eq(users.id, u.id)).limit(1);
     const message: MessageDto = {
       id: newId,

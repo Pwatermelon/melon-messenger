@@ -5,9 +5,11 @@ import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import { getChats, createDm, createGroup, searchUser, getContacts, addContact } from "../api";
 import type { Chat, User } from "@melon/shared";
-import { getUploadsBaseUrl } from "../config";
+import { mediaUrl } from "../utils/mediaUrl";
 import { BrandIcon } from "../components/BrandIcon";
 import { IconPlus } from "../components/Icons";
+import { UserListLabel } from "../components/UserListLabel";
+import { userAvatarLetter, userDisplayName } from "../utils/userDisplay";
 import Profile from "./Profile";
 
 export type ChatLayoutOutletContext = {
@@ -228,7 +230,7 @@ export default function ChatLayout() {
       }
       if (u.id === user?.id) return;
       if (groupSelected.some((x) => x.id === u.id)) return;
-      setGroupSelected((prev) => [...prev, { id: u.id, username: u.yandexLogin ?? u.username }]);
+      setGroupSelected((prev) => [...prev, { id: u.id, username: userDisplayName(u) }]);
       setGroupAddLogin("");
     } catch {
       setGroupAddError("Пользователь не найден");
@@ -254,7 +256,7 @@ export default function ChatLayout() {
     if (chat.type === "group") {
       const url = chat.avatarUrl ?? null;
       if (url) {
-        const src = url.startsWith("http") ? url : `${getUploadsBaseUrl()}${url}`;
+        const src = mediaUrl(url);
         return <img src={src} alt="" className="chat-item-avatar-img" />;
       }
       return <span className="chat-item-avatar-letter">{avatarLetter(chat)}</span>;
@@ -262,7 +264,7 @@ export default function ChatLayout() {
     const other = chat.members.find((m) => m.id !== user?.id);
     const url = other?.avatarUrl ?? null;
     if (url) {
-      const src = url.startsWith("http") ? url : `${getUploadsBaseUrl()}${url}`;
+      const src = mediaUrl(url);
       return <img src={src} alt="" className="chat-item-avatar-img" />;
     }
     return <span className="chat-item-avatar-letter">{avatarLetter(chat)}</span>;
@@ -316,15 +318,18 @@ export default function ChatLayout() {
                 <div className="sidebar-search-avatar">
                   {sidebarUser.avatarUrl ? (
                     <img
-                      src={sidebarUser.avatarUrl.startsWith("http") ? sidebarUser.avatarUrl : `${getUploadsBaseUrl()}${sidebarUser.avatarUrl}`}
+                      src={mediaUrl(sidebarUser.avatarUrl)}
                       alt=""
                     />
                   ) : (
-                    <span>{(sidebarUser.yandexLogin ?? sidebarUser.username).slice(0, 1).toUpperCase()}</span>
+                    <span>{userAvatarLetter(sidebarUser)}</span>
                   )}
                 </div>
                 <div className="sidebar-search-user-body">
-                  <span className="sidebar-search-name">{sidebarUser.yandexLogin ?? sidebarUser.username}</span>
+                  <span className="sidebar-search-name">{userDisplayName(sidebarUser)}</span>
+                  {sidebarUser.yandexLogin && sidebarUser.yandexLogin.toLowerCase() !== sidebarUser.username?.toLowerCase() && (
+                    <span className="sidebar-search-login">{sidebarUser.yandexLogin}</span>
+                  )}
                 </div>
               </div>
               <div className="sidebar-search-actions">
@@ -381,13 +386,13 @@ export default function ChatLayout() {
               >
                 <div className="chat-item-avatar">
                   {c.avatarUrl ? (
-                    <img src={c.avatarUrl.startsWith("http") ? c.avatarUrl : `${getUploadsBaseUrl()}${c.avatarUrl}`} alt="" className="chat-item-avatar-img" />
+                    <img src={mediaUrl(c.avatarUrl)} alt="" className="chat-item-avatar-img" />
                   ) : (
-                    <span className="chat-item-avatar-letter">{(c.yandexLogin ?? c.username).slice(0, 1).toUpperCase()}</span>
+                    <span className="chat-item-avatar-letter">{userAvatarLetter(c)}</span>
                   )}
                 </div>
                 <div className="chat-item-body">
-                  <p className="chat-item-name">{c.yandexLogin ?? c.username}</p>
+                  <UserListLabel user={c} />
                 </div>
               </button>
             ))
@@ -471,9 +476,14 @@ export default function ChatLayout() {
             {dmUser && (
               <div className="search-result-single">
                 <div className="avatar">{dmUser.avatarUrl ? (
-                  <img src={dmUser.avatarUrl.startsWith("http") ? dmUser.avatarUrl : `${getUploadsBaseUrl()}${dmUser.avatarUrl}`} alt="" />
-                ) : (dmUser.yandexLogin ?? dmUser.username).slice(0, 1).toUpperCase()}</div>
-                <span>{dmUser.yandexLogin ?? dmUser.username}</span>
+                  <img src={mediaUrl(dmUser.avatarUrl)} alt="" />
+                ) : userAvatarLetter(dmUser)}</div>
+                <div className="search-result-user-text">
+                  <span className="search-result-name">{userDisplayName(dmUser)}</span>
+                  {dmUser.yandexLogin && dmUser.yandexLogin.toLowerCase() !== dmUser.username?.toLowerCase() && (
+                    <span className="search-result-login">{dmUser.yandexLogin}</span>
+                  )}
+                </div>
                 <button
                   type="button"
                   className="btn-primary"
@@ -497,7 +507,7 @@ export default function ChatLayout() {
                       className="dm-contact-item"
                       onClick={() => void startDm(c.id)}
                     >
-                      <span className="dm-contact-name">{c.yandexLogin ?? c.username}</span>
+                      <UserListLabel user={c} nameClassName="dm-contact-name" tagClassName="dm-contact-login" />
                     </button>
                   ))
                 )}

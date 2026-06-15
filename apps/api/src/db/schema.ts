@@ -77,6 +77,28 @@ export const userContacts = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.contactUserId] })]
 );
 
+/** Uploaded media registry for access control */
+export const mediaFiles = pgTable("media_files", {
+  filename: varchar("filename", { length: 255 }).primaryKey(),
+  ownerId: uuid("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  /** chat = only chat members with grant; profile = any authenticated user */
+  visibility: varchar("visibility", { length: 16 }).notNull().default("chat"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** Which chats may access a chat-scoped media file (filled when message is sent) */
+export const mediaChatGrants = pgTable(
+  "media_chat_grants",
+  {
+    filename: varchar("filename", { length: 255 })
+      .notNull()
+      .references(() => mediaFiles.filename, { onDelete: "cascade" }),
+    chatId: uuid("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.filename, t.chatId] })]
+);
+
 export const usersRelations = relations(users, ({ many }) => ({
   chatMembers: many(chatMembers),
   payments: many(payments),

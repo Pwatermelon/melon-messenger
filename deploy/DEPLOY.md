@@ -117,6 +117,47 @@ ssh user@host "cd /opt/watermelon-messenger && WM_VERSION=1.0.0 ./scripts/deploy
 WM_VERSION=1.0.0 ./scripts/deploy-server.sh   # предыдущая версия
 ```
 
+## Файлы (аватарки, фото, голос, кружки)
+
+### MinIO (S3 внутри стека)
+
+Медиа хранятся в **MinIO** — S3-совместимое хранилище в docker-сети. **Порты MinIO наружу не пробрасываются**, API ходит на `http://minio:9000`.
+
+В `.env` / `PROD_ENV_FILE`:
+
+```env
+MINIO_ROOT_USER=watermelon
+MINIO_ROOT_PASSWORD=длинный_секрет
+S3_BUCKET=watermelon-media
+```
+
+При первом `up` сервис `minio-init` создаёт бакет. Данные — том `miniodata`.
+
+Postgres, Redis, Scylla тоже **без внешних портов** — только `web` (80/443) смотрит наружу.
+
+### Безопасность медиа
+
+- Публичный `GET /uploads/:id` **отключён**
+- Каждый файл в реестре `media_files`; вложения в чатах — только участникам чата (`media_chat_grants`)
+- Аватарки/обложки — любой **авторизованный** пользователь
+- Выдача через `GET /api/media/:file?access=<краткоживущий токен>` (1 ч), привязанный к пользователю
+
+Старые файлы без записи в `media_files` после деплоя не откроются — нужно перезалить или миграция.
+
+### Миграция со старого тома `uploaddata`
+
+Если файлы остались в старом Docker-томе, залей их в MinIO:
+
+```bash
+# пример: том со старыми uploads смонтирован в /backup/uploads
+docker compose -f deploy/docker-compose.yml --env-file .env run --rm \
+  -v watermelon-prod_uploaddata:/backup:ro \
+  minio-init sh -c '
+    mc alias set local http://minio:9000 '"$MINIO_ROOT_USER"' '"$MINIO_ROOT_PASSWORD"' &&
+    mc mirror /backup/uploads local/watermelon-media
+  '
+```
+
 ## Мониторинг
 
 - `GET https://watermelon-messenger.ru/api/health`

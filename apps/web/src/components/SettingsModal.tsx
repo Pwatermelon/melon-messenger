@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { updateProfile, uploadFile } from "../api";
-import { getUploadsBaseUrl } from "../config";
+import { mediaUrl } from "../utils/mediaUrl";
 import { compressImage } from "../utils/imageCompress";
 import { subscribeToPush, unsubscribeFromPush } from "../lib/pushNotifications";
 import { logoutViaYandex } from "../lib/yandexLogout";
@@ -44,7 +44,7 @@ export default function SettingsModal({ onClose }: Props) {
   }
 
   const avatarDisplayUrl = avatarUrl
-    ? (avatarUrl.startsWith("http") ? avatarUrl : `${getUploadsBaseUrl()}${avatarUrl}`)
+    ? mediaUrl(avatarUrl)
     : null;
 
   async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -55,7 +55,7 @@ export default function SettingsModal({ onClose }: Props) {
     setMessage("");
     try {
       const compressed = await compressImage(file);
-      const { url } = await uploadFile(compressed);
+      const { url } = await uploadFile(compressed, { purpose: "profile" });
       const path = url.startsWith("http") ? new URL(url).pathname : url;
       const updated = await updateProfile({ avatarUrl: path });
       setAvatarUrl(updated.avatarUrl ?? null);

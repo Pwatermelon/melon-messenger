@@ -11,7 +11,7 @@ export function useVoiceRecorder() {
   const durationRef = useRef(0);
   durationRef.current = duration;
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (): Promise<boolean> => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mime = pickVoiceMime();
@@ -31,8 +31,10 @@ export function useVoiceRecorder() {
         durationRef.current = d;
         setDuration(d);
       }, 1000);
+      return true;
     } catch (err) {
       console.error("Voice recording failed:", err);
+      return false;
     }
   }, []);
 

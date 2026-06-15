@@ -3,6 +3,7 @@ import { eq, desc, and } from "drizzle-orm";
 import { authPlugin, requireAuth } from "../auth";
 import { db, users, userContacts } from "../db";
 import { toPublicProfile } from "../lib/userDto";
+import { signUserMedia } from "../services/mediaAccess";
 
 export const contactRoutes = new Elysia({ prefix: "/contacts" })
   .use(authPlugin)
@@ -14,7 +15,7 @@ export const contactRoutes = new Elysia({ prefix: "/contacts" })
       .innerJoin(users, eq(users.id, userContacts.contactUserId))
       .where(eq(userContacts.userId, me.id))
       .orderBy(desc(userContacts.createdAt));
-    return rows.map((r) => toPublicProfile(r.user, r.user.birthdayVisible));
+    return Promise.all(rows.map((r) => signUserMedia(toPublicProfile(r.user, r.user.birthdayVisible), me.id)));
   })
   .post("/:userId", async ({ user, params, set }) => {
     const me = requireAuth(set)(user);
@@ -32,7 +33,7 @@ export const contactRoutes = new Elysia({ prefix: "/contacts" })
       .insert(userContacts)
       .values({ userId: me.id, contactUserId: contactId })
       .onConflictDoNothing();
-    return toPublicProfile(target, target.birthdayVisible);
+    return signUserMedia(toPublicProfile(target, target.birthdayVisible), me.id);
   })
   .delete("/:userId", async ({ user, params, set }) => {
     const me = requireAuth(set)(user);

@@ -9,6 +9,7 @@ import { eq, and } from "drizzle-orm";
 import * as scylla from "./services/scylla";
 import * as redis from "./services/redis";
 import { notifyUser } from "./services/webPush";
+import { grantMediaFromAttachment } from "./services/mediaAccess";
 import type { WSClientMessage, WSServerMessage, Message } from "@melon/shared";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "watermelon-dev-secret-change-in-prod";
@@ -191,6 +192,7 @@ export const wsHandlers = {
               attachmentMetadata: attachmentMetadata ?? null,
             }
           );
+          await grantMediaFromAttachment(attachmentUrl, chatId);
           const [u] = await db.select().from(users).where(eq(users.id, ws.data.userId)).limit(1);
           const message: Message = {
             id: messageId,

@@ -1,15 +1,13 @@
 import { Elysia } from "elysia";
+import { extname, join } from "path";
 import { authPlugin, requireAuth } from "../auth";
 import { checkRateLimit, clientKey } from "../middleware/rateLimit";
-import { mkdir } from "fs/promises";
-import { join } from "path";
+import { getMediaStorage, uploadsPathFromKey } from "../services/mediaStorage";
+import { registerMediaFile, registerProfileMedia } from "../services/mediaAccess";
 
 export const UPLOAD_DIR = process.env.UPLOAD_DIR ?? join(import.meta.dir, "../../uploads");
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
 
-async function ensureUploadDir() {
-  await mkdir(UPLOAD_DIR, { recursive: true });
-}
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
 
 function extFromMime(mime: string): string {
   const base = mime.split(";")[0].trim().toLowerCase();
@@ -44,9 +42,9 @@ export const uploadRoutes = new Elysia({ prefix: "/upload" })
       return { error: "Too many uploads. Try again later." };
     }
     const u = requireAuth(set)(user);
-    await ensureUploadDir();
     const formData = await request.formData();
     const file = formData.get("file") as File | Blob | null;
+    const purpose = String(formData.get("purpose") ?? "chat").toLowerCase();
     if (!file || typeof (file as Blob).arrayBuffer !== "function") {
       set.status = 400;
       return { error: "Missing file" };
@@ -55,10 +53,19 @@ export const uploadRoutes = new Elysia({ prefix: "/upload" })
       set.status = 400;
       return { error: "File too large" };
     }
-    const ext = extFromMime(file.type) || (file.name ? "." + file.name.split(".").pop() : "");
+    const ext = extFromMime(file.type) || (file.name ? extname(file.name) : "");
     const filename = `${crypto.randomUUID()}${ext}`;
-    const path = join(UPLOAD_DIR, filename);
-    await Bun.write(path, file);
-    const url = `/uploads/${filename}`;
+    const contentType = file.type || "application/octet-stream";
+    const storage = getMediaStorage();
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    await storage.put(filename, bytes, contentType);
+
+    if (purpose === "profile") {
+      await registerProfileMedia(filename, u.id);
+    } else {
+      await registerMediaFile(filename, u.id, "chat");
+    }
+
+    const url = uploadsPathFromKey(filename);
     return { url, fileName: file.name, mimeType: file.type, size: file.size };
   });

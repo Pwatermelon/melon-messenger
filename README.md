@@ -158,13 +158,15 @@ git commit -m "ver 1.0.0" && git push origin main
 docker compose up -d --build
 ```
 
-Приложение: **http://localhost:8080**
+Приложение: **http://localhost:8080** (единственный порт наружу).
 
-### Локально
+Внутри стека: Postgres, Redis, Scylla, **MinIO** (медиа) — без проброса портов, всё через API/nginx.
+
+### Локально (без полного Docker)
 
 ```bash
-docker compose up -d          # postgres, redis, scylla
-cd apps/api && bun install && bun run dev
+docker compose up -d postgres redis scylla
+cd apps/api && bun install && bun run dev   # MEDIA_STORAGE=local в .env
 cd apps/web && bun install && bun run dev
 ```
 
