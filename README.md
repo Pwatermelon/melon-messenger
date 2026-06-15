@@ -1,190 +1,307 @@
 # Watermelon Messenger
 
-Real-time мессенджер: личные и групповые чаты, медиа, голосовые. Backend на **Bun**, фронт на **React**, native-заготовки для **iOS/macOS**.
+**Real-time мессенджер** с личными и групповыми чатами, медиа, голосовыми и видеокружками.
 
-**Авторизация:** только [Yandex ID](https://oauth.yandex.ru/).  
-**Безопасность:** TLS/WSS + шифрование сообщений at-rest на сервере (AES-256-GCM), модель как у Telegram/VK — не client-side E2E.
+Production: [watermelon-messenger.ru](https://watermelon-messenger.ru)
+
+---
+
+## Содержание
+
+- [О проекте](#о-проекте)
+- [Возможности](#возможности)
+- [Стек](#стек)
+- [Архитектура](#архитектура)
+- [Быстрый старт](#быстрый-старт)
+- [Конфигурация](#конфигурация)
+- [Деплой](#деплой)
+- [Безопасность](#безопасность)
+- [Yandex OAuth](#yandex-oauth)
+- [Структура репозитория](#структура-репозитория)
+- [Разработка](#разработка)
+
+---
+
+## О проекте
+
+Watermelon Messenger — self-hosted мессенджер в духе Telegram: мгновенная доставка через WebSocket, история в ScyllaDB, пользователи и чаты в PostgreSQL. Вход только через [Yandex ID](https://oauth.yandex.ru/). Есть веб-клиент (React), API на Bun и заготовки native-приложений (SwiftUI).
+
+Монорепозиторий: `apps/api`, `apps/web`, `apps/native`, общие типы в `packages/shared`.
+
+---
+
+## Возможности
+
+| Категория | Что есть |
+|-----------|----------|
+| **Чаты** | Личные диалоги, группы (в т.ч. пустые при создании), контакты |
+| **Сообщения** | Текст, фото, файлы, голосовые, видеокружки |
+| **Действия** | Удаление и пересылка сообщений, режим выбора как в Telegram |
+| **Медиа** | Приватное хранилище (MinIO / S3), выдача по подписанным URL |
+| **Профиль** | Аватар, обложка, био, галерея до 12 фото |
+| **Подписка** | Platinum — ранний доступ; оплата через YooKassa (опционально) |
+| **Клиент** | Тёмная / светлая тема, Web Push, PWA (service worker) |
+| **Админка** | Панель для beta-доступа и модерации |
+
+---
+
+## Стек
+
+| Слой | Технологии |
+|------|------------|
+| **API** | [Bun](https://bun.sh), [Elysia](https://elysiajs.com), WebSocket |
+| **Web** | React 18, Vite, TypeScript |
+| **Native** | SwiftUI (iOS / macOS scaffold) |
+| **Реляционные данные** | PostgreSQL, [Drizzle ORM](https://orm.drizzle.team) |
+| **Сообщения** | ScyllaDB (append-only лента) |
+| **Кэш / Pub-Sub** | Redis (presence, rate limits, WS-рассылка) |
+| **Медиа** | MinIO (S3-совместимое API) |
+| **Инфра** | Docker Compose, nginx, Let's Encrypt (certbot) |
+| **CI/CD** | GitHub Actions → Docker Hub → SSH deploy |
 
 ---
 
 ## Архитектура
 
-- **API** — Elysia (REST + WebSocket), JWT после Yandex OAuth
-- **Фронт** — React, Vite; native — SwiftUI (`apps/native/`)
-- **Данные** — PostgreSQL (users, chats), ScyllaDB (messages), Redis (Pub/Sub, presence)
-- **Platinum** — подписка для раннего доступа к beta-функциям
+```mermaid
+flowchart TB
+  subgraph clients [Клиенты]
+    Web[Web / PWA]
+    Native[iOS / macOS]
+  end
+
+  subgraph edge [Edge]
+    Nginx[nginx :80 / :443]
+  end
+
+  subgraph app [Application]
+    API[Elysia API + WebSocket]
+  end
+
+  subgraph data [Data layer]
+    PG[(PostgreSQL)]
+    Scylla[(ScyllaDB)]
+    Redis[(Redis)]
+    MinIO[(MinIO)]
+  end
+
+  Web --> Nginx
+  Native --> Nginx
+  Nginx -->|/api, /ws| API
+  API --> PG
+  API --> Scylla
+  API --> Redis
+  API --> MinIO
+  Redis -.->|Pub/Sub ws:chat:*| API
+```
+
+**Поток сообщения:** клиент отправляет `message` по WebSocket → API пишет в ScyllaDB → публикует событие в Redis `ws:chat:{chatId}` → все инстансы API доставляют подписчикам чата.
+
+**Медиа:** загрузка через `POST /upload` → объект в MinIO → метаданные в PostgreSQL → скачивание только через `GET /api/media/:file?access=…` (краткоживущий токен, проверка прав).
+
+**Сеть в production:** наружу открыт только **web** (80/443). Postgres, Redis, Scylla и MinIO живут во внутренней docker-сети.
+
+---
+
+## Быстрый старт
+
+### Требования
+
+- [Docker](https://docs.docker.com/get-docker/) и Docker Compose v2
+- или [Bun](https://bun.sh) ≥ 1.1 для локальной разработки
+
+### Полный стек в Docker
+
+```bash
+git clone https://github.com/plwatermelon/watermelon-messenger.git
+cd watermelon-messenger
+docker compose up -d --build
+```
+
+Откройте **http://localhost:8080** — единственный порт, проброшенный наружу.
+
+Внутри поднимаются: API, web, PostgreSQL, Redis, Scylla, MinIO.
+
+### Локальная разработка (hot reload)
+
+```bash
+# Инфраструктура в фоне
+docker compose up -d postgres redis scylla minio minio-init
+
+# API и фронт на хосте
+bun install
+cp apps/api/.env.example apps/api/.env   # настройте Yandex OAuth
+bun run dev
+```
+
+- API: `http://localhost:3000`
+- Web (Vite): `http://localhost:5173`
+
+Для API на хосте без MinIO задайте `MEDIA_STORAGE=local` в `apps/api/.env`.
+
+---
+
+## Конфигурация
+
+Шаблоны переменных окружения:
+
+| Файл | Назначение |
+|------|------------|
+| [`deploy/.env.example`](deploy/.env.example) | Production / `PROD_ENV_FILE` |
+| [`apps/api/.env.example`](apps/api/.env.example) | Локальный API |
+
+### Обязательно для production
+
+```env
+# База и секреты
+POSTGRES_PASSWORD=
+JWT_SECRET=
+MESSAGE_AT_REST_KEY=
+
+# Yandex OAuth
+YANDEX_CLIENT_ID=
+YANDEX_CLIENT_SECRET=
+YANDEX_REDIRECT_URI=https://watermelon-messenger.ru/api/auth/yandex/callback
+WEB_URL=https://watermelon-messenger.ru
+API_PUBLIC_URL=https://watermelon-messenger.ru/api
+
+# TLS (certbot)
+CERTBOT_EMAIL=
+
+# MinIO — медиафайлы
+MINIO_ROOT_USER=
+MINIO_ROOT_PASSWORD=
+S3_BUCKET=watermelon-media
+```
+
+### Опционально
+
+| Переменные | Назначение |
+|------------|------------|
+| `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY` | Оплата Platinum |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Web Push |
+| `ADMIN_YANDEX_LOGINS`, `ADMIN_YANDEX_IDS` | Доступ в админ-панель |
+
+`MESSAGE_AT_REST_KEY` — base64 ≥ 32 байт или произвольная строка (будет нормализована). Шифрует content и metadata сообщений в ScyllaDB (AES-256-GCM).
+
+---
+
+## Деплой
+
+Релизы запускаются **только** коммитом с semver в первой строке сообщения:
+
+```bash
+git commit -m "ver 1.0.12"
+git push origin main
+```
+
+Pipeline: unit-тесты → сборка образов → push в Docker Hub → rsync конфигов на VPS → `deploy-server.sh`.
+
+**GitHub Secrets:** `DOCKERHUB_TOKEN`, `PROD_ENV_FILE`, `DEPLOY_SSH_HOST`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_PATH`.
+
+Образы: `plwatermelon/watermelon-messenger-api:X.Y.Z`, `plwatermelon/watermelon-messenger-web:X.Y.Z`.
+
+Подробная инструкция: **[deploy/DEPLOY.md](deploy/DEPLOY.md)** — первичная настройка сервера, TLS, MinIO, rollback, бэкапы.
+
+```bash
+# Ручной деплой на сервере
+WM_VERSION=1.0.12 ./scripts/deploy-server.sh
+```
 
 ---
 
 ## Безопасность
 
-| Слой | Механизм |
-|------|----------|
-| Транспорт | HTTPS / WSS |
-| Хранение | `MESSAGE_AT_REST_KEY` — AES-256-GCM для content и metadata в ScyllaDB |
-| Auth | Yandex OAuth 2.0 → JWT (30 дней) |
+| Слой | Реализация |
+|------|------------|
+| Транспорт | HTTPS, WSS |
+| Аутентификация | Yandex OAuth 2.0 → JWT (30 дней) |
+| Сообщения at-rest | AES-256-GCM (`MESSAGE_AT_REST_KEY`) |
+| Медиа | Приватный бакет; публичный `/uploads` отключён |
+| API | Rate limits (Redis): 300 req/min глобально, 30/min auth, 20 uploads/min |
 
-Задайте `MESSAGE_AT_REST_KEY` в production (base64 ≥32 байт).
+Это **не** client-side E2E: сервер расшифровывает сообщения для доставки и поиска, как в типичных мессенджерах с server-side encryption.
 
 ---
 
 ## Yandex OAuth
 
-Единственный способ входа — [Yandex ID](https://oauth.yandex.ru/).
+1. Создайте приложение на [oauth.yandex.ru](https://oauth.yandex.ru/) (платформы **Веб** и при необходимости **iOS/macOS**).
 
-### 1. Создайте приложение OAuth
+2. Redirect URI:
 
-[oauth.yandex.ru](https://oauth.yandex.ru/) → **Веб-сервисы** (web) + при необходимости **iOS/macOS**.
+   | Окружение | Redirect URI |
+   |-----------|--------------|
+   | Dev (Docker) | `http://localhost:8080/api/auth/yandex/callback` |
+   | Production | `https://watermelon-messenger.ru/api/auth/yandex/callback` |
+   | Native | `watermelon://oauth/yandex` |
 
-### 2. Redirect URI и Suggest Hostname
+3. Иконка для Yandex OAuth: `apps/web/public/yandex-oauth-icon.png` (200×200, квадрат PNG).
 
-**Веб-сервисы** в [oauth.yandex.ru](https://oauth.yandex.ru/):
+4. Native: см. [apps/native/YANDEX_OAUTH.md](apps/native/YANDEX_OAUTH.md).
 
-| Поле | Dev | Production |
-|------|-----|------------|
-| **Redirect URI** | `http://localhost:8080/api/auth/yandex/callback` | `https://watermelon-messenger.ru/api/auth/yandex/callback` |
-| **Suggest Hostname** | `localhost` | `watermelon-messenger.ru` |
+**API (основное):**
 
-**iOS / macOS** (отдельная платформа):
-
-| Поле | Значение |
-|------|----------|
-| Redirect URI | `watermelon://oauth/yandex` |
-
-### 2.1. Иконка приложения в Yandex OAuth
-
-Загрузите в [oauth.yandex.ru](https://oauth.yandex.ru/) **квадратную** иконку:
-
-- Файл: `apps/web/public/yandex-oauth-icon.png` (**200×200**, ~40 KB)
-- Формат: PNG, **1:1**, без прозрачных полей по краям
-- Не используйте исходник 1536×1024 — Яндекс **сплющит** неквадратные картинки
-
-Доступные размеры в репозитории: `icon-32.png` … `icon-512.png`.
-
-### 3. Env
-
-```
-YANDEX_CLIENT_ID=...
-YANDEX_CLIENT_SECRET=...
-YANDEX_REDIRECT_URI=https://watermelon-messenger.ru/api/auth/yandex/callback
-YANDEX_NATIVE_REDIRECT_URI=watermelon://oauth/yandex
-WEB_URL=https://watermelon-messenger.ru
-ADMIN_YANDEX_LOGINS=platinumwatermelon
-MESSAGE_AT_REST_KEY=...
-```
-
-### 4. API endpoints
-
-| Method | Path | Назначение |
-|--------|------|------------|
-| GET | `/auth/yandex` | Web: redirect на Yandex (с CSRF `state`) |
-| GET | `/auth/yandex/callback` | Web callback → redirect на `/auth/callback?token=` |
-| GET | `/auth/yandex?platform=native` | Native: JSON `{ authorizeUrl, state, redirectUri }` |
-| POST | `/auth/yandex/exchange` | Native: `{ code, redirect_uri, state? }` → `{ token, user }` |
-| GET | `/auth/yandex/config` | Публичная конфигурация OAuth |
-
-### 5. Native (iOS/macOS)
-
-- `WMYandexAuth` — `ASWebAuthenticationSession` → обмен code на JWT
-- В Xcode добавьте URL scheme **`watermelon`** (CFBundleURLSchemes) → host `oauth`, path `/yandex`
-- См. [apps/native/YANDEX_OAUTH.md](apps/native/YANDEX_OAUTH.md)
+| Method | Path | Описание |
+|--------|------|----------|
+| GET | `/auth/yandex` | Redirect на Yandex (web) |
+| GET | `/auth/yandex/callback` | Callback → JWT |
+| GET | `/auth/yandex?platform=native` | URL авторизации для native |
+| POST | `/auth/yandex/exchange` | Обмен code → JWT |
 
 ---
 
-## Platinum / YooKassa
-
-Для реальной оплаты подписки Platinum (299 ₽/мес по умолчанию):
-
-```
-YOOKASSA_SHOP_ID=...
-YOOKASSA_SECRET_KEY=...
-PLATINUM_PRICE_RUB=299
-API_PUBLIC_URL=https://your-domain.com/api   # webhook: /api/payments/webhook/yookassa
-```
-
-Без `YOOKASSA_*` API активирует Platinum сразу (dev-режим).
-
----
-
-## Push-уведомления (Web Push)
-
-Сгенерируйте VAPID-ключи (`npx web-push generate-vapid-keys`) и добавьте:
-
-```
-VAPID_PUBLIC_KEY=...
-VAPID_PRIVATE_KEY=...
-```
-
-В настройках мессенджера пользователь включает push. Service worker: `/sw.js`.
-
----
-
-## Мониторинг и бэкапы
-
-- **Health:** `GET /health` — postgres + redis
-- **Metrics:** `GET /metrics` — uptime, requests, memory
-- **Rate limits:** Redis, 300 req/min глобально, 30/min auth, 20 uploads/min
-- **Backup Postgres:** `./scripts/backup-postgres.sh`
-
----
-
-## CI / CD (релизы)
-
-Workflow: `.github/workflows/release.yml`
-
-**Запускается только** при коммите вида `ver X.Y.Z`:
-
-```bash
-git commit -m "ver 1.0.0" && git push origin main
-```
-
-Обычные коммиты и PR — **без CI/CD**.
-
-На релизе: unit + build + smoke → Docker Hub → deploy. Playwright только локально (`bun run test:e2e`), на prod не нужен.
-
-**Secrets:** `DOCKERHUB_TOKEN`, `PROD_ENV_FILE`, `DEPLOY_SSH_*`, `DEPLOY_PATH`.
-
-Образы: `plwatermelon/watermelon-messenger-api:X.Y.Z`, `plwatermelon/watermelon-messenger-web:X.Y.Z`.
-
-См. [deploy/DEPLOY.md](deploy/DEPLOY.md).
-
----
-
-## Запуск
-
-### Docker
-
-```bash
-docker compose up -d --build
-```
-
-Приложение: **http://localhost:8080** (единственный порт наружу).
-
-Внутри стека: Postgres, Redis, Scylla, **MinIO** (медиа) — без проброса портов, всё через API/nginx.
-
-### Локально (без полного Docker)
-
-```bash
-docker compose up -d postgres redis scylla
-cd apps/api && bun install && bun run dev   # MEDIA_STORAGE=local в .env
-cd apps/web && bun install && bun run dev
-```
-
----
-
-## Структура
+## Структура репозитория
 
 ```
 watermelon-messenger/
 ├── apps/
-│   ├── api/
-│   ├── web/
-│   └── native/     # iOS + macOS scaffold (SwiftUI)
-└── packages/shared/
+│   ├── api/              # Bun + Elysia, REST, WebSocket, Drizzle
+│   ├── web/              # React + Vite, PWA
+│   └── native/           # SwiftUI (iOS / macOS)
+├── packages/
+│   └── shared/           # Общие TypeScript-типы
+├── deploy/               # docker-compose prod, nginx, .env.example
+├── scripts/              # deploy-server.sh, backup, certbot
+└── .github/workflows/    # release.yml
 ```
 
 ---
 
-## Platinum
+## Разработка
 
-Страница `/platinum` — ранний доступ к экспериментальным функциям. Активация через API `POST /auth/subscription/platinum` (beta, бесплатно).
+### Команды
+
+```bash
+bun run dev          # API + web параллельно
+bun run build        # production build
+bun test             # unit-тесты API
+bun run test:e2e     # Playwright (локально)
+bun run db:migrate   # миграции PostgreSQL
+bun run db:studio    # Drizzle Studio
+```
+
+### Health и метрики
+
+| Endpoint | Описание |
+|----------|----------|
+| `GET /health` | Postgres + Redis |
+| `GET /metrics` | Uptime, requests, memory |
+
+### Бэкап PostgreSQL
+
+```bash
+./scripts/backup-postgres.sh
+```
+
+### Platinum
+
+Страница `/platinum` — подписка с расширенными возможностями. Без ключей YooKassa API активирует Platinum в dev-режиме (`POST /auth/subscription/platinum`).
+
+---
+
+## Ссылки
+
+- Production: [watermelon-messenger.ru](https://watermelon-messenger.ru)
+- Деплой: [deploy/DEPLOY.md](deploy/DEPLOY.md)
+- Native OAuth: [apps/native/YANDEX_OAUTH.md](apps/native/YANDEX_OAUTH.md)
