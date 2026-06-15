@@ -52,6 +52,10 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
   const duration = activeMode === "voice" ? voice.duration : circle.duration;
   const maxDuration = circle.maxDuration;
   const active = recording || locked;
+  const voiceLevel =
+    activeMode === "voice" && active
+      ? voice.levels.reduce((sum, v) => sum + v, 0) / voice.levels.length
+      : 0;
 
   useEffect(() => {
     gestureRef.current = gesture;
@@ -310,6 +314,17 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
               <span className="record-circle-timer">{duration}s / {maxDuration}s</span>
             </div>
           )}
+          {activeMode === "voice" && (
+            <div className={`record-voice-viz ${gesture === "cancel" ? "record-voice-cancel" : ""}`} aria-hidden>
+              {voice.levels.map((h, i) => (
+                <span
+                  key={i}
+                  className="record-voice-bar"
+                  style={{ transform: `scaleY(${h.toFixed(3)})` }}
+                />
+              ))}
+            </div>
+          )}
           <div
             className={`record-hint-panel ${gesture === "cancel" ? "record-hint-cancel" : ""} ${gesture === "lock" ? "record-hint-lock" : ""}`}
           >
@@ -344,6 +359,13 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
           title={activeMode === "voice" ? "Клик — кружок, удержание — голос" : "Клик — голос, удержание — кружок"}
           data-testid="compose-record-btn"
           data-mode={activeMode}
+          style={
+            activeMode === "voice" && recording
+              ? {
+                  boxShadow: `0 0 ${10 + voiceLevel * 24}px rgba(232, 72, 85, ${0.25 + voiceLevel * 0.45})`,
+                }
+              : undefined
+          }
         >
           {activeMode === "voice" ? <IconMic size={22} /> : <IconCircle size={22} />}
         </button>

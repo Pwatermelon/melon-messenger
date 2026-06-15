@@ -2,6 +2,7 @@ import { SignJWT, jwtVerify } from "jose";
 import { and, eq } from "drizzle-orm";
 import { db, mediaChatGrants, mediaFiles, chatMembers } from "../db";
 import { uploadsPathFromKey } from "./mediaStorage";
+import { sanitizeOriginalFilename } from "../lib/contentDisposition";
 
 const JWT_SECRET_BYTES = new TextEncoder().encode(
   process.env.MEDIA_SIGNING_SECRET ?? process.env.JWT_SECRET ?? "watermelon-dev-secret-change-in-prod"
@@ -22,12 +23,17 @@ export function filenameFromPath(path: string | null | undefined): string | null
 export async function registerMediaFile(
   filename: string,
   ownerId: string,
-  visibility: MediaVisibility = "chat"
+  visibility: MediaVisibility = "chat",
+  originalName?: string | null
 ): Promise<void> {
+  const storedName = originalName ? sanitizeOriginalFilename(originalName) : null;
   await db
     .insert(mediaFiles)
-    .values({ filename, ownerId, visibility })
+    .values({ filename, ownerId, visibility, originalName: storedName })
     .onConflictDoNothing();
+  if (storedName) {
+    await db.update(mediaFiles).set({ originalName: storedName }).where(eq(mediaFiles.filename, filename));
+  }
 }
 
 export async function grantMediaToChat(filename: string, chatId: string): Promise<void> {
@@ -55,8 +61,8 @@ export async function canAccessMedia(userId: string, filename: string): Promise<
 }
 
 /** Profile / group avatars visible to any authenticated user */
-export async function registerProfileMedia(filename: string, ownerId: string): Promise<void> {
-  await registerMediaFile(filename, ownerId, "profile");
+export async function registerProfileMedia(filename: string, ownerId: string, originalName?: string | null): Promise<void> {
+  await registerMediaFile(filename, ownerId, "profile", originalName);
 }
 
 export async function signMediaAccess(userId: string, filename: string): Promise<string> {

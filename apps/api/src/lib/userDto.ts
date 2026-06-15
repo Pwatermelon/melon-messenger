@@ -21,15 +21,44 @@ export function parseAvatarHistory(raw: string | null | undefined): string[] {
   }
 }
 
+export function parseAvatarHistory(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw) as unknown;
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string").slice(0, 24) : [];
+  } catch {
+    return [];
+  }
+}
+
+function sanitizeProfileMedia(u: {
+  avatarUrl?: string | null;
+  avatarHistory?: string[];
+  profilePhotos?: string[];
+}) {
+  const crop = u.avatarUrl ?? null;
+  const avatarHistory = (u.avatarHistory ?? []).filter((p) => p && p !== crop);
+  const avatarPaths = new Set([crop, ...avatarHistory].filter((p): p is string => Boolean(p)));
+  const profilePhotos = (u.profilePhotos ?? []).filter((p) => !avatarPaths.has(p));
+  return { avatarHistory, profilePhotos };
+}
+
 export function toPublicProfile(u: typeof users.$inferSelect, includeBirthday = true) {
+  const avatarHistory = parseAvatarHistory(u.avatarHistory);
+  const profilePhotos = parseProfilePhotos(u.profilePhotos);
+  const media = sanitizeProfileMedia({
+    avatarUrl: u.avatarUrl,
+    avatarHistory,
+    profilePhotos,
+  });
   const base = {
     id: u.id,
     username: u.username,
     avatarUrl: u.avatarUrl,
-    avatarHistory: parseAvatarHistory(u.avatarHistory),
+    avatarHistory: media.avatarHistory,
     coverUrl: u.coverUrl ?? null,
     bio: u.bio ?? null,
-    profilePhotos: parseProfilePhotos(u.profilePhotos),
+    profilePhotos: media.profilePhotos,
     subscriptionTier: u.subscriptionTier ?? "free",
     subscriptionExpiresAt: u.subscriptionExpiresAt?.toISOString?.() ?? null,
     yandexLogin: u.yandexLogin ?? null,

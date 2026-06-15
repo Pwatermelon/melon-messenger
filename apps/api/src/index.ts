@@ -87,6 +87,16 @@ async function main() {
         PRIMARY KEY (filename, chat_id)
       )
     `);
+    await db.execute(sql`ALTER TABLE media_files ADD COLUMN IF NOT EXISTS original_name varchar(255)`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS chat_read_cursors (
+        chat_id uuid NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+        user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        last_read_message_id text NOT NULL,
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (chat_id, user_id)
+      )
+    `);
   } catch (e) {
     console.warn("Schema migration (optional):", e);
   }

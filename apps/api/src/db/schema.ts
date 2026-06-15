@@ -83,6 +83,8 @@ export const mediaFiles = pgTable("media_files", {
   ownerId: uuid("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   /** chat = only chat members with grant; profile = any authenticated user */
   visibility: varchar("visibility", { length: 16 }).notNull().default("chat"),
+  /** Original upload name for Content-Disposition when downloading */
+  originalName: varchar("original_name", { length: 255 }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

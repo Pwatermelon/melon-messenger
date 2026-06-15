@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import { getChats } from "../api";
 import type { Chat } from "@melon/shared";
+import { applyMessageToChatList } from "../utils/chatListUpdate";
 
 export default function Chats() {
   const { user } = useAuth();
@@ -14,20 +15,7 @@ export default function Chats() {
   useEffect(() => {
     return subscribe((msg) => {
       if (msg.type === "message") {
-        setChats((prev) => {
-          const copy = [...prev];
-          const i = copy.findIndex((c) => c.id === msg.message.chatId);
-          if (i >= 0) {
-            copy[i] = {
-              ...copy[i],
-              lastMessageAt: msg.message.createdAt,
-              lastMessagePreview: msg.message.content.slice(0, 80),
-            };
-            const [moved] = copy.splice(i, 1);
-            copy.unshift(moved);
-          }
-          return copy;
-        });
+        setChats((prev) => applyMessageToChatList(prev, msg.message));
       }
     });
   }, [subscribe]);

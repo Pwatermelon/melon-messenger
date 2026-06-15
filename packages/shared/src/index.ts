@@ -41,7 +41,7 @@ export interface Chat {
 }
 
 /** Message content type */
-export type MessageType = "text" | "image" | "file" | "video" | "location" | "voice" | "circle";
+export type MessageType = "text" | "image" | "file" | "video" | "location" | "voice" | "circle" | "system";
 
 /** Attachment metadata (JSON) */
 export interface AttachmentMetadata {
@@ -52,6 +52,13 @@ export interface AttachmentMetadata {
   lat?: number;
   lng?: number;
   forwardedFrom?: { userId: string; username: string };
+  replyTo?: {
+    messageId: string;
+    senderId: string;
+    senderName: string;
+    preview: string;
+    messageType?: MessageType;
+  };
 }
 
 export interface Message {
@@ -60,6 +67,7 @@ export interface Message {
   senderId: string;
   content: string;
   createdAt: string;
+  editedAt?: string | null;
   sender?: User;
   messageType?: MessageType;
   attachmentUrl?: string | null;
@@ -78,13 +86,18 @@ export type WSClientMessage =
       attachmentUrl?: string | null;
       attachmentMetadata?: AttachmentMetadata | null;
     }
-  | { type: "typing"; chatId: string; isTyping: boolean };
+  | { type: "typing"; chatId: string; isTyping: boolean }
+  | { type: "mark_read"; chatId: string; messageId: string };
 
 export type WSServerMessage =
   | { type: "auth_ok"; user: User }
   | { type: "auth_error"; error: string }
   | { type: "message"; message: Message }
+  | { type: "message_edited"; chatId: string; message: Message }
   | { type: "message_deleted"; chatId: string; messageId: string }
+  | { type: "chat_removed"; chatId: string }
+  | { type: "chat_members_changed"; chatId: string }
+  | { type: "read_receipt"; chatId: string; userId: string; messageId: string }
   | { type: "typing"; chatId: string; userId: string; isTyping: boolean }
   | { type: "presence"; userId: string; online: boolean }
   | { type: "error"; error: string };

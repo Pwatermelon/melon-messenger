@@ -28,6 +28,8 @@ function extFromMime(mime: string): string {
     "audio/aac": ".aac",
     "application/pdf": ".pdf",
     "application/zip": ".zip",
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
   };
   return map[base] ?? "";
 }
@@ -61,9 +63,9 @@ export const uploadRoutes = new Elysia({ prefix: "/upload" })
     await storage.put(filename, bytes, contentType);
 
     if (purpose === "profile") {
-      await registerProfileMedia(filename, u.id);
+      await registerProfileMedia(filename, u.id, file.name);
     } else {
-      await registerMediaFile(filename, u.id, "chat");
+      await registerMediaFile(filename, u.id, "chat", file.name);
     }
 
     const url = uploadsPathFromKey(filename);

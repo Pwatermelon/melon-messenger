@@ -99,7 +99,10 @@ export default function ImageCropModal({ file, variant, title, onConfirm, onCanc
     startX: number;
     startY: number;
     startCrop: CropRect;
+    pointerId: number;
+    captureEl: HTMLElement | null;
   } | null>(null);
+  const suppressOverlayClickRef = useRef(false);
 
   const dragHandlersRef = useRef({
     onMove: (_e: PointerEvent) => {},
@@ -127,10 +130,20 @@ export default function ImageCropModal({ file, variant, title, onConfirm, onCanc
   }, [previewUrl, viewW, viewH, aspect]);
 
   const endDrag = useCallback(() => {
+    const drag = dragRef.current;
+    if (drag?.captureEl && drag.pointerId >= 0) {
+      try {
+        drag.captureEl.releasePointerCapture(drag.pointerId);
+      } catch {}
+    }
     dragRef.current = null;
     document.removeEventListener("pointermove", dragHandlersRef.current.onMove);
     document.removeEventListener("pointerup", dragHandlersRef.current.onUp);
     document.removeEventListener("pointercancel", dragHandlersRef.current.onUp);
+    suppressOverlayClickRef.current = true;
+    window.setTimeout(() => {
+      suppressOverlayClickRef.current = false;
+    }, 200);
   }, []);
 
   useEffect(() => {
@@ -173,15 +186,27 @@ export default function ImageCropModal({ file, variant, title, onConfirm, onCanc
     if (!crop || !layout) return;
     e.preventDefault();
     e.stopPropagation();
+    const el = e.currentTarget as HTMLElement;
+    try {
+      el.setPointerCapture(e.pointerId);
+    } catch {}
     dragRef.current = {
       mode,
       startX: e.clientX,
       startY: e.clientY,
       startCrop: { ...crop },
+      pointerId: e.pointerId,
+      captureEl: el,
     };
     document.addEventListener("pointermove", dragHandlersRef.current.onMove, { passive: false });
     document.addEventListener("pointerup", dragHandlersRef.current.onUp, { passive: false });
     document.addEventListener("pointercancel", dragHandlersRef.current.onUp, { passive: false });
+  }
+
+  function handleOverlayClick(e: React.MouseEvent) {
+    if (e.target !== e.currentTarget) return;
+    if (suppressOverlayClickRef.current || dragRef.current) return;
+    onCancel();
   }
 
   async function handleConfirm() {
@@ -199,7 +224,7 @@ export default function ImageCropModal({ file, variant, title, onConfirm, onCanc
   const circle = variant === "avatar";
 
   return (
-    <div className="search-overlay image-crop-overlay" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+    <div className="search-overlay image-crop-overlay" onClick={handleOverlayClick}>
       <div className="search-modal image-crop-modal" onClick={(e) => e.stopPropagation()}>
         <button type="button" className="modal-close" onClick={onCancel} aria-label="Закрыть">
           ×

@@ -13,6 +13,7 @@ export async function getChats(): Promise<
     createdAt: string;
     lastMessageAt: string | null;
     lastMessagePreview: string | null;
+    unreadCount?: number;
     members: Array<{ id: string; username: string; avatarUrl: string | null; subscriptionTier?: string; role: string }>;
   }>
 > {
@@ -256,17 +257,29 @@ export interface MessageItem {
   senderId: string;
   content: string;
   createdAt: string;
+  editedAt?: string | null;
   sender?: { id: string; username: string };
   messageType?: MessageType;
   attachmentUrl?: string | null;
   attachmentMetadata?: AttachmentMetadata | null;
 }
 
+export type ReadCursor = { userId: string; lastReadMessageId: string };
+
+export async function getChatUnreadCount(chatId: string): Promise<number> {
+  const res = await fetch(`${getApiUrl()}/chats/${encodeURIComponent(chatId)}/unread-count`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) return 0;
+  const data = (await res.json()) as { count?: number };
+  return typeof data.count === "number" ? data.count : 0;
+}
+
 export async function getMessages(
   chatId: string,
   limit?: number,
   before?: string
-): Promise<{ messages: MessageItem[] }> {
+): Promise<{ messages: MessageItem[]; readCursors?: ReadCursor[] }> {
   const params = new URLSearchParams();
   if (limit) params.set("limit", String(limit));
   if (before) params.set("before", before);
@@ -286,6 +299,27 @@ export async function deleteMessage(chatId: string, messageId: string): Promise<
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error ?? "Не удалось удалить сообщение");
   }
+}
+
+export async function editMessage(
+  chatId: string,
+  messageId: string,
+  content: string
+): Promise<MessageItem> {
+  const res = await fetch(
+    `${getApiUrl()}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${getToken()}`,
+      },
+      body: JSON.stringify({ content }),
+    }
+  );
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Не удалось изменить сообщение");
+  return data.message as MessageItem;
 }
 
 export async function forwardMessage(

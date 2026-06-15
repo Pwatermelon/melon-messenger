@@ -1,14 +1,16 @@
 import { useEffect, useRef } from "react";
-import { IconForward } from "./Icons";
+import { IconEdit, IconForward, IconReply } from "./Icons";
 
 type Props = {
   x: number;
   y: number;
+  onReply: () => void;
   onForward: () => void;
+  onEdit?: () => void;
   onClose: () => void;
 };
 
-export function MessageContextMenu({ x, y, onForward, onClose }: Props) {
+export function MessageContextMenu({ x, y, onReply, onForward, onEdit, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -17,6 +19,16 @@ export function MessageContextMenu({ x, y, onForward, onClose }: Props) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      const menu = ref.current;
+      if (!menu || menu.contains(e.target as Node)) return;
+      onClose();
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => window.removeEventListener("pointerdown", onPointerDown, true);
   }, [onClose]);
 
   useEffect(() => {
@@ -35,13 +47,24 @@ export function MessageContextMenu({ x, y, onForward, onClose }: Props) {
   }, [x, y]);
 
   return (
-    <>
-      <div className="message-menu-backdrop" onClick={onClose} />
-      <div ref={ref} className="message-context-menu" style={{ left: x, top: y }} role="menu">
-        <button type="button" className="message-context-menu-item" onClick={onForward} role="menuitem">
-          <IconForward size={18} /> Переслать
+    <div
+      ref={ref}
+      className="message-context-menu"
+      style={{ left: x, top: y }}
+      role="menu"
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <button type="button" className="message-context-menu-item" onClick={onReply} role="menuitem">
+        <IconReply size={18} /> Ответить
+      </button>
+      {onEdit && (
+        <button type="button" className="message-context-menu-item" onClick={onEdit} role="menuitem">
+          <IconEdit size={18} /> Изменить
         </button>
-      </div>
-    </>
+      )}
+      <button type="button" className="message-context-menu-item" onClick={onForward} role="menuitem">
+        <IconForward size={18} /> Переслать
+      </button>
+    </div>
   );
 }

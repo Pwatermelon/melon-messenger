@@ -179,7 +179,7 @@ S3_BUCKET=watermelon-media
 | Переменные | Назначение |
 |------------|------------|
 | `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY` | Оплата Platinum |
-| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Web Push |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Уведомления в браузере (Web Push; не email). `npx web-push generate-vapid-keys` |
 | `ADMIN_YANDEX_LOGINS`, `ADMIN_YANDEX_IDS` | Доступ в админ-панель |
 
 `MESSAGE_AT_REST_KEY` — base64 ≥ 32 байт или произвольная строка (будет нормализована). Шифрует content и metadata сообщений в ScyllaDB (AES-256-GCM).

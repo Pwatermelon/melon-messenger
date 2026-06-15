@@ -10,6 +10,8 @@ import * as scylla from "./services/scylla";
 import * as redis from "./services/redis";
 import { notifyUser } from "./services/webPush";
 import { grantMediaFromAttachment } from "./services/mediaAccess";
+import { upsertReadCursor } from "./services/readReceipts";
+import { trackSocket, untrackSocket } from "./wsRegistry";
 import type { WSClientMessage, WSServerMessage, Message } from "@melon/shared";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "watermelon-dev-secret-change-in-prod";
@@ -38,6 +40,15 @@ export async function publishChatEvent(chatId: string, payload: WSServerMessage)
 
 function chatTopic(chatId: string) {
   return `chat:${chatId}`;
+}
+
+async function isChatMember(chatId: string, userId: string): Promise<boolean> {
+  const [member] = await db
+    .select({ userId: chatMembers.userId })
+    .from(chatMembers)
+    .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, userId)))
+    .limit(1);
+  return Boolean(member);
 }
 
 function decodeJwtSubUnsafe(token: string): string | null {
@@ -139,6 +150,7 @@ export const wsHandlers = {
             },
           };
           send(ws, authOk);
+          trackSocket(u.id, ws);
           redis.setPresence(u.id).catch((err) => console.warn("[WS] setPresence failed:", err));
         } catch (e) {
           send(ws, { type: "auth_error", error: String(e) });
@@ -154,6 +166,10 @@ export const wsHandlers = {
       if (msg.type === "subscribe") {
         const { chatId } = msg;
         if (!chatId) return;
+        if (!(await isChatMember(chatId, ws.data.userId))) {
+          send(ws, { type: "error", error: "Not a member of this chat" });
+          return;
+        }
         ws.subscribe(chatTopic(chatId));
         ws.data.subscribedChats.add(chatId);
         return;
@@ -237,6 +253,7 @@ export const wsHandlers = {
       if (msg.type === "typing") {
         const { chatId, isTyping } = msg;
         if (!chatId) return;
+        if (!(await isChatMember(chatId, ws.data.userId))) return;
         const payload: WSServerMessage = {
           type: "typing",
           chatId,
@@ -244,6 +261,33 @@ export const wsHandlers = {
           isTyping: !!isTyping,
         };
         wsServerRef?.publish(chatTopic(chatId), JSON.stringify(payload));
+        return;
+      }
+
+      if (msg.type === "mark_read") {
+        const { chatId, messageId } = msg;
+        if (!chatId || !messageId) {
+          send(ws, { type: "error", error: "chatId and messageId required" });
+          return;
+        }
+        const [member] = await db
+          .select()
+          .from(chatMembers)
+          .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, ws.data.userId)))
+          .limit(1);
+        if (!member) {
+          send(ws, { type: "error", error: "Not a member of this chat" });
+          return;
+        }
+        const advanced = await upsertReadCursor(chatId, ws.data.userId, messageId);
+        if (advanced) {
+          await publishChatEvent(chatId, {
+            type: "read_receipt",
+            chatId,
+            userId: ws.data.userId,
+            messageId,
+          });
+        }
       }
       } catch (err) {
         console.error("[WS] message error:", err);
@@ -254,9 +298,14 @@ export const wsHandlers = {
     },
 
   close(ws: ServerWebSocket<WSData>) {
-    if (ws.data.userId) redis.removePresence(ws.data.userId);
+    if (ws.data.userId) {
+      untrackSocket(ws.data.userId, ws);
+      redis.removePresence(ws.data.userId);
+    }
   },
 };
+
+export { kickUserFromChat } from "./wsRegistry";
 
 export function setupRedisSubscriber(server: { publish: (topic: string, data: string) => number }) {
   redis.redisSub.psubscribe(`${redis.WS_CHANNEL_PREFIX}*`);

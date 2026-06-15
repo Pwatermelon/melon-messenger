@@ -1,5 +1,9 @@
 import { getApiUrl } from "../config";
 
+export type PushSubscribeResult =
+  | { ok: true }
+  | { ok: false; reason: "unsupported" | "server_unconfigured" | "subscribe_failed" | "permission_denied" };
+
 function urlBase64ToUint8Array(base64: string): Uint8Array {
   const padding = "=".repeat((4 - (base64.length % 4)) % 4);
   const b64 = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -16,11 +20,17 @@ export async function getVapidPublicKey(): Promise<string | null> {
   return data.enabled && data.publicKey ? data.publicKey : null;
 }
 
-export async function subscribeToPush(token: string): Promise<boolean> {
-  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
+export async function isPushServerConfigured(): Promise<boolean> {
+  return (await getVapidPublicKey()) !== null;
+}
+
+export async function subscribeToPush(token: string): Promise<PushSubscribeResult> {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    return { ok: false, reason: "unsupported" };
+  }
 
   const vapidKey = await getVapidPublicKey();
-  if (!vapidKey) return false;
+  if (!vapidKey) return { ok: false, reason: "server_unconfigured" };
 
   const reg = await navigator.serviceWorker.ready;
   let sub = await reg.pushManager.getSubscription();
@@ -32,7 +42,9 @@ export async function subscribeToPush(token: string): Promise<boolean> {
   }
 
   const json = sub.toJSON();
-  if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return false;
+  if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
+    return { ok: false, reason: "subscribe_failed" };
+  }
 
   const res = await fetch(`${getApiUrl()}/push/subscribe`, {
     method: "POST",
@@ -45,7 +57,7 @@ export async function subscribeToPush(token: string): Promise<boolean> {
       keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
     }),
   });
-  return res.ok;
+  return res.ok ? { ok: true } : { ok: false, reason: "subscribe_failed" };
 }
 
 export async function unsubscribeFromPush(token: string): Promise<void> {

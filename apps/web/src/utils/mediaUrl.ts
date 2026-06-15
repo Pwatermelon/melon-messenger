@@ -16,3 +16,13 @@ export function mediaUrl(path: string | null | undefined): string {
   const base = getApiUrl().replace(/\/api\/?$/, "");
   return `${base}${path.startsWith("/") ? path : `/${path}`}`;
 }
+
+/** Media URL that suggests download with the original filename (server sends Content-Disposition). */
+export function mediaDownloadUrl(path: string | null | undefined, fileName?: string | null): string {
+  const url = mediaUrl(path);
+  if (!url) return "";
+  const sep = url.includes("?") ? "&" : "?";
+  const params = ["download=1"];
+  if (fileName) params.push(`as=${encodeURIComponent(fileName)}`);
+  return `${url}${sep}${params.join("&")}`;
+}

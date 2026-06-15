@@ -5,11 +5,12 @@ import { useTheme } from "../context/ThemeContext";
 import { updateProfile, uploadFile } from "../api";
 import { mediaUrl } from "../utils/mediaUrl";
 import { compressImage } from "../utils/imageCompress";
-import { subscribeToPush, unsubscribeFromPush } from "../lib/pushNotifications";
+import { subscribeToPush, unsubscribeFromPush, isPushServerConfigured } from "../lib/pushNotifications";
 import { logoutViaYandex } from "../lib/yandexLogout";
 import { formatBirthdayLabel, getBirthdayAge } from "@melon/shared";
 import BirthdayInfoBlock from "./BirthdayInfoBlock";
 import ImageCropModal from "./ImageCropModal";
+import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 
 type Props = {
   onClose: () => void;
@@ -42,6 +43,7 @@ function SettingsSwitch({
 }
 
 export default function SettingsModal({ onClose }: Props) {
+  const overlayDismiss = useOverlayDismiss(onClose);
   const { user, updateUser, logout, token } = useAuth();
   const { theme, setTheme } = useTheme();
   const [username, setUsername] = useState(user?.username ?? "");
@@ -51,6 +53,7 @@ export default function SettingsModal({ onClose }: Props) {
   const [loginCopied, setLoginCopied] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
+  const [pushServerOk, setPushServerOk] = useState<boolean | null>(null);
   const [birthdayVisible, setBirthdayVisible] = useState(user?.birthdayVisible ?? false);
   const [privacyLoading, setPrivacyLoading] = useState(false);
   const [cropFile, setCropFile] = useState<File | null>(null);
@@ -65,6 +68,15 @@ export default function SettingsModal({ onClose }: Props) {
     setAvatarUrl(user?.avatarUrl ?? null);
     setBirthdayVisible(user?.birthdayVisible ?? false);
   }, [user]);
+
+  useEffect(() => {
+    void isPushServerConfigured().then(setPushServerOk);
+    if ("serviceWorker" in navigator && "PushManager" in window) {
+      void navigator.serviceWorker.ready.then((reg) =>
+        reg.pushManager.getSubscription().then((sub) => setPushEnabled(!!sub))
+      );
+    }
+  }, []);
 
   async function copyLogin() {
     if (!yandexLogin) return;
@@ -100,12 +112,8 @@ export default function SettingsModal({ onClose }: Props) {
         const original = await compressImage(originalFile);
         const fullRes = await uploadFile(original, { purpose: "profile" });
         const fullPath = fullRes.url.startsWith("http") ? new URL(fullRes.url).pathname : fullRes.url;
-        let history = [...(user.avatarHistory ?? [])];
-        if (user.avatarUrl && user.avatarUrl !== cropPath) {
-          history = [user.avatarUrl, ...history.filter((h) => h !== user.avatarUrl)];
-        }
-        history = [fullPath, ...history.filter((h) => h !== fullPath && h !== cropPath)];
-        payload.avatarHistory = history.slice(0, 24);
+        const history = [...(user.avatarHistory ?? [])];
+        payload.avatarHistory = [fullPath, ...history.filter((h) => h !== fullPath && h !== cropPath)].slice(0, 24);
       }
 
       const updated = await updateProfile(payload);
@@ -166,8 +174,16 @@ export default function SettingsModal({ onClose }: Props) {
       } else {
         const perm = await Notification.requestPermission();
         if (perm !== "granted") throw new Error("Разрешите уведомления в браузере");
-        const ok = await subscribeToPush(token);
-        if (!ok) throw new Error("Push недоступен на сервере");
+        const result = await subscribeToPush(token);
+        if (!result.ok) {
+          const err =
+            result.reason === "server_unconfigured"
+              ? "Уведомления в браузере не настроены на сервере (нужны push-ключи)"
+              : result.reason === "unsupported"
+                ? "Браузер не поддерживает push-уведомления"
+                : "Не удалось включить уведомления";
+          throw new Error(err);
+        }
         setPushEnabled(true);
       }
     } catch (e) {
@@ -194,9 +210,14 @@ export default function SettingsModal({ onClose }: Props) {
       <div
         className="search-overlay settings-overlay"
         data-testid="settings-modal"
-        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+        onPointerDown={overlayDismiss.onOverlayPointerDown}
+        onClick={overlayDismiss.onOverlayClick}
       >
-        <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="settings-modal"
+          onPointerDown={overlayDismiss.onModalPointerDown}
+          onClick={(e) => e.stopPropagation()}
+        >
           <button type="button" className="modal-close settings-modal-close" onClick={onClose} aria-label="Закрыть">
             ×
           </button>
@@ -297,11 +318,15 @@ export default function SettingsModal({ onClose }: Props) {
               <div className="settings-row">
                 <div className="settings-row-text">
                   <span className="settings-row-label">Push-уведомления</span>
-                  <span className="settings-row-hint">Сообщения в фоне</span>
+                  <span className="settings-row-hint">
+                    {pushServerOk === false
+                      ? "На сервере не заданы ключи Web Push"
+                      : "Когда вкладка закрыта или в фоне"}
+                  </span>
                 </div>
                 <SettingsSwitch
                   checked={pushEnabled}
-                  disabled={pushLoading}
+                  disabled={pushLoading || pushServerOk === false}
                   onChange={() => void togglePush()}
                   label="Push-уведомления"
                 />

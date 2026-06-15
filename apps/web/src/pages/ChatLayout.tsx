@@ -1,17 +1,33 @@
-import { useState, useEffect, useRef } from "react";
-import { Link, Outlet, useNavigate, useParams, useLocation } from "react-router-dom";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import SettingsModal from "../components/SettingsModal";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
-import { getChats, createDm, createGroup, searchUser, getContacts, addContact } from "../api";
-import type { Chat, User } from "@melon/shared";
+import { useActiveChat } from "../context/ActiveChatContext";
+import { getChats, createDm, createGroup, searchUser, getContacts, addContact, getChatUnreadCount } from "../api";
+import type { Chat, User, Message } from "@melon/shared";
 import { mediaUrl } from "../utils/mediaUrl";
 import { BrandIcon } from "../components/BrandIcon";
 import { IconPlus } from "../components/Icons";
 import { UserListLabel } from "../components/UserListLabel";
 import { userAvatarLetter, userDisplayName } from "../utils/userDisplay";
 import Profile from "./Profile";
+import ChatRoom from "./ChatRoom";
 import { APP_VERSION } from "../version";
+import { applyMessageToChatList } from "../utils/chatListUpdate";
+import { useCompactLayout } from "../hooks/useCompactLayout";
+
+function EmptyChat() {
+  return (
+    <div className="empty-chat">
+      <div className="empty-chat-icon">
+        <BrandIcon size={80} />
+      </div>
+      <h2>Watermelon Messenger</h2>
+      <p>Выберите чат или создайте новый</p>
+    </div>
+  );
+}
 
 export type ChatLayoutOutletContext = {
   openSettings: () => void;
@@ -21,10 +37,11 @@ export type ChatLayoutOutletContext = {
 
 export default function ChatLayout() {
   const { user } = useAuth();
-  const { subscribe } = useWebSocketContext();
+  const { subscribe, send, ready } = useWebSocketContext();
   const navigate = useNavigate();
   const location = useLocation();
-  const { chatId: currentChatId } = useParams();
+  const { activeChatId, openChat, closeChat } = useActiveChat();
+  const compact = useCompactLayout();
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -49,6 +66,32 @@ export default function ChatLayout() {
   const [contactsLoading, setContactsLoading] = useState(false);
   const [profileUserId, setProfileUserId] = useState<string | null | undefined>(undefined);
   const newChatMenuRef = useRef<HTMLDivElement>(null);
+  const subscribedChatsRef = useRef<Set<string>>(new Set());
+  const activeChatIdRef = useRef(activeChatId);
+  activeChatIdRef.current = activeChatId;
+  const userIdRef = useRef(user?.id);
+  userIdRef.current = user?.id;
+  const unreadRefreshTimersRef = useRef<Map<string, number>>(new Map());
+
+  const refreshChatUnreadCount = useCallback((chatId: string) => {
+    const timers = unreadRefreshTimersRef.current;
+    const existing = timers.get(chatId);
+    if (existing) window.clearTimeout(existing);
+    timers.set(
+      chatId,
+      window.setTimeout(() => {
+        timers.delete(chatId);
+        if (chatId === activeChatIdRef.current) return;
+        void getChatUnreadCount(chatId).then((count) => {
+          setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, unreadCount: count } : c)));
+        });
+      }, 200)
+    );
+  }, []);
+
+  const bumpChatPreview = useCallback((message: Pick<Message, "chatId" | "createdAt" | "content" | "messageType">) => {
+    setChats((prev) => applyMessageToChatList(prev, message));
+  }, []);
 
   function openProfile(userId?: string) {
     setProfileUserId(userId ?? null);
@@ -89,28 +132,59 @@ export default function ChatLayout() {
   }, [location.state, location.pathname, location.search, navigate]);
 
   useEffect(() => {
+    if (!activeChatId) return;
+    setChats((prev) => prev.map((c) => (c.id === activeChatId ? { ...c, unreadCount: 0 } : c)));
+  }, [activeChatId]);
+
+  useEffect(() => {
+    if (!ready) {
+      subscribedChatsRef.current.clear();
+      return;
+    }
+    for (const chat of chats) {
+      if (subscribedChatsRef.current.has(chat.id)) continue;
+      send({ type: "subscribe", chatId: chat.id });
+      subscribedChatsRef.current.add(chat.id);
+    }
+  }, [chats, ready, send]);
+
+  useEffect(() => {
     return subscribe((msg) => {
       if (msg.type === "message") {
         setChats((prev) => {
-          const copy = [...prev];
-          const i = copy.findIndex((c) => c.id === msg.message.chatId);
-          if (i >= 0) {
-            copy[i] = {
-              ...copy[i],
-              lastMessageAt: msg.message.createdAt,
-              lastMessagePreview: msg.message.content.slice(0, 80),
-            };
-            const [moved] = copy.splice(i, 1);
-            copy.unshift(moved);
+          const next = applyMessageToChatList(prev, msg.message);
+          const chatId = msg.message.chatId;
+          const isSystem = (msg.message.messageType ?? "text") === "system";
+          if (
+            !isSystem &&
+            chatId !== activeChatIdRef.current &&
+            msg.message.senderId !== userIdRef.current
+          ) {
+            refreshChatUnreadCount(chatId);
           }
-          return copy;
+          return next;
         });
       }
-      if (msg.type === "message_deleted") {
-        window.dispatchEvent(new Event("wm:refresh-chats"));
+      if (msg.type === "message_edited") {
+        setChats((prev) => applyMessageToChatList(prev, msg.message));
+      }
+      if (msg.type === "read_receipt" && msg.userId === userIdRef.current) {
+        setChats((prev) => prev.map((c) => (c.id === msg.chatId ? { ...c, unreadCount: 0 } : c)));
+      }
+      if (msg.type === "message_deleted" || msg.type === "chat_removed" || msg.type === "chat_members_changed") {
+        if (msg.type === "chat_removed") {
+          setChats((prev) => prev.filter((c) => c.id !== msg.chatId));
+          if (msg.chatId === activeChatIdRef.current) closeChat();
+        }
+        if (msg.type === "chat_members_changed") {
+          window.dispatchEvent(new Event("wm:refresh-chats"));
+        }
+        if (msg.type === "message_deleted") {
+          window.dispatchEvent(new Event("wm:refresh-chats"));
+        }
       }
     });
-  }, [subscribe]);
+  }, [subscribe, closeChat, refreshChatUnreadCount]);
 
   function refreshChats() {
     getChats().then((list) => setChats(list as Chat[]));
@@ -181,7 +255,7 @@ export default function ChatLayout() {
     }
   }
 
-  async function startDm(otherUserId: string) {
+  async function startDm(otherUserId: string): Promise<boolean> {
     setDmError("");
     try {
       const chat = await createDm(otherUserId);
@@ -190,16 +264,22 @@ export default function ChatLayout() {
       setDmUser(null);
       setSidebarUser(null);
       setSidebarQuery("");
-      setChats((prev) => [chat as Chat, ...prev]);
-      navigate(`/chat/${chat.id}`);
+      setSidebarTab("chats");
+      setChats((prev) => [chat as Chat, ...prev.filter((c) => c.id !== chat.id)]);
+      await openChat(chat.id);
+      return true;
     } catch (e) {
       if (e instanceof Error && e.message.includes("already")) {
         const existing = chats.find((c) => c.members.some((m) => m.id === otherUserId));
-        if (existing) navigate(`/chat/${existing.id}`);
+        if (existing) {
+          setSidebarTab("chats");
+          await openChat(existing.id);
+        }
         setDmOpen(false);
-      } else {
-        setDmError(e instanceof Error ? e.message : "Не удалось создать чат");
+        return true;
       }
+      setDmError(e instanceof Error ? e.message : "Не удалось создать чат");
+      return false;
     }
   }
 
@@ -216,7 +296,7 @@ export default function ChatLayout() {
       setGroupAddLogin("");
       setGroupAddError("");
       setChats((prev) => [chat as Chat, ...prev]);
-      navigate(`/chat/${chat.id}`);
+      await openChat(chat.id);
     } catch (err) {
       setGroupError(err instanceof Error ? err.message : "Не удалось создать группу");
     }
@@ -248,7 +328,8 @@ export default function ChatLayout() {
   function displayName(chat: Chat): string {
     if (chat.name) return chat.name;
     const other = chat.members.find((m) => m.id !== user?.id);
-    return other?.username ?? "Chat";
+    if (other?.username) return other.username;
+    return chat.type === "dm" ? "Удалённый чат" : "Чат";
   }
 
   function avatarLetter(chat: Chat): string {
@@ -275,7 +356,10 @@ export default function ChatLayout() {
   }
 
   return (
-    <div className={`layout${currentChatId ? " layout-chat-open" : ""}`} data-testid="messenger-shell">
+    <div
+      className={`layout${activeChatId ? " layout-chat-open" : ""}${compact ? " layout-compact" : ""}`}
+      data-testid="messenger-shell"
+    >
       <aside className="sidebar">
         <div className="sidebar-header">
           <h2 className="sidebar-title">
@@ -365,19 +449,32 @@ export default function ChatLayout() {
             <p className="chat-list-empty">Нет чатов</p>
           ) : (
             chats.map((chat) => (
-              <Link
+              <button
                 key={chat.id}
-                to={`/chat/${chat.id}`}
-                className={`chat-item ${currentChatId === chat.id ? "chat-item-active" : ""}`}
+                type="button"
+                className={`chat-item chat-item-btn ${activeChatId === chat.id ? "chat-item-active" : ""}`}
+                onClick={() => {
+                  setChats((prev) =>
+                    prev.map((c) => (c.id === chat.id ? { ...c, unreadCount: 0 } : c))
+                  );
+                  void openChat(chat.id);
+                }}
               >
                 <div className="chat-item-avatar">
                   {chatAvatar(chat)}
                 </div>
                 <div className="chat-item-body">
-                  <p className="chat-item-name">{displayName(chat)}</p>
+                  <div className="chat-item-top">
+                    <p className="chat-item-name">{displayName(chat)}</p>
+                    {(chat.unreadCount ?? 0) > 0 && activeChatId !== chat.id && (
+                      <span className="chat-item-unread" aria-label={`${chat.unreadCount} непрочитанных`}>
+                        {chat.unreadCount! > 99 ? "99+" : chat.unreadCount}
+                      </span>
+                    )}
+                  </div>
                   <p className="chat-item-preview">{chat.lastMessagePreview ?? "Нет сообщений"}</p>
                 </div>
-              </Link>
+              </button>
             ))
           )}
           </>
@@ -433,11 +530,17 @@ export default function ChatLayout() {
         </div>
       </aside>
       <main className="main">
-        <Outlet context={{
-          openSettings: () => setSettingsOpen(true),
-          openProfile,
-          addContact: handleAddContact,
-        } satisfies ChatLayoutOutletContext} />
+        {activeChatId ? (
+          <ChatRoom
+            chatId={activeChatId}
+            onClose={closeChat}
+            openProfile={openProfile}
+            onSyncPreview={bumpChatPreview}
+            showBack={compact}
+          />
+        ) : (
+          <EmptyChat />
+        )}
       </main>
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
@@ -450,6 +553,7 @@ export default function ChatLayout() {
           onOpenSettings={() => { setProfileUserId(undefined); setSettingsOpen(true); }}
           onAddContact={handleAddContact}
           onContactChange={() => { if (sidebarTab === "contacts") void loadContacts(); }}
+          onStartDm={startDm}
         />
       )}
 

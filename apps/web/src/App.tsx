@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate, Outlet, useParams } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import { WebSocketProvider } from "./context/WebSocketContext";
+import { ActiveChatProvider } from "./context/ActiveChatContext";
 import Login from "./pages/Login";
 import AuthCallback from "./pages/AuthCallback";
 import BetaWelcome from "./pages/BetaWelcome";
@@ -8,9 +9,8 @@ import BetaPending from "./pages/BetaPending";
 import AdminPanel from "./pages/AdminPanel";
 import Platinum from "./pages/Platinum";
 import ChatLayout from "./pages/ChatLayout";
-import ChatRoom from "./pages/ChatRoom";
+import ChatLegacyRedirect from "./pages/ChatLegacyRedirect";
 import IconPreview from "./pages/IconPreview";
-import { BrandIcon } from "./components/BrandIcon";
 
 function AuthRequired({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -24,20 +24,10 @@ function MessengerLayout() {
   if (!user?.betaApproved) return <Navigate to="/beta/pending" replace />;
   return (
     <WebSocketProvider token={token}>
-      <Outlet />
+      <ActiveChatProvider>
+        <Outlet />
+      </ActiveChatProvider>
     </WebSocketProvider>
-  );
-}
-
-function EmptyChat() {
-  return (
-    <div className="empty-chat">
-      <div className="empty-chat-icon">
-        <BrandIcon size={80} />
-      </div>
-      <h2>Watermelon Messenger</h2>
-      <p>Выберите чат или создайте новый</p>
-    </div>
   );
 }
 
@@ -59,13 +49,11 @@ export default function App() {
       <Route path="/admin" element={<AuthRequired><AdminPanel /></AuthRequired>} />
 
       <Route element={<AuthRequired><MessengerLayout /></AuthRequired>}>
-        <Route path="/" element={<ChatLayout />}>
-          <Route index element={<EmptyChat />} />
-          <Route path="chat/:chatId" element={<ChatRoom />} />
-          <Route path="settings" element={<Navigate to="/" replace state={{ openSettings: true }} />} />
-          <Route path="profile" element={<Navigate to="/" replace state={{ openProfile: null }} />} />
-          <Route path="profile/:userId" element={<ProfileRedirect />} />
-        </Route>
+        <Route path="/" element={<ChatLayout />} />
+        <Route path="chat/:chatId" element={<ChatLegacyRedirect />} />
+        <Route path="settings" element={<Navigate to="/" replace state={{ openSettings: true }} />} />
+        <Route path="profile" element={<Navigate to="/" replace state={{ openProfile: null }} />} />
+        <Route path="profile/:userId" element={<ProfileRedirect />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

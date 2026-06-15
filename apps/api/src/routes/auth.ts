@@ -131,12 +131,6 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     if (body.avatarUrl !== undefined) {
       const newUrl =
         typeof body.avatarUrl === "string" ? body.avatarUrl.trim() || null : null;
-      if (newUrl && newUrl !== u.avatarUrl && u.avatarUrl) {
-        const history = parseAvatarHistory(u.avatarHistory);
-        updates.avatarHistory = JSON.stringify(
-          [u.avatarUrl, ...history.filter((h) => h !== newUrl && h !== u.avatarUrl)].slice(0, 24)
-        );
-      }
       updates.avatarUrl = newUrl;
     }
     if (Array.isArray(body.avatarHistory)) {

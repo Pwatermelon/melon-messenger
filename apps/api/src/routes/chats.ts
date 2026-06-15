@@ -2,13 +2,21 @@ import { Elysia } from "elysia";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
 import { authPlugin, requireAuth } from "../auth";
 import { db, users, chats, chatMembers } from "../db";
-import { getMessages as scyllaGetMessages, getMessage as scyllaGetMessage, deleteMessage as scyllaDeleteMessage, insertMessage as scyllaInsertMessage, deleteChatMessages } from "../services/scylla";
-import { publishChatEvent } from "../ws";
+import { getMessages as scyllaGetMessages, getMessage as scyllaGetMessage, deleteMessage as scyllaDeleteMessage, insertMessage as scyllaInsertMessage, deleteChatMessages, updateMessageContent as scyllaUpdateMessageContent, countUnreadMessages as scyllaCountUnreadMessages } from "../services/scylla";
+import { publishChatEvent, kickUserFromChat } from "../ws";
 import { notifyUser } from "../services/webPush";
-import type { AttachmentMetadata, Message as MessageDto, MessageType } from "@melon/shared";
+import type { AttachmentMetadata, Message as MessageDto, MessageType, Message } from "@melon/shared";
 import { toPublicProfile } from "../lib/userDto";
 import { usersShareChat } from "../lib/chatAccess";
-import { grantMediaFromAttachment, signMediaPath, signUserMedia } from "../services/mediaAccess";
+import {
+  ensureChatAvatarRegistered,
+  grantMediaFromAttachment,
+  grantMediaToChat,
+  signMediaPath,
+  signUserMedia,
+  filenameFromPath,
+} from "../services/mediaAccess";
+import { getReadCursors, getUserReadCursorsByChat } from "../services/readReceipts";
 
 function toUser(u: typeof users.$inferSelect) {
   return toPublicProfile(u);
@@ -21,6 +29,75 @@ function parseAttachmentMetadata(raw: string | null | undefined): AttachmentMeta
   } catch {
     return null;
   }
+}
+
+async function rowToMessageDto(
+  r: {
+    message_id: string;
+    chat_id: string;
+    sender_id: string;
+    content: string;
+    created_at: Date;
+    message_type?: string | null;
+    attachment_url?: string | null;
+    attachment_metadata?: string | null;
+    edited_at?: Date | null;
+  },
+  viewerId: string,
+  sender?: Awaited<ReturnType<typeof signUserMedia<ReturnType<typeof toUser>>>>
+): Promise<MessageDto> {
+  const attachmentMetadata = parseAttachmentMetadata(r.attachment_metadata);
+  const rawUrl = r.attachment_url ?? null;
+  const attachmentUrl = rawUrl ? (await signMediaPath(rawUrl, viewerId)) ?? rawUrl : null;
+  return {
+    id: r.message_id,
+    chatId: r.chat_id,
+    senderId: r.sender_id,
+    content: r.content,
+    createdAt: r.created_at?.toISOString?.(),
+    editedAt: r.edited_at?.toISOString?.() ?? null,
+    sender,
+    messageType: (r.message_type as MessageType) ?? "text",
+    attachmentUrl,
+    attachmentMetadata,
+  };
+}
+
+type ChatDto = {
+  id: string;
+  type: string;
+  name: string | null;
+  avatarUrl?: string | null;
+  createdAt?: string | null;
+  lastMessageAt?: string | null;
+  lastMessagePreview?: string | null;
+  unreadCount?: number;
+  members: Array<ReturnType<typeof toUser> & { role: string }>;
+};
+
+async function signChatDto<T extends ChatDto>(chat: T, viewerId: string): Promise<T> {
+  const avatarUrl = chat.avatarUrl
+    ? (await signMediaPath(chat.avatarUrl, viewerId)) ?? chat.avatarUrl
+    : chat.avatarUrl;
+  const members = await Promise.all(chat.members.map((m) => signUserMedia(m, viewerId)));
+  return { ...chat, avatarUrl, members };
+}
+
+async function publishGroupSystemEvent(chatId: string, actorId: string, content: string): Promise<void> {
+  const { messageId, createdAt } = await scyllaInsertMessage(chatId, actorId, content, {
+    messageType: "system",
+  });
+  const [actor] = await db.select().from(users).where(eq(users.id, actorId)).limit(1);
+  const message: Message = {
+    id: messageId,
+    chatId,
+    senderId: actorId,
+    content,
+    createdAt: createdAt.toISOString(),
+    messageType: "system",
+    sender: actor ? toUser(actor) : undefined,
+  };
+  await publishChatEvent(chatId, { type: "message", message });
 }
 
 export const chatRoutes = new Elysia({ prefix: "/chats" })
@@ -90,47 +167,54 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       .where(eq(chatMembers.userId, u.id))
       .orderBy(desc(chats.createdAt));
 
-    const result = await Promise.all(
-      memberChats.map(async (row) => {
-        const members = await db
-          .select({ user: users, role: chatMembers.role })
-          .from(chatMembers)
-          .innerJoin(users, eq(users.id, chatMembers.userId))
-          .where(eq(chatMembers.chatId, row.chatId));
-        let lastMessagePreview: string | null = null;
-        let lastMessageAt: string | null = null;
-        try {
-          const [first] = await scyllaGetMessages(row.chatId, 1);
-          if (first) {
-            lastMessagePreview = first.content.slice(0, 80);
-            lastMessageAt = first.created_at?.toISOString?.() ?? null;
-          }
-        } catch {
-          // Scylla might be unavailable
+    const result: ChatDto[] = [];
+    const readCursorsByChat = await getUserReadCursorsByChat(u.id);
+    for (const row of memberChats) {
+      const members = await db
+        .select({ user: users, role: chatMembers.role })
+        .from(chatMembers)
+        .innerJoin(users, eq(users.id, chatMembers.userId))
+        .where(eq(chatMembers.chatId, row.chatId));
+      if (row.chat.type === "dm" && members.length < 2) {
+        await db
+          .delete(chatMembers)
+          .where(and(eq(chatMembers.chatId, row.chatId), eq(chatMembers.userId, u.id)));
+        await db.delete(chats).where(eq(chats.id, row.chatId));
+        await deleteChatMessages(row.chatId).catch(() => {});
+        await publishChatEvent(row.chatId, { type: "chat_removed", chatId: row.chatId }).catch(() => {});
+        continue;
+      }
+      let lastMessagePreview: string | null = null;
+      let lastMessageAt: string | null = null;
+      try {
+        const [first] = await scyllaGetMessages(row.chatId, 1);
+        if (first) {
+          lastMessagePreview = first.content.slice(0, 80);
+          lastMessageAt = first.created_at?.toISOString?.() ?? null;
         }
-        return {
-          id: row.chat.id,
-          type: row.chat.type,
-          name: row.chat.name,
-          avatarUrl: row.chat.avatarUrl,
-          createdAt: row.chat.createdAt?.toISOString?.(),
-          lastMessageAt,
-          lastMessagePreview,
-          members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
-        };
-      })
-    );
-    const signed = await Promise.all(
-      result.map(async (chat) => {
-        const avatarUrl = chat.avatarUrl
-          ? (await signMediaPath(chat.avatarUrl, u.id)) ?? chat.avatarUrl
-          : chat.avatarUrl;
-        const members = await Promise.all(
-          chat.members.map(async (m) => signUserMedia(m, u.id))
-        );
-        return { ...chat, avatarUrl, members };
-      })
-    );
+      } catch {
+        // Scylla might be unavailable
+      }
+      const lastRead = readCursorsByChat.get(row.chatId) ?? null;
+      let unreadCount = 0;
+      try {
+        unreadCount = await scyllaCountUnreadMessages(row.chatId, lastRead, u.id);
+      } catch {
+        unreadCount = 0;
+      }
+      result.push({
+        id: row.chat.id,
+        type: row.chat.type,
+        name: row.chat.name,
+        avatarUrl: row.chat.avatarUrl,
+        createdAt: row.chat.createdAt?.toISOString?.(),
+        lastMessageAt,
+        lastMessagePreview,
+        unreadCount,
+        members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
+      });
+    }
+    const signed = await Promise.all(result.map((chat) => signChatDto(chat, u.id)));
     return signed;
   })
   .post("/dm", async ({ user, body, set }) => {
@@ -166,15 +250,19 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         .from(chatMembers)
         .innerJoin(users, eq(users.id, chatMembers.userId))
         .where(eq(chatMembers.chatId, chat.id));
-      return {
-        id: chat.id,
-        type: chat.type,
-        name: chat.name,
-        createdAt: chat.createdAt?.toISOString?.(),
-        lastMessageAt: null,
-        lastMessagePreview: null,
-        members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
-      };
+      return signChatDto(
+        {
+          id: chat.id,
+          type: chat.type,
+          name: chat.name,
+          avatarUrl: chat.avatarUrl,
+          createdAt: chat.createdAt?.toISOString?.(),
+          lastMessageAt: null,
+          lastMessagePreview: null,
+          members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
+        },
+        u.id
+      );
     }
     const [chat] = await db.insert(chats).values({ type: "dm" }).returning();
     await db.insert(chatMembers).values([
@@ -186,16 +274,19 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       .from(chatMembers)
       .innerJoin(users, eq(users.id, chatMembers.userId))
       .where(eq(chatMembers.chatId, chat.id));
-    return {
-      id: chat.id,
-      type: chat.type,
-      name: chat.name,
-      avatarUrl: chat.avatarUrl,
-      createdAt: chat.createdAt?.toISOString?.(),
-      lastMessageAt: null,
-      lastMessagePreview: null,
-      members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
-    };
+    return signChatDto(
+      {
+        id: chat.id,
+        type: chat.type,
+        name: chat.name,
+        avatarUrl: chat.avatarUrl,
+        createdAt: chat.createdAt?.toISOString?.(),
+        lastMessageAt: null,
+        lastMessagePreview: null,
+        members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
+      },
+      u.id
+    );
   })
   .post("/group", async ({ user, body, set }) => {
     const u = requireAuth(set)(user);
@@ -224,16 +315,19 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       .from(chatMembers)
       .innerJoin(users, eq(users.id, chatMembers.userId))
       .where(eq(chatMembers.chatId, chat.id));
-    return {
-      id: chat.id,
-      type: chat.type,
-      name: chat.name,
-      avatarUrl: chat.avatarUrl,
-      createdAt: chat.createdAt?.toISOString?.(),
-      lastMessageAt: null,
-      lastMessagePreview: null,
-      members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
-    };
+    return signChatDto(
+      {
+        id: chat.id,
+        type: chat.type,
+        name: chat.name,
+        avatarUrl: chat.avatarUrl,
+        createdAt: chat.createdAt?.toISOString?.(),
+        lastMessageAt: null,
+        lastMessagePreview: null,
+        members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
+      },
+      u.id
+    );
   })
   .get("/:id", async ({ user, params, set }) => {
     const u = requireAuth(set)(user);
@@ -253,6 +347,16 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       .from(chatMembers)
       .innerJoin(users, eq(users.id, chatMembers.userId))
       .where(eq(chatMembers.chatId, chatId));
+    if (chatRow.type === "dm" && members.length < 2) {
+      await db
+        .delete(chatMembers)
+        .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, u.id)));
+      await db.delete(chats).where(eq(chats.id, chatId));
+      await deleteChatMessages(chatId).catch(() => {});
+      await publishChatEvent(chatId, { type: "chat_removed", chatId }).catch(() => {});
+      set.status = 404;
+      return { error: "Chat not found" };
+    }
     let lastMessagePreview: string | null = null;
     let lastMessageAt: string | null = null;
     try {
@@ -262,16 +366,19 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         lastMessageAt = first.created_at?.toISOString?.() ?? null;
       }
     } catch {}
-    return {
-      id: chatRow.id,
-      type: chatRow.type,
-      name: chatRow.name,
-      avatarUrl: chatRow.avatarUrl,
-      createdAt: chatRow.createdAt?.toISOString?.(),
-      lastMessageAt,
-      lastMessagePreview,
-      members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
-    };
+    return signChatDto(
+      {
+        id: chatRow.id,
+        type: chatRow.type,
+        name: chatRow.name,
+        avatarUrl: chatRow.avatarUrl,
+        createdAt: chatRow.createdAt?.toISOString?.(),
+        lastMessageAt,
+        lastMessagePreview,
+        members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
+      },
+      u.id
+    );
   })
   .post("/:id/members", async ({ user, params, body, set }) => {
     const u = requireAuth(set)(user);
@@ -302,6 +409,14 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
     const toAdd = ids.filter((id) => !alreadySet.has(id));
     if (toAdd.length > 0) {
       await db.insert(chatMembers).values(toAdd.map((userId) => ({ chatId, userId, role: "member" as const })));
+      const addedNames = existingUsers
+        .filter((usr) => toAdd.includes(usr.id))
+        .map((usr) => usr.username)
+        .join(", ");
+      const [actor] = await db.select().from(users).where(eq(users.id, u.id)).limit(1);
+      const text = `${actor?.username ?? "Участник"} добавил(а): ${addedNames}`;
+      await publishGroupSystemEvent(chatId, u.id, text);
+      await publishChatEvent(chatId, { type: "chat_members_changed", chatId });
     }
     const members = await db
       .select({ user: users, role: chatMembers.role })
@@ -317,15 +432,19 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         lastMessageAt = first.created_at?.toISOString?.() ?? null;
       }
     } catch {}
-    return {
-      id: chatRow.id,
-      type: chatRow.type,
-      name: chatRow.name,
-      createdAt: chatRow.createdAt?.toISOString?.(),
-      lastMessageAt,
-      lastMessagePreview,
-      members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
-    };
+    return signChatDto(
+      {
+        id: chatRow.id,
+        type: chatRow.type,
+        name: chatRow.name,
+        avatarUrl: chatRow.avatarUrl,
+        createdAt: chatRow.createdAt?.toISOString?.(),
+        lastMessageAt,
+        lastMessagePreview,
+        members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
+      },
+      u.id
+    );
   })
   .delete("/:id/members/:userId", async ({ user, params, set }) => {
     const u = requireAuth(set)(user);
@@ -344,7 +463,16 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       set.status = 403;
       return { error: "Only admin can remove other members" };
     }
+    const [targetUser] = await db.select().from(users).where(eq(users.id, targetUserId)).limit(1);
+    const [actor] = await db.select().from(users).where(eq(users.id, u.id)).limit(1);
     await db.delete(chatMembers).where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, targetUserId)));
+    const eventText =
+      targetUserId === u.id
+        ? `${targetUser?.username ?? "Участник"} покинул(а) группу`
+        : `${actor?.username ?? "Участник"} исключил(а) ${targetUser?.username ?? "участника"}`;
+    await publishGroupSystemEvent(chatId, u.id, eventText);
+    kickUserFromChat(targetUserId, chatId, { type: "chat_removed", chatId });
+    await publishChatEvent(chatId, { type: "chat_members_changed", chatId });
     const members = await db
       .select({ user: users, role: chatMembers.role })
       .from(chatMembers)
@@ -359,16 +487,36 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         lastMessageAt = first.created_at?.toISOString?.() ?? null;
       }
     } catch {}
-    return {
-      id: chatRow.id,
-      type: chatRow.type,
-      name: chatRow.name,
-      avatarUrl: chatRow.avatarUrl,
-      createdAt: chatRow.createdAt?.toISOString?.(),
-      lastMessageAt,
-      lastMessagePreview,
-      members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
-    };
+    return signChatDto(
+      {
+        id: chatRow.id,
+        type: chatRow.type,
+        name: chatRow.name,
+        avatarUrl: chatRow.avatarUrl,
+        createdAt: chatRow.createdAt?.toISOString?.(),
+        lastMessageAt,
+        lastMessagePreview,
+        members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
+      },
+      u.id
+    );
+  })
+  .get("/:id/unread-count", async ({ user, params, set }) => {
+    const u = requireAuth(set)(user);
+    const { id: chatId } = params;
+    const [member] = await db
+      .select()
+      .from(chatMembers)
+      .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, u.id)))
+      .limit(1);
+    if (!member) {
+      set.status = 403;
+      return { error: "Not a member of this chat" };
+    }
+    const readMap = await getUserReadCursorsByChat(u.id);
+    const lastRead = readMap.get(chatId) ?? null;
+    const count = await scyllaCountUnreadMessages(chatId, lastRead, u.id);
+    return { count };
   })
   .get("/:id/messages", async ({ user, params, query, set }) => {
     const u = requireAuth(set)(user);
@@ -393,26 +541,64 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
     }
     const messages = await Promise.all(
       rows.map(async (r) => {
-        let attachmentMetadata = null;
-        try {
-          if (r.attachment_metadata) attachmentMetadata = JSON.parse(r.attachment_metadata) as import("@melon/shared").AttachmentMetadata;
-        } catch {}
-        const rawUrl = r.attachment_url ?? null;
-        const attachmentUrl = rawUrl ? (await signMediaPath(rawUrl, u.id)) ?? rawUrl : null;
-        return {
-          id: r.message_id,
-          chatId: r.chat_id,
-          senderId: r.sender_id,
-          content: r.content,
-          createdAt: r.created_at?.toISOString?.(),
-          sender: userMap.get(r.sender_id) ? toUser(userMap.get(r.sender_id)!) : undefined,
-          messageType: (r.message_type as import("@melon/shared").MessageType) ?? "text",
-          attachmentUrl,
-          attachmentMetadata,
-        };
+        const senderRow = userMap.get(r.sender_id);
+        const sender = senderRow
+          ? await signUserMedia(toUser(senderRow), u.id)
+          : undefined;
+        return rowToMessageDto(r, u.id, sender);
       })
     );
-    return { messages: messages.slice().reverse() };
+    const readCursors = await getReadCursors(chatId);
+    return { messages: messages.slice().reverse(), readCursors };
+  })
+  .patch("/:id/messages/:messageId", async ({ user, params, body, set }) => {
+    const u = requireAuth(set)(user);
+    const { id: chatId, messageId } = params;
+    const [member] = await db
+      .select()
+      .from(chatMembers)
+      .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, u.id)))
+      .limit(1);
+    if (!member) {
+      set.status = 403;
+      return { error: "Not a member of this chat" };
+    }
+    const row = await scyllaGetMessage(chatId, messageId);
+    if (!row) {
+      set.status = 404;
+      return { error: "Message not found" };
+    }
+    if (row.sender_id !== u.id) {
+      set.status = 403;
+      return { error: "Only the sender can edit this message" };
+    }
+    const messageType = (row.message_type as MessageType) ?? "text";
+    if (messageType !== "text") {
+      set.status = 400;
+      return { error: "Only text messages can be edited" };
+    }
+    const payload = body as { content?: string };
+    const content = typeof payload.content === "string" ? payload.content.trim() : "";
+    if (!content) {
+      set.status = 400;
+      return { error: "content required" };
+    }
+    if (content === row.content) {
+      const [senderUser] = await db.select().from(users).where(eq(users.id, u.id)).limit(1);
+      const sender = senderUser ? await signUserMedia(toUser(senderUser), u.id) : undefined;
+      const message = await rowToMessageDto(row, u.id, sender);
+      return { message };
+    }
+    const editedAt = await scyllaUpdateMessageContent(chatId, messageId, content);
+    const [senderUser] = await db.select().from(users).where(eq(users.id, u.id)).limit(1);
+    const sender = senderUser ? await signUserMedia(toUser(senderUser), u.id) : undefined;
+    const message = await rowToMessageDto(
+      { ...row, content, edited_at: editedAt },
+      u.id,
+      sender
+    );
+    await publishChatEvent(chatId, { type: "message_edited", chatId, message });
+    return { message };
   })
   .delete("/:id/messages/:messageId", async ({ user, params, set }) => {
     const u = requireAuth(set)(user);
@@ -557,11 +743,27 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         members: [] as unknown as Array<ReturnType<typeof toUser> & { role: string }>,
       };
     }
+    const oldAvatar = chatRow.avatarUrl ?? null;
     const [updatedChat] = await db
       .update(chats)
       .set(updates)
       .where(eq(chats.id, chatId))
       .returning();
+    const newAvatar = "avatarUrl" in updates ? (updates.avatarUrl ?? null) : oldAvatar;
+    if ("avatarUrl" in updates && updates.avatarUrl) {
+      await ensureChatAvatarRegistered(chatId, updates.avatarUrl);
+      const filename = filenameFromPath(updates.avatarUrl);
+      if (filename) await grantMediaToChat(filename, chatId);
+    }
+    if ("avatarUrl" in updates && newAvatar !== oldAvatar) {
+      const [actor] = await db.select().from(users).where(eq(users.id, u.id)).limit(1);
+      const text =
+        newAvatar === null
+          ? `${actor?.username ?? "Участник"} удалил(а) фото группы`
+          : `${actor?.username ?? "Участник"} изменил(а) фото группы`;
+      await publishGroupSystemEvent(chatId, u.id, text);
+      await publishChatEvent(chatId, { type: "chat_members_changed", chatId });
+    }
     const members = await db
       .select({ user: users, role: chatMembers.role })
       .from(chatMembers)
@@ -576,16 +778,19 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         lastMessageAt = first.created_at?.toISOString?.() ?? null;
       }
     } catch {}
-    return {
-      id: updatedChat.id,
-      type: updatedChat.type,
-      name: updatedChat.name,
-      avatarUrl: updatedChat.avatarUrl,
-      createdAt: updatedChat.createdAt?.toISOString?.(),
-      lastMessageAt,
-      lastMessagePreview,
-      members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
-    };
+    return signChatDto(
+      {
+        id: updatedChat.id,
+        type: updatedChat.type,
+        name: updatedChat.name,
+        avatarUrl: updatedChat.avatarUrl,
+        createdAt: updatedChat.createdAt?.toISOString?.(),
+        lastMessageAt,
+        lastMessagePreview,
+        members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
+      },
+      u.id
+    );
   })
   .delete("/:id", async ({ user, params, set }) => {
     const u = requireAuth(set)(user);
@@ -613,6 +818,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       await db.delete(chatMembers).where(eq(chatMembers.chatId, chatId));
       await db.delete(chats).where(eq(chats.id, chatId));
       await deleteChatMessages(chatId).catch(() => {});
+      await publishChatEvent(chatId, { type: "chat_removed", chatId }).catch(() => {});
       return { success: true };
     }
 
@@ -627,6 +833,10 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
     if (remaining.length === 0) {
       await db.delete(chats).where(eq(chats.id, chatId));
       await deleteChatMessages(chatId).catch(() => {});
+      await publishChatEvent(chatId, { type: "chat_removed", chatId }).catch(() => {});
+    } else {
+      await publishChatEvent(chatId, { type: "chat_members_changed", chatId }).catch(() => {});
     }
+    kickUserFromChat(u.id, chatId, { type: "chat_removed", chatId });
     return { success: true };
   });

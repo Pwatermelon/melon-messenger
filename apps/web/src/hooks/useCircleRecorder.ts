@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { pickCircleMime } from "../utils/mediaMime";
+import { pickCircleMime, isSafariBrowser } from "../utils/mediaMime";
 
 const MAX_DURATION = 60;
 
@@ -29,8 +29,7 @@ export function useCircleRecorder() {
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const durationRef = useRef(0);
-  durationRef.current = duration;
+  const startTimeRef = useRef<number | null>(null);
 
   const cleanup = useCallback(() => {
     if (timerRef.current) {
@@ -43,7 +42,7 @@ export function useCircleRecorder() {
     mediaRecorderRef.current = null;
     setRecording(false);
     setDuration(0);
-    durationRef.current = 0;
+    startTimeRef.current = null;
   }, []);
 
   useEffect(() => () => cleanup(), [cleanup]);
@@ -62,14 +61,14 @@ export function useCircleRecorder() {
         if (e.data.size) chunksRef.current.push(e.data);
       };
       mediaRecorderRef.current = recorder;
-      recorder.start(250);
+      if (isSafariBrowser()) recorder.start();
+      else recorder.start(250);
       setRecording(true);
       setDuration(0);
-      durationRef.current = 0;
       const startTime = Date.now();
+      startTimeRef.current = startTime;
       timerRef.current = setInterval(() => {
         const d = Math.floor((Date.now() - startTime) / 1000);
-        durationRef.current = d;
         setDuration(d);
       }, 200);
       return true;
@@ -93,9 +92,15 @@ export function useCircleRecorder() {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
-      const d = durationRef.current;
+      const startedAt = startTimeRef.current;
+      const wallDuration = startedAt
+        ? Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+        : 1;
       const mime = recorder.mimeType || pickCircleMime() || "video/webm";
+      let finalized = false;
       const finish = () => {
+        if (finalized) return;
+        finalized = true;
         const blob = new Blob(chunksRef.current, { type: mime });
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
@@ -103,11 +108,13 @@ export function useCircleRecorder() {
         mediaRecorderRef.current = null;
         setRecording(false);
         setDuration(0);
-        durationRef.current = 0;
-        resolve({ blob, duration: d });
+        startTimeRef.current = null;
+        resolve({ blob, duration: wallDuration });
       };
       recorder.onstop = () => {
-        requestAnimationFrame(() => requestAnimationFrame(finish));
+        const delay = isSafariBrowser() ? 150 : 0;
+        if (delay) setTimeout(finish, delay);
+        else requestAnimationFrame(() => requestAnimationFrame(finish));
       };
       if (recorder.state === "recording") {
         recorder.requestData?.();

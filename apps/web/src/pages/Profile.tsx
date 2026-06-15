@@ -9,6 +9,7 @@ import type { ChatLayoutOutletContext } from "./ChatLayout";
 import BirthdayInfoBlock from "../components/BirthdayInfoBlock";
 import ImageLightbox from "../components/ImageLightbox";
 import ImageCropModal from "../components/ImageCropModal";
+import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 
 type ProfileProps = {
   modal?: boolean;
@@ -17,6 +18,7 @@ type ProfileProps = {
   onOpenSettings?: () => void;
   onAddContact?: (userId: string) => Promise<void>;
   onContactChange?: () => void;
+  onStartDm?: (userId: string) => Promise<boolean>;
 };
 
 function mediaFullUrl(path: string | null | undefined): string | null {
@@ -24,16 +26,21 @@ function mediaFullUrl(path: string | null | undefined): string | null {
   return resolveMediaUrl(path);
 }
 
-function buildAvatarPaths(profile: User): string[] {
-  const paths: string[] = [];
-  if (profile.avatarUrl) paths.push(profile.avatarUrl);
-  for (const p of profile.avatarHistory ?? []) {
-    if (!paths.includes(p)) paths.push(p);
-  }
-  return paths;
+function buildAvatarLightboxPaths(profile: User): string[] {
+  const crop = profile.avatarUrl;
+  const history = (profile.avatarHistory ?? []).filter((p) => p && p !== crop);
+  if (history.length > 0) return history;
+  return crop ? [crop] : [];
 }
 
-export default function Profile({ modal, onClose, userIdProp, onOpenSettings, onAddContact, onContactChange }: ProfileProps = {}) {
+function buildProfilePhotoPaths(profile: User): string[] {
+  const avatarPaths = new Set(
+    [profile.avatarUrl, ...(profile.avatarHistory ?? [])].filter((p): p is string => Boolean(p))
+  );
+  return (profile.profilePhotos ?? []).filter((p) => !avatarPaths.has(p));
+}
+
+export default function Profile({ modal, onClose, userIdProp, onOpenSettings, onAddContact, onContactChange, onStartDm }: ProfileProps = {}) {
   const { userId: routeUserId } = useParams<{ userId?: string }>();
   const userId = userIdProp ?? routeUserId;
   const navigate = useNavigate();
@@ -45,6 +52,7 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
   const targetId = userId ?? me?.id;
   const [isContact, setIsContact] = useState(false);
   const [contactBusy, setContactBusy] = useState(false);
+  const [dmBusy, setDmBusy] = useState(false);
   const [cropFile, setCropFile] = useState<{ file: File; kind: "avatar" | "cover" } | null>(null);
 
   const [profile, setProfile] = useState<User | null>(isOwn && me ? me : null);
@@ -55,15 +63,23 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
   const [avatarLightboxIndex, setAvatarLightboxIndex] = useState<number | null>(null);
   const [photoLightboxIndex, setPhotoLightboxIndex] = useState<number | null>(null);
   const [loginCopied, setLoginCopied] = useState(false);
+  const bioDirtyRef = useRef(false);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const overlayDismiss = useOverlayDismiss(() => onClose?.());
+
+  useEffect(() => {
+    bioDirtyRef.current = false;
+  }, [targetId]);
 
   useEffect(() => {
     if (!targetId) return;
     if (isOwn && me) {
       setProfile(me);
-      setBio(me.bio ?? "");
+      if (!bioDirtyRef.current) {
+        setBio(me.bio ?? "");
+      }
       return;
     }
     setLoading(true);
@@ -105,6 +121,24 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
     }
   }
 
+  async function handleWriteMessage() {
+    if (!profile || isOwn || !onStartDm) return;
+    setDmBusy(true);
+    setMessage("");
+    try {
+      const ok = await onStartDm(profile.id);
+      if (!ok) {
+        setMessage("Не удалось открыть чат");
+        return;
+      }
+      onClose?.();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Не удалось открыть чат");
+    } finally {
+      setDmBusy(false);
+    }
+  }
+
   async function copyLogin() {
     if (!profile?.yandexLogin) return;
     try {
@@ -124,6 +158,7 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
       const updated = await updateProfile({ bio: bio.trim() || null });
       updateUser(updated);
       setProfile(updated);
+      bioDirtyRef.current = false;
       setMessage("Био сохранено");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Ошибка");
@@ -143,9 +178,6 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
       if (originalFile) {
         const original = await compressImage(originalFile);
         const { path: fullPath } = await uploadFile(original, { purpose: "profile" });
-        if (profile?.avatarUrl && profile.avatarUrl !== cropPath) {
-          history = [profile.avatarUrl, ...history.filter((h) => h !== profile.avatarUrl)];
-        }
         history = [fullPath, ...history.filter((h) => h !== fullPath && h !== cropPath)];
       }
 
@@ -199,13 +231,15 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
   }
 
   async function removePhoto(path: string) {
-    const current = profile?.profilePhotos ?? [];
+    const current = buildProfilePhotoPaths(profile!);
     const idx = current.indexOf(path);
-    const updated = await updateProfile({ profilePhotos: current.filter((p) => p !== path) });
+    const updated = await updateProfile({
+      profilePhotos: current.filter((p) => p !== path),
+    });
     updateUser(updated);
     setProfile(updated);
     if (photoLightboxIndex !== null) {
-      const remaining = updated.profilePhotos ?? [];
+      const remaining = buildProfilePhotoPaths(updated);
       if (remaining.length === 0) setPhotoLightboxIndex(null);
       else setPhotoLightboxIndex(Math.min(idx >= 0 ? idx : photoLightboxIndex, remaining.length - 1));
     }
@@ -213,14 +247,13 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
 
   async function removeAvatarAt(listIndex: number) {
     if (!profile || !isOwn) return;
-    const list = buildAvatarPaths(profile);
+    const list = buildAvatarLightboxPaths(profile);
     const next = list.filter((_, i) => i !== listIndex);
     setSaving(true);
     setMessage("");
     try {
       const updated = await updateProfile({
-        avatarUrl: next[0] ?? null,
-        avatarHistory: next.slice(1),
+        avatarHistory: next,
       });
       updateUser(updated);
       setProfile(updated);
@@ -252,18 +285,18 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
 
   const coverDisplay = mediaFullUrl(profile.coverUrl);
   const avatarDisplay = mediaFullUrl(profile.avatarUrl);
-  const photos = profile.profilePhotos ?? [];
-  const avatarPaths = buildAvatarPaths(profile);
+  const photos = buildProfilePhotoPaths(profile);
+  const avatarPaths = buildAvatarLightboxPaths(profile);
   const avatarUrls = avatarPaths.map((p) => mediaFullUrl(p)).filter(Boolean) as string[];
   const photoUrls = photos.map((p) => mediaFullUrl(p)).filter(Boolean) as string[];
 
-  const hasToolbarActions =
-    (!isOwn && !!profile) || (isOwn && !!openSettings);
+  const showModalTopBar = modal && (isOwn ? !!openSettings : !!profile);
+  const showPageToolbar = !modal && ((!isOwn && !!profile) || (isOwn && !!openSettings));
 
   const body = (
     <div className={`profile-page${modal ? " profile-page-modal" : ""}`}>
-      {(!modal || hasToolbarActions) && (
-      <div className={`profile-toolbar${modal ? " profile-toolbar-modal" : ""}`}>
+      {showPageToolbar && (
+      <div className="profile-toolbar">
         {!modal && (
           <button type="button" className="profile-back" onClick={() => navigate(-1)}>
             ← Назад
@@ -379,6 +412,16 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
             isToday={profile.isBirthdayToday}
           />
         )}
+        {!isOwn && onStartDm && (
+          <button
+            type="button"
+            className="btn profile-write-btn"
+            onClick={() => void handleWriteMessage()}
+            disabled={dmBusy || contactBusy}
+          >
+            {dmBusy ? "…" : "Написать"}
+          </button>
+        )}
       </div>
 
       <div className="profile-section">
@@ -388,7 +431,10 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
             <textarea
               className="profile-bio-input"
               value={bio}
-              onChange={(e) => setBio(e.target.value)}
+              onChange={(e) => {
+                bioDirtyRef.current = true;
+                setBio(e.target.value);
+              }}
               placeholder="Расскажите о себе…"
               maxLength={500}
               rows={4}
@@ -508,9 +554,45 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
         {cropModal}
         <div
         className="search-overlay profile-overlay"
-        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+        onPointerDown={overlayDismiss.onOverlayPointerDown}
+        onClick={overlayDismiss.onOverlayClick}
       >
-        <div className="profile-modal" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="profile-modal"
+          onPointerDown={overlayDismiss.onModalPointerDown}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {showModalTopBar && (
+            <div className="profile-modal-topbar">
+              {isOwn && openSettings ? (
+                <button type="button" className="profile-settings-link" onClick={openSettings}>
+                  Настройки
+                </button>
+              ) : !isOwn && profile ? (
+                isContact ? (
+                  <button
+                    type="button"
+                    className="profile-remove-contact"
+                    onClick={() => void handleRemoveContact()}
+                    disabled={contactBusy}
+                  >
+                    {contactBusy ? "…" : "Удалить из контактов"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="profile-add-contact"
+                    onClick={() => void handleAddContact()}
+                    disabled={contactBusy}
+                  >
+                    {contactBusy ? "…" : "В контакты"}
+                  </button>
+                )
+              ) : (
+                <span />
+              )}
+            </div>
+          )}
           <button type="button" className="modal-close" onClick={onClose} aria-label="Закрыть">
             ×
           </button>

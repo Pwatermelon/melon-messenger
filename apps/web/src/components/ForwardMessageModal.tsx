@@ -24,7 +24,11 @@ function chatAvatar(chat: Chat, userId?: string): string | null {
 }
 
 export function ForwardMessageModal({ chats, userId, currentChatId, onSelect, onClose, sending }: Props) {
-  const list = chats.filter((c) => c.id !== currentChatId);
+  const list = [...chats].sort((a, b) => {
+    if (a.id === currentChatId) return -1;
+    if (b.id === currentChatId) return 1;
+    return 0;
+  });
 
   return (
     <div className="search-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -35,16 +39,17 @@ export function ForwardMessageModal({ chats, userId, currentChatId, onSelect, on
         <h3>Переслать в…</h3>
         <div className="forward-chat-list">
           {list.length === 0 ? (
-            <p className="search-hint">Нет других чатов</p>
+            <p className="search-hint">Нет чатов — создайте диалог через «+»</p>
           ) : (
             list.map((chat) => {
               const avatar = chatAvatar(chat, userId);
               const label = chatLabel(chat, userId);
+              const isCurrent = chat.id === currentChatId;
               return (
                 <button
                   key={chat.id}
                   type="button"
-                  className="forward-chat-item"
+                  className={`forward-chat-item${isCurrent ? " forward-chat-item-current" : ""}`}
                   disabled={sending}
                   onClick={() => onSelect(chat.id)}
                 >
@@ -55,7 +60,10 @@ export function ForwardMessageModal({ chats, userId, currentChatId, onSelect, on
                       label.slice(0, 1).toUpperCase()
                     )}
                   </span>
-                  <span className="forward-chat-name">{label}</span>
+                  <span className="forward-chat-name">
+                    {label}
+                    {isCurrent && <span className="forward-chat-badge">этот чат</span>}
+                  </span>
                 </button>
               );
             })

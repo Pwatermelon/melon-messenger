@@ -4,7 +4,11 @@ import { db, pushSubscriptions } from "../db";
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY ?? "";
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY ?? "";
-const VAPID_SUBJECT = process.env.VAPID_SUBJECT ?? "mailto:admin@watermelon.local";
+/** Контакт приложения для push-сервисов браузера (не рассылка почты). По умолчанию — WEB_URL. */
+const VAPID_SUBJECT =
+  process.env.VAPID_SUBJECT?.trim() ||
+  process.env.WEB_URL?.trim() ||
+  "http://localhost:5173";
 
 let configured = false;
 

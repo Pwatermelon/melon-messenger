@@ -12,6 +12,10 @@ function isSafari(): boolean {
   return /Safari/i.test(ua) && !/Chrome|Chromium|CriOS|FxiOS|Edg/i.test(ua);
 }
 
+export function isSafariBrowser(): boolean {
+  return isSafari();
+}
+
 export function pickVoiceMime(): string {
   const types = isSafari()
     ? ["audio/mp4", "audio/aac", "audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/ogg"]

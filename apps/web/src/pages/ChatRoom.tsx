@@ -1,5 +1,4 @@
-import { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate, useOutletContext } from "react-router-dom";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import { ComposeRecorder } from "../components/ComposeRecorder";
@@ -7,45 +6,97 @@ import { VoiceMessagePlayer } from "../components/VoiceMessagePlayer";
 import { CircleMessagePlayer } from "../components/CircleMessagePlayer";
 import { MessageContextMenu } from "../components/MessageContextMenu";
 import { ForwardMessageModal } from "../components/ForwardMessageModal";
+import ImageCropModal from "../components/ImageCropModal";
 import BirthdayInfoBlock from "../components/BirthdayInfoBlock";
-import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo } from "../components/Icons";
-import { getChats, getMessages, uploadFile, addGroupMembers, removeGroupMember, getUserByYandexLogin, deleteChat, updateGroup, deleteMessage, forwardMessage, signMediaPaths } from "../api";
+import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo, IconBack } from "../components/Icons";
+import { getChat, getChats, getMessages, uploadFile, addGroupMembers, removeGroupMember, getUserByYandexLogin, deleteChat, updateGroup, deleteMessage, editMessage, forwardMessage, signMediaPaths } from "../api";
 import { extFromBlobType } from "../utils/mediaMime";
-import { compressImage } from "../utils/imageCompress";
-import type { Chat, Message } from "@melon/shared";
+import { compressImage, isGifFile } from "../utils/imageCompress";
+import type { Chat, Message, AttachmentMetadata } from "@melon/shared";
 import type { MessageItem } from "../api";
 import { getWsUrl } from "../config";
-import { mediaUrl } from "../utils/mediaUrl";
-import type { ChatLayoutOutletContext } from "./ChatLayout";
+import { mediaUrl, mediaDownloadUrl } from "../utils/mediaUrl";
+import { buildReplyTo } from "../utils/messagePreview";
 
-export default function ChatRoom() {
-  const { chatId } = useParams<{ chatId: string }>();
-  const navigate = useNavigate();
+type ChatRoomProps = {
+  chatId: string;
+  onClose: () => void;
+  openProfile: (userId?: string) => void;
+  onSyncPreview?: (message: Message) => void;
+  showBack?: boolean;
+};
+
+const MESSAGE_PAGE_SIZE = 50;
+
+export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview, showBack = false }: ChatRoomProps) {
   const { user } = useAuth();
-  const { openProfile } = useOutletContext<ChatLayoutOutletContext>();
   const { send, ready, status, reconnect, subscribe } = useWebSocketContext();
   const [chat, setChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const groupAvatarInputRef = useRef<HTMLInputElement>(null);
+  const [groupAvatarCropFile, setGroupAvatarCropFile] = useState<File | null>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [fileDragActive, setFileDragActive] = useState(false);
   const [contactInfoOpen, setContactInfoOpen] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [groupAddLogin, setGroupAddLogin] = useState("");
   const [groupAddError, setGroupAddError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+  const pendingInitialScrollRef = useRef(false);
+  const fileDragDepthRef = useRef(0);
   const longPressRef = useRef<number | null>(null);
   const [messageMenu, setMessageMenu] = useState<{ message: Message; x: number; y: number } | null>(null);
   const [forwardTarget, setForwardTarget] = useState<Message | null>(null);
   const [forwardChats, setForwardChats] = useState<Chat[]>([]);
   const [forwarding, setForwarding] = useState(false);
+  const [replyDraft, setReplyDraft] = useState<Message | null>(null);
+  const [editDraft, setEditDraft] = useState<Message | null>(null);
+  const composeInputRef = useRef<HTMLInputElement>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const selectionMode = selectedIds.size > 0;
+  const [readCursors, setReadCursors] = useState<Record<string, string>>({});
+  const readCursorsRef = useRef<Record<string, string>>({});
+  const messagesRef = useRef<Message[]>([]);
+  const hasMoreOlderRef = useRef(true);
+  const loadingOlderRef = useRef(false);
+  const loadingRef = useRef(true);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
+
+  function applyReadCursors(rows: { userId: string; lastReadMessageId: string }[]) {
+    const map = Object.fromEntries(rows.map((r) => [r.userId, r.lastReadMessageId]));
+    readCursorsRef.current = map;
+    setReadCursors(map);
+  }
+
+  function markChatRead(messageId: string) {
+    if (!chatId || !ready || !user?.id) return;
+    const mine = readCursorsRef.current[user.id];
+    if (mine && mine >= messageId) return;
+    readCursorsRef.current[user.id] = messageId;
+    setReadCursors((prev) => ({ ...prev, [user.id]: messageId }));
+    send({ type: "mark_read", chatId, messageId });
+  }
+
+  function isMessageReadByPeers(m: Message): boolean {
+    if (m.senderId !== user?.id) return false;
+    const peers = chat?.members.filter((mem) => mem.id !== user?.id) ?? [];
+    return peers.some((p) => (readCursors[p.id] ?? "") >= m.id);
+  }
 
   useEffect(() => {
     if (!lightboxImage) return;
@@ -69,7 +120,27 @@ export default function ChatRoom() {
 
   useEffect(() => {
     setSelectedIds(new Set());
+    setReadCursors({});
+    readCursorsRef.current = {};
+    setReplyDraft(null);
+    setEditDraft(null);
+    stickToBottomRef.current = true;
+    pendingInitialScrollRef.current = true;
   }, [chatId]);
+
+  useEffect(() => {
+    if (!replyDraft && !editDraft) return;
+    composeInputRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setReplyDraft(null);
+        setEditDraft(null);
+        setInput("");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [replyDraft, editDraft]);
 
   useEffect(() => {
     if (!selectionMode) return;
@@ -105,66 +176,203 @@ export default function ChatRoom() {
       if (msg.type === "message_deleted" && msg.chatId === chatId) {
         setMessages((prev) => prev.filter((m) => m.id !== msg.messageId));
       }
+      if (msg.type === "message_edited" && msg.chatId === chatId) {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === msg.message.id ? { ...m, ...msg.message } : m))
+        );
+      }
+      if (msg.type === "read_receipt" && msg.chatId === chatId) {
+        setReadCursors((prev) => {
+          const cur = prev[msg.userId];
+          if (cur && cur >= msg.messageId) return prev;
+          const next = { ...prev, [msg.userId]: msg.messageId };
+          readCursorsRef.current = next;
+          return next;
+        });
+      }
+      if (msg.type === "chat_members_changed" && msg.chatId === chatId) {
+        void getChat(chatId).then((c) => {
+          if (c) setChat(c as Chat);
+        });
+        window.dispatchEvent(new Event("wm:refresh-chats"));
+      }
     });
   }, [subscribe, chatId]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!chatId || loadingOlderRef.current || !hasMoreOlderRef.current || loadingRef.current) return;
+    const oldest = messagesRef.current[0];
+    if (!oldest) return;
+
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    const listEl = listRef.current;
+    const prevHeight = listEl?.scrollHeight ?? 0;
+
+    try {
+      const { messages: older } = await getMessages(chatId, MESSAGE_PAGE_SIZE, oldest.id);
+      const batch = older as Message[];
+      if (batch.length < MESSAGE_PAGE_SIZE) {
+        hasMoreOlderRef.current = false;
+      }
+      if (batch.length === 0) {
+        hasMoreOlderRef.current = false;
+        return;
+      }
+      setMessages((prev) => {
+        const ids = new Set(prev.map((m) => m.id));
+        const fresh = batch.filter((m) => !ids.has(m.id));
+        return fresh.length > 0 ? [...fresh, ...prev] : prev;
+      });
+      requestAnimationFrame(() => {
+        if (listEl) listEl.scrollTop += listEl.scrollHeight - prevHeight;
+      });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [chatId]);
+
+  useEffect(() => {
+    if (!chatId || !ready || messages.length === 0) return;
+    markChatRead(messages[messages.length - 1].id);
+  }, [chatId, ready, messages]);
 
   useEffect(() => {
     if (!chatId) return;
     let cancelled = false;
     setLoading(true);
-    getChats()
-      .then((chats) => {
-        const c = (chats as Chat[]).find((ch) => ch.id === chatId);
-        if (!cancelled) setChat(c ?? null);
+    loadingRef.current = true;
+    setLoadingOlder(false);
+    loadingOlderRef.current = false;
+    hasMoreOlderRef.current = true;
+    setMessages([]);
+    getChat(chatId)
+      .then((c) => {
+        if (cancelled) return;
+        if (!c) {
+          onClose();
+          return;
+        }
+        setChat(c as Chat);
       })
       .catch(() => {
-        if (!cancelled) setChat(null);
+        if (!cancelled) onClose();
       });
 
-    getMessages(chatId, 50)
-      .then(({ messages: list }) => {
-        if (!cancelled) setMessages(list as Message[]);
+    getMessages(chatId, MESSAGE_PAGE_SIZE)
+      .then(({ messages: list, readCursors: cursors }) => {
+        if (!cancelled) {
+          setMessages(list as Message[]);
+          const more = list.length >= MESSAGE_PAGE_SIZE;
+          hasMoreOlderRef.current = more;
+          if (cursors?.length) applyReadCursors(cursors);
+          const last = list[list.length - 1];
+          if (last) onSyncPreview?.(last as Message);
+        }
       })
       .catch(() => {
-        if (!cancelled) setMessages([]);
+        if (!cancelled) {
+          setMessages([]);
+          onClose();
+        }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          loadingRef.current = false;
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [chatId]);
+  }, [chatId, onClose, onSyncPreview]);
+
+  const scrollToBottom = useCallback((instant: boolean) => {
+    const list = listRef.current;
+    if (list) {
+      list.scrollTop = list.scrollHeight;
+      return;
+    }
+    messagesEndRef.current?.scrollIntoView({ behavior: instant ? "auto" : "smooth", block: "end" });
+  }, []);
 
   useEffect(() => {
-    if (!chatId || !ready) return;
-    send({ type: "subscribe", chatId });
-    return () => {
-      send({ type: "unsubscribe", chatId });
+    const list = listRef.current;
+    if (!list) return;
+    const onScroll = () => {
+      stickToBottomRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 120;
+      if (list.scrollTop < 120 && hasMoreOlderRef.current && !loadingOlderRef.current && !loadingRef.current) {
+        void loadOlderMessages();
+      }
     };
-  }, [chatId, ready, send]);
+    list.addEventListener("scroll", onScroll, { passive: true });
+    return () => list.removeEventListener("scroll", onScroll);
+  }, [chatId, loadOlderMessages]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (loading || messages.length === 0) return;
+
+    if (pendingInitialScrollRef.current) {
+      pendingInitialScrollRef.current = false;
+      const snap = () => scrollToBottom(true);
+      snap();
+      requestAnimationFrame(() => {
+        snap();
+        requestAnimationFrame(snap);
+      });
+      const t1 = window.setTimeout(snap, 100);
+      const t2 = window.setTimeout(snap, 400);
+      const t3 = window.setTimeout(snap, 900);
+      return () => {
+        window.clearTimeout(t1);
+        window.clearTimeout(t2);
+        window.clearTimeout(t3);
+      };
+    }
+
+    if (stickToBottomRef.current) {
+      scrollToBottom(false);
+    }
+  }, [messages, loading, scrollToBottom]);
+
+  function dispatchMessage(
+    opts: {
+      content: string;
+      messageType?: "text" | "image" | "file" | "video" | "location" | "voice" | "circle";
+      attachmentUrl?: string | null;
+      attachmentMetadata?: AttachmentMetadata | null;
+    },
+    withReply = true
+  ) {
+    if (!chatId) return;
+    const replyMeta: AttachmentMetadata | null =
+      withReply && replyDraft
+        ? { ...(opts.attachmentMetadata ?? {}), replyTo: buildReplyTo(replyDraft) }
+        : opts.attachmentMetadata ?? null;
+    send({
+      type: "message",
+      chatId,
+      content: opts.content,
+      messageType: opts.messageType ?? "text",
+      attachmentUrl: opts.attachmentUrl ?? null,
+      attachmentMetadata: replyMeta,
+    });
+  }
 
   async function sendMessage(opts: {
     content: string;
     messageType?: "text" | "image" | "file" | "video" | "location" | "voice" | "circle";
     attachmentUrl?: string | null;
-    attachmentMetadata?: { fileName?: string; mimeType?: string; size?: number; duration?: number; lat?: number; lng?: number } | null;
+    attachmentMetadata?: AttachmentMetadata | null;
   }) {
     if (!chatId || sending) return;
     setSending(true);
     try {
-      send({
-        type: "message",
-        chatId,
-        content: opts.content,
-        messageType: opts.messageType ?? "text",
-        attachmentUrl: opts.attachmentUrl ?? null,
-        attachmentMetadata: opts.attachmentMetadata ?? null,
-      });
+      dispatchMessage(opts);
+      setReplyDraft(null);
     } finally {
       setSending(false);
     }
@@ -174,8 +382,48 @@ export default function ChatRoom() {
     e.preventDefault();
     const text = input.trim();
     if (!text) return;
+    if (editDraft) {
+      await saveEdit(text);
+      return;
+    }
     setInput("");
     await sendMessage({ content: text });
+  }
+
+  async function saveEdit(text: string) {
+    if (!chatId || !editDraft || sending) return;
+    setSending(true);
+    try {
+      const updated = await editMessage(chatId, editDraft.id, text);
+      setMessages((prev) => prev.map((m) => (m.id === updated.id ? { ...m, ...updated } as Message : m)));
+      setEditDraft(null);
+      setInput("");
+      window.dispatchEvent(new Event("wm:refresh-chats"));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function scrollToMessage(messageId: string) {
+    const el = listRef.current?.querySelector(`[data-message-id="${messageId}"]`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function handleReplyStart(m: Message) {
+    setMessageMenu(null);
+    setEditDraft(null);
+    setInput("");
+    setReplyDraft(m);
+  }
+
+  function handleEditStart(m: Message) {
+    setMessageMenu(null);
+    setReplyDraft(null);
+    setEditDraft(m);
+    setInput(m.content);
+    composeInputRef.current?.focus();
   }
 
   function openAttach(accept: string) {
@@ -186,27 +434,76 @@ export default function ChatRoom() {
     inputEl.click();
   }
 
-  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || !chatId) return;
-    e.target.value = "";
+  async function uploadFiles(files: File[]) {
+    if (!files.length || !chatId || sending || !ready) return;
     setSending(true);
     try {
-      const isImage = file.type.startsWith("image/");
-      const toUpload = isImage ? await compressImage(file) : file;
-      const { path, fileName, mimeType, size } = await uploadFile(toUpload);
-      const type = isImage ? "image" : file.type.startsWith("video/") ? "video" : "file";
-      await sendMessage({
-        content: type === "image" ? "Фотография" : file.name,
-        messageType: type,
-        attachmentUrl: path,
-        attachmentMetadata: type === "image" ? { fileName: "Фотография", mimeType: toUpload.type, size: toUpload.size } : { fileName: file.name ?? fileName, mimeType: mimeType ?? file.type, size: size ?? file.size },
-      });
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]!;
+        const isGif = isGifFile(file);
+        const isImage = file.type.startsWith("image/") && !isGif;
+        const toUpload = isImage ? await compressImage(file) : file;
+        const { path, fileName, mimeType, size } = await uploadFile(toUpload);
+        const type = isGif || isImage ? "image" : file.type.startsWith("video/") ? "video" : "file";
+        dispatchMessage(
+          {
+            content: isGif ? "GIF" : type === "image" ? "Фотография" : file.name,
+            messageType: type,
+            attachmentUrl: path,
+            attachmentMetadata:
+              isGif
+                ? { fileName: file.name || "animation.gif", mimeType: "image/gif", size: file.size }
+                : type === "image"
+                ? { fileName: "Фотография", mimeType: toUpload.type, size: toUpload.size }
+                : { fileName: file.name ?? fileName, mimeType: mimeType ?? file.type, size: size ?? file.size },
+          },
+          i === 0
+        );
+      }
+      setReplyDraft(null);
     } catch (err) {
       console.error(err);
     } finally {
       setSending(false);
     }
+  }
+
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    await uploadFiles(files);
+  }
+
+  function hasDraggedFiles(e: React.DragEvent) {
+    return Array.from(e.dataTransfer.types).includes("Files");
+  }
+
+  function handleFileDragEnter(e: React.DragEvent) {
+    if (!ready || sending || !hasDraggedFiles(e)) return;
+    e.preventDefault();
+    fileDragDepthRef.current += 1;
+    setFileDragActive(true);
+  }
+
+  function handleFileDragLeave(e: React.DragEvent) {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+    if (fileDragDepthRef.current === 0) setFileDragActive(false);
+  }
+
+  function handleFileDragOver(e: React.DragEvent) {
+    if (!ready || sending || !hasDraggedFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleFileDrop(e: React.DragEvent) {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    fileDragDepthRef.current = 0;
+    setFileDragActive(false);
+    void uploadFiles(Array.from(e.dataTransfer.files ?? []));
   }
 
   function handleLocation() {
@@ -292,8 +589,14 @@ export default function ChatRoom() {
 
   const isGroupAdmin = Boolean(chat?.type === "group" && chat.members.find((m) => m.id === user?.id)?.role === "admin");
 
-  function canDeleteMessage(_m: Message): boolean {
+  function canDeleteMessage(m: Message): boolean {
+    if ((m.messageType ?? "text") === "system") return false;
     return Boolean(user && chatId);
+  }
+
+  function canEditMessage(m: Message): boolean {
+    if (!user || m.senderId !== user.id) return false;
+    return (m.messageType ?? "text") === "text";
   }
 
   function toggleMessageSelect(messageId: string) {
@@ -378,23 +681,28 @@ export default function ChatRoom() {
     try {
       await deleteChat(chatId);
       window.dispatchEvent(new Event("wm:refresh-chats"));
-      navigate("/", { replace: true });
+      onClose();
     } catch (e) {
       console.error(e);
     }
   }
 
-  async function handleGroupAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!chatId) return;
+  function handleGroupAvatarPick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !file.type.startsWith("image/")) return;
+    setGroupAvatarCropFile(file);
+  }
+
+  async function uploadGroupAvatar(croppedFile: File) {
+    if (!chatId) return;
     setSending(true);
     try {
-      const compressed = await compressImage(file);
-      const { path } = await uploadFile(compressed);
-      const updated = await updateGroup(chatId, { avatarUrl: path });
-      setChat(updated as Chat);
+      const compressed = await compressImage(croppedFile);
+      const { path } = await uploadFile(compressed, { purpose: "profile" });
+      await updateGroup(chatId, { avatarUrl: path });
+      const fresh = await getChat(chatId);
+      if (fresh) setChat(fresh as Chat);
       window.dispatchEvent(new Event("wm:refresh-chats"));
     } catch (err) {
       console.error(err);
@@ -412,9 +720,11 @@ export default function ChatRoom() {
         setGroupAddError("Пользователь не найден");
         return;
       }
-      const updated = await addGroupMembers(chatId, [u.id]);
-      setChat(updated as Chat);
+      await addGroupMembers(chatId, [u.id]);
+      const fresh = await getChat(chatId);
+      if (fresh) setChat(fresh as Chat);
       setGroupAddLogin("");
+      window.dispatchEvent(new Event("wm:refresh-chats"));
     } catch (e) {
       setGroupAddError(e instanceof Error ? e.message : "Ошибка");
     }
@@ -423,14 +733,16 @@ export default function ChatRoom() {
   async function handleRemoveGroupMember(memberId: string) {
     if (!chatId) return;
     try {
-      const updated = await removeGroupMember(chatId, memberId);
+      await removeGroupMember(chatId, memberId);
       setSelectedMemberId(null);
       if (memberId === user?.id) {
         window.dispatchEvent(new Event("wm:refresh-chats"));
-        navigate("/", { replace: true });
+        onClose();
         return;
       }
-      setChat(updated as Chat);
+      const fresh = await getChat(chatId);
+      if (fresh) setChat(fresh as Chat);
+      window.dispatchEvent(new Event("wm:refresh-chats"));
     } catch (e) {
       console.error(e);
     }
@@ -441,6 +753,16 @@ export default function ChatRoom() {
   return (
     <>
       <div className={`chat-header${selectionMode ? " chat-header-select" : ""}`}>
+        {showBack && !selectionMode && (
+          <button
+            type="button"
+            className="chat-header-back"
+            onClick={onClose}
+            aria-label="К списку чатов"
+          >
+            <IconBack size={22} />
+          </button>
+        )}
         {selectionMode ? (
           <>
             <button
@@ -506,12 +828,43 @@ export default function ChatRoom() {
           </>
         )}
       </div>
-      <div className="messages" ref={listRef}>
+      <div
+        className={`chat-body${fileDragActive ? " chat-body-drag" : ""}`}
+        onDragEnter={handleFileDragEnter}
+        onDragLeave={handleFileDragLeave}
+        onDragOver={handleFileDragOver}
+        onDrop={handleFileDrop}
+      >
+        {fileDragActive && (
+          <div className="chat-drop-overlay" aria-hidden>
+            <span>Отпустите, чтобы отправить</span>
+          </div>
+        )}
+      <div
+        className="messages"
+        ref={listRef}
+        onContextMenu={(e) => {
+          if (!(e.target as HTMLElement).closest(".message")) e.preventDefault();
+        }}
+      >
         {loading ? (
           <p style={{ color: "var(--muted)", padding: "1rem" }}>Loading messages…</p>
         ) : (
-          messages.map((m) => {
+          <>
+            {loadingOlder && (
+              <p className="messages-load-older" aria-busy="true">
+                Загрузка…
+              </p>
+            )}
+            {messages.map((m) => {
             const mt = m.messageType ?? "text";
+            if (mt === "system") {
+              return (
+                <div key={m.id} className="message-system" data-message-id={m.id}>
+                  <span>{m.content}</span>
+                </div>
+              );
+            }
             const naked = mt === "circle" || mt === "voice" || mt === "image";
             const own = m.senderId === user?.id;
             const selectable = canDeleteMessage(m);
@@ -519,25 +872,44 @@ export default function ChatRoom() {
             return (
             <div
               key={m.id}
-              className={`message-row ${own ? "own" : "incoming"}${selected ? " is-selected" : ""}${selectionMode ? " selection-mode" : ""}`}
+              data-message-id={m.id}
+              className={`message-row ${own ? "own" : "incoming"}${selectionMode ? " selection-mode" : ""}`}
             >
-              {own && selectable && (
-                <button
-                  type="button"
-                  className="message-row-hit"
-                  onClick={() => toggleMessageSelect(m.id)}
-                  aria-label={selected ? "Снять выбор" : "Выбрать сообщение"}
-                />
-              )}
-              {selected && selectable && (
-                <div className="message-select-check is-checked" aria-hidden>
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                    <path d="M2.5 6l2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
-              )}
+              <div
+                className={`message-row-body${selected ? " is-selected" : ""}`}
+                onClick={
+                  selectionMode && selectable
+                    ? (e) => {
+                        const t = e.target as HTMLElement;
+                        if (t.closest(".voice-player, .circle-player")) return;
+                        toggleMessageSelect(m.id);
+                      }
+                    : undefined
+                }
+                role={selectionMode && selectable ? "button" : undefined}
+                tabIndex={selectionMode && selectable ? 0 : undefined}
+                onKeyDown={
+                  selectionMode && selectable
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          toggleMessageSelect(m.id);
+                        }
+                      }
+                    : undefined
+                }
+              >
+                {selectionMode && selectable && (
+                  <div className={`message-select-check${selected ? " is-checked" : ""}`} aria-hidden>
+                    {selected && (
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M2.5 6l2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </div>
+                )}
             <div
-              className={`message ${own ? "own" : ""}${naked ? " message-naked" : ""}`}
+              className={`message ${own ? "own" : ""}${naked ? " message-naked" : ""}${mt === "circle" ? " message-circle" : ""}${mt === "voice" ? " message-voice" : ""}`}
               onContextMenu={(e) => onMessageContextMenu(e, m)}
               onTouchStart={(e) => onMessageTouchStart(e, m)}
               onTouchEnd={onMessageTouchEnd}
@@ -551,22 +923,40 @@ export default function ChatRoom() {
                   Переслано от {m.attachmentMetadata.forwardedFrom.username}
                 </div>
               )}
+              {m.attachmentMetadata?.replyTo && (
+                <button
+                  type="button"
+                  className="message-reply-quote"
+                  onClick={() => scrollToMessage(m.attachmentMetadata!.replyTo!.messageId)}
+                >
+                  <span className="message-reply-author">{m.attachmentMetadata.replyTo.senderName}</span>
+                  <span className="message-reply-text">{m.attachmentMetadata.replyTo.preview}</span>
+                </button>
+              )}
               {(m.messageType ?? "text") === "text" && (
                 <p className="message-content">{displayContent(m)}</p>
               )}
               {(m.messageType ?? "text") === "image" && m.attachmentUrl && (() => {
                 const imgUrl = mediaUrl(m.attachmentUrl);
+                const isGif =
+                  m.attachmentMetadata?.mimeType === "image/gif" ||
+                  /\.gif$/i.test(m.attachmentUrl.split("?")[0] ?? "") ||
+                  m.content === "GIF";
                 return (
                   <div className="message-image-wrap">
                     <button type="button" className="message-image-btn" onClick={() => setLightboxImage(imgUrl)}>
                       <img src={imgUrl} alt="" className="message-image" />
                     </button>
-                    <span className="message-image-caption">Фотография</span>
+                    <span className="message-image-caption">{isGif ? "GIF" : "Фотография"}</span>
                   </div>
                 );
               })()}
               {(m.messageType ?? "text") === "file" && m.attachmentUrl && (
-                <a href={mediaUrl(m.attachmentUrl)} target="_blank" rel="noopener noreferrer" className="message-file">
+                <a
+                  href={mediaDownloadUrl(m.attachmentUrl, m.attachmentMetadata?.fileName)}
+                  download={m.attachmentMetadata?.fileName ?? undefined}
+                  className="message-file"
+                >
                   📎 {m.attachmentMetadata?.fileName ?? "File"}
                 </a>
               )}
@@ -595,31 +985,68 @@ export default function ChatRoom() {
                   duration={m.attachmentMetadata?.duration}
                 />
               )}
-              <div className="message-time">
-                {m.createdAt
-                  ? new Date(m.createdAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
-                  : ""}
+              {(mt !== "circle" && mt !== "voice") || (own && isMessageReadByPeers(m)) ? (
+              <div className="message-meta">
+                {mt !== "circle" && mt !== "voice" && (
+                  <div className="message-time">
+                    {m.editedAt && <span className="message-edited">изменено</span>}
+                    {m.createdAt
+                      ? new Date(m.createdAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
+                      : ""}
+                  </div>
+                )}
+                {own && isMessageReadByPeers(m) && (
+                  <span className="message-read-receipt" title="Прочитано" aria-label="Прочитано">
+                    🍉
+                  </span>
+                )}
+              </div>
+              ) : null}
+            </div>
               </div>
             </div>
-              {!own && selectable && (
-                <button
-                  type="button"
-                  className="message-row-hit"
-                  onClick={() => toggleMessageSelect(m.id)}
-                  aria-label={selected ? "Снять выбор" : "Выбрать сообщение"}
-                />
-              )}
-            </div>
           );
-          })
+          })}
+          </>
         )}
         <div ref={messagesEndRef} />
       </div>
       <div className="compose">
+        {replyDraft && (
+          <div className="compose-reply">
+            <div className="compose-reply-body">
+              <span className="compose-reply-label">Ответ {replyDraft.sender?.username ?? "пользователю"}</span>
+              <span className="compose-reply-preview">{buildReplyTo(replyDraft).preview}</span>
+            </div>
+            <button type="button" className="compose-reply-close" onClick={() => setReplyDraft(null)} aria-label="Отменить ответ">
+              ×
+            </button>
+          </div>
+        )}
+        {editDraft && (
+          <div className="compose-reply compose-edit">
+            <div className="compose-reply-body">
+              <span className="compose-reply-label">Редактирование</span>
+              <span className="compose-reply-preview">{editDraft.content}</span>
+            </div>
+            <button
+              type="button"
+              className="compose-reply-close"
+              onClick={() => {
+                setEditDraft(null);
+                setInput("");
+              }}
+              aria-label="Отменить редактирование"
+            >
+              ×
+            </button>
+          </div>
+        )}
         <input
           type="file"
           ref={fileInputRef}
           accept="*/*"
+          multiple
           onChange={handleFileSelect}
           style={{ display: "none" }}
         />
@@ -629,7 +1056,7 @@ export default function ChatRoom() {
               type="button"
               className="compose-btn compose-btn-icon compose-btn-attach"
               onClick={() => setAttachMenuOpen((o) => !o)}
-              disabled={!ready || sending}
+              disabled={!ready || sending || Boolean(editDraft)}
               title="Вложение"
             >
               <IconAttach size={22} />
@@ -648,21 +1075,23 @@ export default function ChatRoom() {
           </div>
           <input
             type="text"
+            ref={composeInputRef}
             className="compose-input"
             data-testid="compose-input"
-            placeholder="Сообщение…"
+            placeholder={editDraft ? "Изменить сообщение…" : "Сообщение…"}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={!ready}
           />
-          {input.trim() ? (
-            <button type="submit" className="compose-btn compose-btn-send" data-testid="compose-send" disabled={!ready || sending}>
+          {input.trim() || editDraft ? (
+            <button type="submit" className="compose-btn compose-btn-send" data-testid="compose-send" disabled={!ready || sending || !input.trim()}>
               <IconSend size={20} />
             </button>
           ) : (
             <ComposeRecorder disabled={!ready || sending} onVoiceSend={handleVoiceSend} onCircleSend={handleCircleSend} />
           )}
         </form>
+      </div>
       </div>
       {lightboxImage && (
         <div
@@ -729,6 +1158,23 @@ export default function ChatRoom() {
                 >
                   Открыть профиль
                 </button>
+                <button
+                  type="button"
+                  className="contact-info-remove-btn"
+                  onClick={handleDeleteChat}
+                >
+                  Удалить чат
+                </button>
+              </>
+            ) : chat.type === "dm" ? (
+              <>
+                <div className="contact-info-avatar-wrap">
+                  <div className="contact-info-avatar-placeholder">?</div>
+                </div>
+                <p className="contact-info-name">Собеседник недоступен</p>
+                <p className="contact-info-muted" style={{ margin: "0 0 1rem", color: "var(--muted)", fontSize: "0.9rem" }}>
+                  Возможно, собеседник удалил этот чат. Вы можете удалить его у себя.
+                </p>
                 <button
                   type="button"
                   className="contact-info-remove-btn"
@@ -811,7 +1257,7 @@ export default function ChatRoom() {
                         type="file"
                         ref={groupAvatarInputRef}
                         accept="image/*"
-                        onChange={handleGroupAvatarChange}
+                        onChange={handleGroupAvatarPick}
                         style={{ display: "none" }}
                       />
                       <button
@@ -906,6 +1352,8 @@ export default function ChatRoom() {
         <MessageContextMenu
           x={messageMenu.x}
           y={messageMenu.y}
+          onReply={() => handleReplyStart(messageMenu.message)}
+          onEdit={canEditMessage(messageMenu.message) ? () => handleEditStart(messageMenu.message) : undefined}
           onForward={() => handleForwardStart(messageMenu.message)}
           onClose={() => setMessageMenu(null)}
         />
@@ -919,6 +1367,19 @@ export default function ChatRoom() {
           sending={forwarding}
           onSelect={(id) => void handleForwardTo(id)}
           onClose={() => !forwarding && setForwardTarget(null)}
+        />
+      )}
+
+      {groupAvatarCropFile && (
+        <ImageCropModal
+          file={groupAvatarCropFile}
+          variant="avatar"
+          title="Аватар группы"
+          onConfirm={(cropped) => {
+            setGroupAvatarCropFile(null);
+            void uploadGroupAvatar(cropped);
+          }}
+          onCancel={() => setGroupAvatarCropFile(null)}
         />
       )}
     </>
