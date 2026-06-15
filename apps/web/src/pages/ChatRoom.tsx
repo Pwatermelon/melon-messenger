@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import { ComposeRecorder } from "../components/ComposeRecorder";
@@ -10,7 +10,7 @@ import { LocationPickerModal } from "../components/LocationPickerModal";
 import { LocationPreview } from "../components/LocationPreview";
 import ImageCropModal from "../components/ImageCropModal";
 import BirthdayInfoBlock from "../components/BirthdayInfoBlock";
-import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo, IconBack } from "../components/Icons";
+import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo, IconBack, IconChevronDown } from "../components/Icons";
 import { getChat, getChats, getMessages, uploadFile, addGroupMembers, removeGroupMember, getUserByYandexLogin, deleteChat, updateGroup, deleteMessage, editMessage, forwardMessage, signMediaPaths, markChatReadApi } from "../api";
 import { extFromBlobType } from "../utils/mediaMime";
 import { compressImage, isGifFile } from "../utils/imageCompress";
@@ -21,7 +21,13 @@ import { mediaUrl, mediaDownloadUrl } from "../utils/mediaUrl";
 import { buildReplyTo } from "../utils/messagePreview";
 import { linkifyText } from "../utils/linkify";
 import { parseLocationCoords } from "../utils/yandexMaps";
-import { captureScrollAnchor, restoreScrollAnchor, type ScrollAnchor } from "../utils/messageListScroll";
+import { capturePrependScroll, restorePrependScroll, type PrependScrollState } from "../utils/messageListScroll";
+import {
+  countUnreadBelowViewport,
+  findUnreadBounds,
+  isMessageBelowViewport,
+  scrollListToMessage,
+} from "../utils/chatUnread";
 
 type ChatRoomProps = {
   chatId: string;
@@ -40,7 +46,6 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -59,6 +64,8 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const pendingInitialScrollRef = useRef(false);
+  const suppressAutoReadRef = useRef(false);
+  const [unreadJumpCount, setUnreadJumpCount] = useState(0);
   const fileDragDepthRef = useRef(0);
   const longPressRef = useRef<number | null>(null);
   const [messageMenu, setMessageMenu] = useState<{ message: Message; x: number; y: number } | null>(null);
@@ -75,9 +82,12 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const messagesRef = useRef<Message[]>([]);
   const hasMoreOlderRef = useRef(true);
   const loadingOlderRef = useRef(false);
+  const loadOlderLockRef = useRef(false);
+  const lastOlderLoadAtRef = useRef(0);
   const loadingRef = useRef(true);
   const prependingOlderRef = useRef(false);
-  const pendingAnchorRef = useRef<ScrollAnchor | null>(null);
+  const pendingPrependRef = useRef<PrependScrollState | null>(null);
+  const [prependTick, setPrependTick] = useState(0);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
@@ -146,6 +156,8 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     setEditDraft(null);
     stickToBottomRef.current = true;
     pendingInitialScrollRef.current = true;
+    suppressAutoReadRef.current = false;
+    setUnreadJumpCount(0);
   }, [chatId]);
 
   useEffect(() => {
@@ -172,6 +184,43 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   }, [selectionMode]);
 
   const otherMember = chat?.type === "dm" ? chat.members.find((m) => m.id !== user?.id) : null;
+
+  const myLastReadId = user?.id ? (readCursors[user.id] ?? readCursorsRef.current[user.id] ?? null) : null;
+  const unreadBounds = useMemo(
+    () => (user?.id ? findUnreadBounds(messages, myLastReadId, user.id) : { first: null, last: null, count: 0 }),
+    [messages, myLastReadId, user?.id]
+  );
+
+  const refreshUnreadJumpCount = useCallback(() => {
+    const list = listRef.current;
+    if (!list || !user?.id) {
+      setUnreadJumpCount(0);
+      return;
+    }
+    setUnreadJumpCount(countUnreadBelowViewport(list, messagesRef.current, readCursorsRef.current[user.id] ?? null, user.id));
+  }, [user?.id]);
+
+  const tryMarkReadFromScroll = useCallback(() => {
+    if (!chatId || !user?.id || messagesRef.current.length === 0) return;
+    const list = listRef.current;
+    if (!list) return;
+
+    const lastRead = readCursorsRef.current[user.id] ?? null;
+    const bounds = findUnreadBounds(messagesRef.current, lastRead, user.id);
+
+    if (!bounds.last) {
+      if (stickToBottomRef.current) {
+        suppressAutoReadRef.current = false;
+        markChatRead(messagesRef.current[messagesRef.current.length - 1]!.id);
+      }
+      return;
+    }
+
+    if (!isMessageBelowViewport(list, bounds.last.id)) {
+      suppressAutoReadRef.current = false;
+      markChatRead(messagesRef.current[messagesRef.current.length - 1]!.id);
+    }
+  }, [chatId, user?.id]);
 
   useEffect(() => {
     return subscribe((msg) => {
@@ -220,17 +269,18 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   }, [subscribe, chatId]);
 
   const loadOlderMessages = useCallback(async () => {
-    if (!chatId || loadingOlderRef.current || !hasMoreOlderRef.current || loadingRef.current) return;
+    if (!chatId || loadOlderLockRef.current || !hasMoreOlderRef.current || loadingRef.current) return;
     const oldest = messagesRef.current[0];
     if (!oldest) return;
 
     const listEl = listRef.current;
-    if (listEl) {
-      pendingAnchorRef.current = captureScrollAnchor(listEl, oldest.id);
-    }
+    if (!listEl) return;
 
+    loadOlderLockRef.current = true;
     loadingOlderRef.current = true;
     prependingOlderRef.current = true;
+    pendingPrependRef.current = capturePrependScroll(listEl);
+    lastOlderLoadAtRef.current = Date.now();
     setLoadingOlder(true);
 
     let didPrepend = false;
@@ -239,11 +289,9 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
       const batch = older as Message[];
       if (batch.length < MESSAGE_PAGE_SIZE) {
         hasMoreOlderRef.current = false;
-        setHasMoreOlder(false);
       }
       if (batch.length === 0) {
         hasMoreOlderRef.current = false;
-        setHasMoreOlder(false);
         return;
       }
       setMessages((prev) => {
@@ -251,19 +299,20 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
         const fresh = batch.filter((m) => !ids.has(m.id));
         if (fresh.length === 0) {
           hasMoreOlderRef.current = false;
-          setHasMoreOlder(false);
           return prev;
         }
         didPrepend = true;
         return [...fresh, ...prev];
       });
+      if (didPrepend) setPrependTick((t) => t + 1);
     } catch (err) {
       console.error(err);
     } finally {
-      loadingOlderRef.current = false;
       if (!didPrepend) {
+        loadOlderLockRef.current = false;
+        loadingOlderRef.current = false;
         prependingOlderRef.current = false;
-        pendingAnchorRef.current = null;
+        pendingPrependRef.current = null;
         setLoadingOlder(false);
       }
     }
@@ -272,13 +321,13 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   useEffect(() => {
     if (!chatId || messages.length === 0 || !user?.id) return;
     if (prependingOlderRef.current || loadingOlderRef.current) return;
+    if (suppressAutoReadRef.current) return;
+    if (!stickToBottomRef.current) {
+      refreshUnreadJumpCount();
+      return;
+    }
     markChatRead(messages[messages.length - 1]!.id);
-  }, [chatId, messages, user?.id, ready]);
-
-  useEffect(() => {
-    if (!chatId || !user?.id) return;
-    markChatRead();
-  }, [chatId, user?.id]);
+  }, [chatId, messages, user?.id, ready, refreshUnreadJumpCount]);
 
   useEffect(() => {
     if (!chatId) return;
@@ -287,10 +336,10 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     loadingRef.current = true;
     setLoadingOlder(false);
     loadingOlderRef.current = false;
+    loadOlderLockRef.current = false;
     prependingOlderRef.current = false;
-    pendingAnchorRef.current = null;
+    pendingPrependRef.current = null;
     hasMoreOlderRef.current = true;
-    setHasMoreOlder(true);
     setMessages([]);
     getChat(chatId)
       .then((c) => {
@@ -311,8 +360,14 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
           setMessages(list as Message[]);
           const more = list.length >= MESSAGE_PAGE_SIZE;
           hasMoreOlderRef.current = more;
-          setHasMoreOlder(more);
           if (cursors?.length) applyReadCursors(cursors);
+          if (user?.id) {
+            suppressAutoReadRef.current = findUnreadBounds(
+              list as Message[],
+              readCursorsRef.current[user.id] ?? null,
+              user.id
+            ).count > 0;
+          }
         }
       })
       .catch(() => {
@@ -333,12 +388,12 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   }, [chatId]);
 
   useLayoutEffect(() => {
-    const anchor = pendingAnchorRef.current;
-    if (!anchor || !prependingOlderRef.current) return;
+    const pending = pendingPrependRef.current;
+    if (!pending || !prependingOlderRef.current) return;
     const list = listRef.current;
     if (!list) return;
 
-    const stick = () => restoreScrollAnchor(list, anchor);
+    const stick = () => restorePrependScroll(list, pending);
 
     stick();
     requestAnimationFrame(stick);
@@ -348,16 +403,18 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
 
     const done = window.setTimeout(() => {
       ro.disconnect();
-      pendingAnchorRef.current = null;
+      pendingPrependRef.current = null;
       prependingOlderRef.current = false;
+      loadingOlderRef.current = false;
+      loadOlderLockRef.current = false;
       setLoadingOlder(false);
-    }, 600);
+    }, 800);
 
     return () => {
       ro.disconnect();
       window.clearTimeout(done);
     };
-  }, [messages]);
+  }, [prependTick]);
 
   useEffect(() => {
     const root = listRef.current;
@@ -367,14 +424,17 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     const io = new IntersectionObserver(
       (entries) => {
         if (!entries[0]?.isIntersecting) return;
-        if (loadingOlderRef.current || loadingRef.current || !hasMoreOlderRef.current) return;
+        if (loadOlderLockRef.current || loadingOlderRef.current || loadingRef.current || !hasMoreOlderRef.current) {
+          return;
+        }
+        if (Date.now() - lastOlderLoadAtRef.current < 800) return;
         void loadOlderMessages();
       },
-      { root, rootMargin: "80px 0px 0px 0px", threshold: 0 }
+      { root, rootMargin: "0px", threshold: 0 }
     );
     io.observe(sentinel);
     return () => io.disconnect();
-  }, [chatId, loading, loadOlderMessages, messages.length]);
+  }, [chatId, loading, loadOlderMessages]);
 
   useEffect(() => {
     return () => {
@@ -398,24 +458,35 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     if (!list) return;
     const onScroll = () => {
       stickToBottomRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 120;
+      refreshUnreadJumpCount();
+      tryMarkReadFromScroll();
     };
     list.addEventListener("scroll", onScroll, { passive: true });
     return () => list.removeEventListener("scroll", onScroll);
-  }, [chatId]);
+  }, [chatId, refreshUnreadJumpCount, tryMarkReadFromScroll]);
 
   useEffect(() => {
     if (loading && messages.length === 0) return;
     if (messages.length === 0) return;
-    if (pendingAnchorRef.current || prependingOlderRef.current || loadingOlderRef.current) return;
+    if (pendingPrependRef.current || prependingOlderRef.current || loadingOlderRef.current || loadOlderLockRef.current) return;
 
     if (pendingInitialScrollRef.current) {
+      if (!user?.id) return;
+      const list = listRef.current;
+      const firstUnread = unreadBounds.first;
+
       const snap = () => {
-        if (!stickToBottomRef.current) {
-          pendingInitialScrollRef.current = false;
-          return;
+        if (!list) return;
+        if (firstUnread) {
+          stickToBottomRef.current = false;
+          scrollListToMessage(list, firstUnread.id, "start", 16);
+        } else {
+          stickToBottomRef.current = true;
+          suppressAutoReadRef.current = false;
+          list.scrollTop = list.scrollHeight;
         }
-        scrollToBottom(true);
       };
+
       snap();
       requestAnimationFrame(() => {
         snap();
@@ -426,6 +497,8 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
       const t3 = window.setTimeout(() => {
         snap();
         pendingInitialScrollRef.current = false;
+        refreshUnreadJumpCount();
+        if (!firstUnread) tryMarkReadFromScroll();
       }, 900);
       return () => {
         window.clearTimeout(t1);
@@ -434,10 +507,12 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
       };
     }
 
+    refreshUnreadJumpCount();
+
     if (stickToBottomRef.current) {
       scrollToBottom(false);
     }
-  }, [messages, loading, scrollToBottom]);
+  }, [messages, loading, scrollToBottom, unreadBounds.first, refreshUnreadJumpCount, tryMarkReadFromScroll]);
 
   function dispatchMessage(
     opts: {
@@ -507,9 +582,20 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     }
   }
 
-  function scrollToMessage(messageId: string) {
-    const el = listRef.current?.querySelector(`[data-message-id="${messageId}"]`);
-    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  function scrollToMessage(messageId: string, block: "start" | "center" | "end" = "center") {
+    const list = listRef.current;
+    if (!list) return;
+    scrollListToMessage(list, messageId, block, 16);
+    requestAnimationFrame(() => {
+      refreshUnreadJumpCount();
+      tryMarkReadFromScroll();
+    });
+  }
+
+  function jumpToLastUnread() {
+    if (!unreadBounds.last) return;
+    scrollToMessage(unreadBounds.last.id, "end");
+    stickToBottomRef.current = false;
   }
 
   function handleReplyStart(m: Message) {
@@ -968,21 +1054,25 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
         ) : (
           <>
             <div ref={topSentinelRef} className="messages-top-sentinel" aria-hidden />
-            {(hasMoreOlder || loadingOlder) && (
-              <div className="messages-history-head" aria-live="polite">
-                {loadingOlder ? (
-                  <span className="messages-load-older-spinner" aria-label="Загрузка истории" />
-                ) : (
-                  <span className="messages-history-hint">Прокрутите вверх для истории</span>
-                )}
+            {loadingOlder && (
+              <div className="messages-history-overlay" aria-busy="true" aria-label="Загрузка истории">
+                <span className="messages-load-older-spinner" />
               </div>
             )}
             {messages.map((m) => {
             const mt = m.messageType ?? "text";
+            const showUnreadDivider = unreadBounds.first?.id === m.id;
             if (mt === "system") {
               return (
-                <div key={m.id} className="message-system" data-message-id={m.id}>
-                  <span>{m.content}</span>
+                <div key={m.id}>
+                  {showUnreadDivider && (
+                    <div className="messages-unread-divider" role="separator">
+                      <span>Непрочитанные сообщения</span>
+                    </div>
+                  )}
+                  <div className="message-system" data-message-id={m.id}>
+                    <span>{m.content}</span>
+                  </div>
                 </div>
               );
             }
@@ -991,8 +1081,13 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
             const selectable = canDeleteMessage(m);
             const selected = selectedIds.has(m.id);
             return (
+            <div key={m.id}>
+              {showUnreadDivider && (
+                <div className="messages-unread-divider" role="separator">
+                  <span>Непрочитанные сообщения</span>
+                </div>
+              )}
             <div
-              key={m.id}
               data-message-id={m.id}
               className={`message-row ${own ? "own" : "incoming"}${selectionMode ? " selection-mode" : ""}`}
               onClick={(e) => onMessageRowClick(e, m)}
@@ -1114,12 +1209,24 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
             </div>
               </div>
             </div>
+            </div>
           );
           })}
           </>
         )}
         <div ref={messagesEndRef} />
       </div>
+      {unreadJumpCount > 0 && unreadBounds.last && (
+        <button
+          type="button"
+          className="messages-unread-jump"
+          onClick={jumpToLastUnread}
+          aria-label={`Прокрутить к непрочитанным: ${unreadJumpCount}`}
+        >
+          <IconChevronDown size={18} />
+          <span>{unreadJumpCount > 99 ? "99+" : unreadJumpCount}</span>
+        </button>
+      )}
       <div className="compose">
         {replyDraft && (
           <div className="compose-reply">

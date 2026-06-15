@@ -4,7 +4,7 @@ import SettingsModal from "../components/SettingsModal";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import { useActiveChat } from "../context/ActiveChatContext";
-import { getChats, createDm, createGroup, searchUser, getContacts, addContact, getChatUnreadCount, markChatReadApi } from "../api";
+import { getChats, createDm, createGroup, searchUser, getContacts, addContact, getChatUnreadCount } from "../api";
 import type { Chat, User, Message } from "@melon/shared";
 import { mediaUrl } from "../utils/mediaUrl";
 import { BrandIcon } from "../components/BrandIcon";
@@ -132,11 +132,6 @@ export default function ChatLayout() {
   }, [location.state, location.pathname, location.search, navigate]);
 
   useEffect(() => {
-    if (!activeChatId) return;
-    setChats((prev) => prev.map((c) => (c.id === activeChatId ? { ...c, unreadCount: 0 } : c)));
-  }, [activeChatId]);
-
-  useEffect(() => {
     if (!ready) {
       subscribedChatsRef.current.clear();
       return;
@@ -162,9 +157,6 @@ export default function ChatLayout() {
               c.id === chatId ? { ...c, unreadCount: (c.unreadCount ?? 0) + 1 } : c
             );
             refreshChatUnreadCount(chatId);
-          }
-          if (!isSystem && fromOther && isActive) {
-            void markChatReadApi(chatId).catch(() => {});
           }
           return next;
         });
@@ -192,12 +184,7 @@ export default function ChatLayout() {
 
   function refreshChats() {
     getChats().then((list) => {
-      const activeId = activeChatIdRef.current;
-      setChats(
-        sortChatsByRecent(
-          (list as Chat[]).map((c) => (c.id === activeId ? { ...c, unreadCount: 0 } : c))
-        )
-      );
+      setChats(sortChatsByRecent(list as Chat[]));
     });
   }
 
@@ -206,12 +193,7 @@ export default function ChatLayout() {
     getChats()
       .then((list) => {
         if (!cancelled) {
-          const activeId = activeChatIdRef.current;
-          setChats(
-            sortChatsByRecent(
-              (list as Chat[]).map((c) => (c.id === activeId ? { ...c, unreadCount: 0 } : c))
-            )
-          );
+          setChats(sortChatsByRecent(list as Chat[]));
         }
       })
       .finally(() => {
@@ -486,10 +468,6 @@ export default function ChatLayout() {
                 type="button"
                 className={`chat-item chat-item-btn ${activeChatId === chat.id ? "chat-item-active" : ""}`}
                 onClick={() => {
-                  setChats((prev) =>
-                    prev.map((c) => (c.id === chat.id ? { ...c, unreadCount: 0 } : c))
-                  );
-                  void markChatReadApi(chat.id).catch(() => {});
                   void openChat(chat.id);
                 }}
               >

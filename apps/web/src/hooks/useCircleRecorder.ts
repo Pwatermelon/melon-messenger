@@ -1,20 +1,40 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { pickCircleMime, isSafariBrowser } from "../utils/mediaMime";
+import {
+  readCachedCircleConstraintIndex,
+  writeCachedCircleConstraintIndex,
+} from "../utils/mediaAccess";
 
 const MAX_DURATION = 60;
 
+const CIRCLE_CONSTRAINTS: MediaStreamConstraints[] = [
+  { video: { facingMode: "user", width: { ideal: 480 }, height: { ideal: 480 } }, audio: true },
+  { video: { width: { ideal: 480 }, height: { ideal: 480 } }, audio: true },
+  { video: true, audio: true },
+];
+
+function isPermissionDenied(err: unknown): boolean {
+  return err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "PermissionDeniedError");
+}
+
 async function getCircleStream(): Promise<MediaStream> {
-  const attempts: MediaStreamConstraints[] = [
-    { video: { facingMode: "user", width: { ideal: 480 }, height: { ideal: 480 } }, audio: true },
-    { video: { width: { ideal: 480 }, height: { ideal: 480 } }, audio: true },
-    { video: true, audio: true },
-  ];
+  const cached = readCachedCircleConstraintIndex();
+  const order = [...CIRCLE_CONSTRAINTS.keys()];
+  if (cached != null && cached >= 0 && cached < CIRCLE_CONSTRAINTS.length) {
+    order.splice(order.indexOf(cached), 1);
+    order.unshift(cached);
+  }
+
   let lastErr: unknown;
-  for (const constraints of attempts) {
+  for (const index of order) {
+    const constraints = CIRCLE_CONSTRAINTS[index]!;
     try {
-      return await navigator.mediaDevices.getUserMedia(constraints);
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      writeCachedCircleConstraintIndex(index);
+      return stream;
     } catch (e) {
       lastErr = e;
+      if (isPermissionDenied(e)) throw e;
     }
   }
   throw lastErr ?? new Error("Camera unavailable");
@@ -29,6 +49,7 @@ export function useCircleRecorder() {
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const acquiredStreamRef = useRef<MediaStream | null>(null);
   const startTimeRef = useRef<number | null>(null);
 
   const cleanup = useCallback(() => {
@@ -38,6 +59,8 @@ export function useCircleRecorder() {
     }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    acquiredStreamRef.current?.getTracks().forEach((t) => t.stop());
+    acquiredStreamRef.current = null;
     setPreviewStream(null);
     mediaRecorderRef.current = null;
     setRecording(false);
@@ -47,10 +70,40 @@ export function useCircleRecorder() {
 
   useEffect(() => () => cleanup(), [cleanup]);
 
-  const start = useCallback(async (): Promise<boolean> => {
+  const releaseAcquire = useCallback(() => {
+    if (mediaRecorderRef.current) return;
+    acquiredStreamRef.current?.getTracks().forEach((t) => t.stop());
+    acquiredStreamRef.current = null;
+    setPreviewStream(null);
+  }, []);
+
+  const acquire = useCallback(async (): Promise<boolean> => {
+    if (mediaRecorderRef.current || acquiredStreamRef.current) return true;
     setError(null);
     try {
       const stream = await getCircleStream();
+      acquiredStreamRef.current = stream;
+      setPreviewStream(stream);
+      return true;
+    } catch (err) {
+      console.error("Circle acquire failed:", err);
+      setError(err instanceof Error ? err.message : "Не удалось открыть камеру");
+      return false;
+    }
+  }, []);
+
+  const begin = useCallback(async (): Promise<boolean> => {
+    if (mediaRecorderRef.current) return true;
+    setError(null);
+    try {
+      let stream = acquiredStreamRef.current;
+      if (!stream) {
+        const ok = await acquire();
+        if (!ok) return false;
+        stream = acquiredStreamRef.current;
+      }
+      if (!stream) return false;
+      acquiredStreamRef.current = null;
       streamRef.current = stream;
       setPreviewStream(stream);
 
@@ -78,7 +131,13 @@ export function useCircleRecorder() {
       cleanup();
       return false;
     }
-  }, [cleanup]);
+  }, [acquire, cleanup]);
+
+  const start = useCallback(async (): Promise<boolean> => {
+    const ok = await acquire();
+    if (!ok) return false;
+    return begin();
+  }, [acquire, begin]);
 
   const stop = useCallback((): Promise<{ blob: Blob; duration: number }> => {
     return new Promise((resolve) => {
@@ -136,5 +195,17 @@ export function useCircleRecorder() {
     }
   }, [cleanup]);
 
-  return { recording, duration, previewStream, error, start, stop, cancel, maxDuration: MAX_DURATION };
+  return {
+    recording,
+    duration,
+    previewStream,
+    error,
+    acquire,
+    begin,
+    releaseAcquire,
+    start,
+    stop,
+    cancel,
+    maxDuration: MAX_DURATION,
+  };
 }

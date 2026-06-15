@@ -5,6 +5,14 @@ const BAR_COUNT = 14;
 const LEVEL_UPDATE_MS = 80;
 const SAFARI_STOP_FLUSH_MS = 150;
 
+const VOICE_CONSTRAINTS: MediaStreamConstraints = {
+  audio: {
+    channelCount: 1,
+    echoCancellation: true,
+    noiseSuppression: true,
+  },
+};
+
 function idleLevels(): number[] {
   return Array.from({ length: BAR_COUNT }, () => 0.15);
 }
@@ -38,6 +46,7 @@ export function useVoiceRecorder() {
   const analysisStreamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastLevelUpdateRef = useRef(0);
+  const acquiredStreamRef = useRef<MediaStream | null>(null);
 
   const stopAnalyser = useCallback(() => {
     if (rafRef.current !== null) {
@@ -91,15 +100,36 @@ export function useVoiceRecorder() {
     });
   }, [stopAnalyser]);
 
-  const start = useCallback(async (): Promise<boolean> => {
+  const releaseAcquire = useCallback(() => {
+    if (mediaRecorderRef.current) return;
+    acquiredStreamRef.current?.getTracks().forEach((t) => t.stop());
+    acquiredStreamRef.current = null;
+  }, []);
+
+  const acquire = useCallback(async (): Promise<boolean> => {
+    if (mediaRecorderRef.current || acquiredStreamRef.current) return true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
-      });
+      const stream = await navigator.mediaDevices.getUserMedia(VOICE_CONSTRAINTS);
+      acquiredStreamRef.current = stream;
+      return true;
+    } catch (err) {
+      console.error("Voice acquire failed:", err);
+      return false;
+    }
+  }, []);
+
+  const begin = useCallback(async (): Promise<boolean> => {
+    if (mediaRecorderRef.current) return true;
+    try {
+      let stream = acquiredStreamRef.current;
+      if (!stream) {
+        const ok = await acquire();
+        if (!ok) return false;
+        stream = acquiredStreamRef.current;
+      }
+      if (!stream) return false;
+      acquiredStreamRef.current = null;
+
       await waitForLiveAudioTrack(stream);
       const mime = pickVoiceMime();
       const recorder = mime
@@ -110,7 +140,6 @@ export function useVoiceRecorder() {
         if (e.data.size) chunksRef.current.push(e.data);
       };
       mediaRecorderRef.current = recorder;
-      // Safari/iOS loses audio with small timeslices; keep recorder on the raw mic stream.
       if (isSafariBrowser()) recorder.start();
       else recorder.start(250);
 
@@ -129,9 +158,16 @@ export function useVoiceRecorder() {
     } catch (err) {
       console.error("Voice recording failed:", err);
       stopAnalyser();
+      releaseAcquire();
       return false;
     }
-  }, [startAnalyser, stopAnalyser]);
+  }, [acquire, releaseAcquire, startAnalyser, stopAnalyser]);
+
+  const start = useCallback(async (): Promise<boolean> => {
+    const ok = await acquire();
+    if (!ok) return false;
+    return begin();
+  }, [acquire, begin]);
 
   const stop = useCallback((): Promise<{ blob: Blob; duration: number }> => {
     return new Promise((resolve) => {
@@ -139,6 +175,7 @@ export function useVoiceRecorder() {
       const startedAt = startTimeRef.current;
       if (!recorder || recorder.state === "inactive") {
         stopAnalyser();
+        releaseAcquire();
         startTimeRef.current = null;
         resolve({ blob: new Blob(), duration: 0 });
         return;
@@ -180,7 +217,7 @@ export function useVoiceRecorder() {
         finish();
       }
     });
-  }, [stopAnalyser]);
+  }, [releaseAcquire, stopAnalyser]);
 
   const cancel = useCallback(() => {
     if (timerRef.current) {
@@ -193,13 +230,15 @@ export function useVoiceRecorder() {
       recorder.onstop = null;
       if (recorder.state !== "inactive") recorder.stop();
       recorder.stream.getTracks().forEach((t) => t.stop());
+    } else {
+      releaseAcquire();
     }
     chunksRef.current = [];
     mediaRecorderRef.current = null;
     startTimeRef.current = null;
     setRecording(false);
     setDuration(0);
-  }, [stopAnalyser]);
+  }, [releaseAcquire, stopAnalyser]);
 
-  return { recording, duration, levels, start, stop, cancel };
+  return { recording, duration, levels, acquire, begin, releaseAcquire, start, stop, cancel };
 }

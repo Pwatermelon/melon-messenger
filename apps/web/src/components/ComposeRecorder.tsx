@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useVoiceRecorder } from "../hooks/useVoiceRecorder";
 import { useCircleRecorder } from "../hooks/useCircleRecorder";
-import { IconCircle, IconMic } from "./Icons";
+import { IconCircle, IconMic, IconTrash } from "./Icons";
+import { shouldAcquireMediaEarly, type RecordMediaKind } from "../utils/mediaAccess";
 
 type RecordMode = "voice" | "circle";
 type Gesture = "none" | "cancel" | "lock";
@@ -125,6 +126,15 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
     sendingRef.current = false;
   }
 
+  function activeRecorder() {
+    return modeRef.current === "voice" ? voice : circle;
+  }
+
+  function releaseInactiveAcquire() {
+    if (modeRef.current === "voice") circle.releaseAcquire();
+    else voice.releaseAcquire();
+  }
+
   function cancelRecording() {
     if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
     holdTimerRef.current = null;
@@ -139,29 +149,21 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
     setAnchor(null);
   }
 
-  async function startRecording(): Promise<boolean> {
+  async function acquireRecording(): Promise<boolean> {
+    releaseInactiveAcquire();
+    return activeRecorder().acquire();
+  }
+
+  async function beginRecording(): Promise<boolean> {
     updateAnchor();
     setRecordError(null);
-    const p = (async () => {
-      if (modeRef.current === "voice") return voice.start();
-      return circle.start();
-    })();
-    startPromiseRef.current = p;
-    try {
-      const ok = await p;
-      if (ok) recordingStartedRef.current = true;
-      else {
-        setAnchor(null);
-        setRecordError("Не удалось начать запись");
-      }
-      return ok;
-    } catch {
+    const ok = await activeRecorder().begin();
+    if (ok) recordingStartedRef.current = true;
+    else {
       setAnchor(null);
       setRecordError("Не удалось начать запись");
-      return false;
-    } finally {
-      startPromiseRef.current = null;
     }
+    return ok;
   }
 
   function updateGesture(clientX: number, clientY: number) {
@@ -198,6 +200,8 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
     }
 
     if (!holdActivatedRef.current && !movedRef.current) {
+      releaseInactiveAcquire();
+      activeRecorder().releaseAcquire();
       persistMode(modeRef.current === "voice" ? "circle" : "voice");
       return;
     }
@@ -256,6 +260,7 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
     recordingStartedRef.current = false;
     setGesture("none");
     setRecordError(null);
+    startPromiseRef.current = null;
 
     document.addEventListener("pointermove", onDocPointerMove, { passive: false });
     document.addEventListener("pointerup", onDocPointerUp, { passive: false });
@@ -264,9 +269,31 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
     document.addEventListener("touchend", onDocTouchEnd, { passive: false });
     document.addEventListener("touchcancel", onDocTouchEnd, { passive: false });
 
+    void (async () => {
+      const kind: RecordMediaKind = modeRef.current;
+      if (await shouldAcquireMediaEarly(kind)) {
+        const p = acquireRecording();
+        startPromiseRef.current = p;
+        await p;
+      }
+    })();
+
     holdTimerRef.current = setTimeout(() => {
       holdActivatedRef.current = true;
-      void startRecording();
+      const p = (async () => {
+        if (!startPromiseRef.current) {
+          const acquired = await acquireRecording();
+          if (!acquired) return false;
+        } else {
+          const acquired = await startPromiseRef.current;
+          if (!acquired) return false;
+        }
+        return beginRecording();
+      })();
+      startPromiseRef.current = p;
+      void p.finally(() => {
+        if (startPromiseRef.current === p) startPromiseRef.current = null;
+      });
     }, HOLD_MS);
   }
 
@@ -326,9 +353,20 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
             </div>
           )}
           <div
-            className={`record-hint-panel ${gesture === "cancel" ? "record-hint-cancel" : ""} ${gesture === "lock" ? "record-hint-lock" : ""}`}
+            className={`record-hint-panel ${locked ? "record-hint-panel-locked" : ""} ${gesture === "cancel" ? "record-hint-cancel" : ""} ${gesture === "lock" ? "record-hint-lock" : ""}`}
           >
-            <span className={`record-hint record-hint-left ${gesture === "cancel" ? "active" : ""}`}>← Отмена</span>
+            {locked ? (
+              <button
+                type="button"
+                className="record-hint record-hint-left record-hint-cancel-btn"
+                onClick={cancelRecording}
+                disabled={disabled}
+              >
+                ← Отмена
+              </button>
+            ) : (
+              <span className={`record-hint record-hint-left ${gesture === "cancel" ? "active" : ""}`}>← Отмена</span>
+            )}
             <span className="record-hint-timer">{duration}s</span>
             <span className={`record-hint record-hint-right ${gesture === "lock" ? "active" : ""}`}>
               {locked ? "Заблокировано" : "↑ Без удержания"}
@@ -340,14 +378,28 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
         <span className="compose-record-error" role="alert">{recordError}</span>
       )}
       {locked ? (
-        <button
-          type="button"
-          className="compose-btn compose-btn-icon compose-btn-record-stop"
-          onClick={() => void finishSend()}
-          disabled={disabled}
-        >
-          {duration}s
-        </button>
+        <div className="compose-record-locked-actions">
+          <button
+            type="button"
+            className="compose-btn compose-btn-icon compose-btn-record-cancel"
+            onClick={cancelRecording}
+            disabled={disabled}
+            aria-label="Отмена"
+            title="Отмена"
+          >
+            <IconTrash size={20} />
+          </button>
+          <button
+            type="button"
+            className="compose-btn compose-btn-icon compose-btn-record-stop"
+            onClick={() => void finishSend()}
+            disabled={disabled}
+            aria-label="Отправить"
+            title="Отправить"
+          >
+            {duration}s
+          </button>
+        </div>
       ) : (
         <button
           ref={btnRef}
