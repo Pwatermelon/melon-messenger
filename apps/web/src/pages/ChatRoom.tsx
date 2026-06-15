@@ -89,17 +89,21 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     setReadCursors(map);
   }
 
-  function markChatRead(messageId: string) {
+  function markChatRead(messageId?: string) {
     if (!chatId || !user?.id) return;
-    const normalized = messageId.toLowerCase();
-    const mine = readCursorsRef.current[user.id];
-    if (mine && mine.toLowerCase() >= normalized) return;
-    readCursorsRef.current[user.id] = normalized;
-    setReadCursors((prev) => ({ ...prev, [user.id]: normalized }));
-    if (ready) {
-      send({ type: "mark_read", chatId, messageId: normalized });
+    if (messageId) {
+      const normalized = messageId.toLowerCase();
+      const mine = readCursorsRef.current[user.id];
+      if (mine && mine.toLowerCase() >= normalized) return;
+      readCursorsRef.current[user.id] = normalized;
+      setReadCursors((prev) => ({ ...prev, [user.id]: normalized }));
     }
-    void markChatReadApi(chatId, normalized).catch(() => {});
+    if (ready) {
+      send(messageId ? { type: "mark_read", chatId, messageId: messageId.toLowerCase() } : { type: "mark_read", chatId });
+    }
+    void markChatReadApi(chatId, messageId).then(() => {
+      window.dispatchEvent(new CustomEvent("wm:chat-read", { detail: { chatId } }));
+    }).catch(() => {});
   }
 
   function isMessageReadByPeers(m: Message): boolean {
@@ -250,9 +254,14 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   }, [chatId]);
 
   useEffect(() => {
-    if (!chatId || messages.length === 0) return;
+    if (!chatId || messages.length === 0 || !user?.id) return;
     markChatRead(messages[messages.length - 1]!.id);
-  }, [chatId, messages]);
+  }, [chatId, messages, user?.id, ready]);
+
+  useEffect(() => {
+    if (!chatId || !user?.id) return;
+    markChatRead();
+  }, [chatId, user?.id]);
 
   useEffect(() => {
     if (!chatId) return;
@@ -314,10 +323,8 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   useEffect(() => {
     return () => {
       const id = chatId;
-      const msgs = messagesRef.current;
-      if (!id || msgs.length === 0) return;
-      const lastId = msgs[msgs.length - 1]!.id.toLowerCase();
-      void markChatReadApi(id, lastId).catch(() => {});
+      if (!id) return;
+      void markChatReadApi(id).catch(() => {});
     };
   }, [chatId]);
 

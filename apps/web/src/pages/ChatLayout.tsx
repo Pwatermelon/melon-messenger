@@ -4,7 +4,7 @@ import SettingsModal from "../components/SettingsModal";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import { useActiveChat } from "../context/ActiveChatContext";
-import { getChats, createDm, createGroup, searchUser, getContacts, addContact, getChatUnreadCount } from "../api";
+import { getChats, createDm, createGroup, searchUser, getContacts, addContact, getChatUnreadCount, markChatReadApi } from "../api";
 import type { Chat, User, Message } from "@melon/shared";
 import { mediaUrl } from "../utils/mediaUrl";
 import { BrandIcon } from "../components/BrandIcon";
@@ -85,7 +85,7 @@ export default function ChatLayout() {
         void getChatUnreadCount(chatId).then((count) => {
           setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, unreadCount: count } : c)));
         });
-      }, 200)
+      }, 600)
     );
   }, []);
 
@@ -152,15 +152,19 @@ export default function ChatLayout() {
     return subscribe((msg) => {
       if (msg.type === "message") {
         setChats((prev) => {
-          const next = applyMessageToChatList(prev, msg.message);
           const chatId = msg.message.chatId;
           const isSystem = (msg.message.messageType ?? "text") === "system";
-          if (
-            !isSystem &&
-            chatId !== activeChatIdRef.current &&
-            msg.message.senderId !== userIdRef.current
-          ) {
+          const isActive = chatId === activeChatIdRef.current;
+          const fromOther = msg.message.senderId !== userIdRef.current;
+          let next = applyMessageToChatList(prev, msg.message);
+          if (!isSystem && fromOther && !isActive) {
+            next = next.map((c) =>
+              c.id === chatId ? { ...c, unreadCount: (c.unreadCount ?? 0) + 1 } : c
+            );
             refreshChatUnreadCount(chatId);
+          }
+          if (!isSystem && fromOther && isActive) {
+            void markChatReadApi(chatId).catch(() => {});
           }
           return next;
         });
@@ -216,6 +220,16 @@ export default function ChatLayout() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    const onChatRead = (e: Event) => {
+      const chatId = (e as CustomEvent<{ chatId?: string }>).detail?.chatId;
+      if (!chatId) return;
+      setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, unreadCount: 0 } : c)));
+    };
+    window.addEventListener("wm:chat-read", onChatRead);
+    return () => window.removeEventListener("wm:chat-read", onChatRead);
   }, []);
 
   useEffect(() => {
@@ -475,6 +489,7 @@ export default function ChatLayout() {
                   setChats((prev) =>
                     prev.map((c) => (c.id === chat.id ? { ...c, unreadCount: 0 } : c))
                   );
+                  void markChatReadApi(chat.id).catch(() => {});
                   void openChat(chat.id);
                 }}
               >

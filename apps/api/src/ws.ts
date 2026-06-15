@@ -10,7 +10,7 @@ import * as scylla from "./services/scylla";
 import * as redis from "./services/redis";
 import { notifyUser } from "./services/webPush";
 import { grantMediaFromAttachment } from "./services/mediaAccess";
-import { upsertReadCursor } from "./services/readReceipts";
+import { advanceReadCursor } from "./services/chatRead";
 import { trackSocket, untrackSocket } from "./wsRegistry";
 import type { WSClientMessage, WSServerMessage, Message } from "@melon/shared";
 
@@ -266,8 +266,8 @@ export const wsHandlers = {
 
       if (msg.type === "mark_read") {
         const { chatId, messageId } = msg;
-        if (!chatId || !messageId) {
-          send(ws, { type: "error", error: "chatId and messageId required" });
+        if (!chatId) {
+          send(ws, { type: "error", error: "chatId required" });
           return;
         }
         const [member] = await db
@@ -279,13 +279,17 @@ export const wsHandlers = {
           send(ws, { type: "error", error: "Not a member of this chat" });
           return;
         }
-        const advanced = await upsertReadCursor(chatId, ws.data.userId, messageId);
-        if (advanced) {
+        const { advanced, messageId: resolvedId } = await advanceReadCursor(
+          chatId,
+          ws.data.userId,
+          messageId
+        );
+        if (advanced && resolvedId) {
           await publishChatEvent(chatId, {
             type: "read_receipt",
             chatId,
             userId: ws.data.userId,
-            messageId,
+            messageId: resolvedId,
           });
         }
       }

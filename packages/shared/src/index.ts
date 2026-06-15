@@ -87,7 +87,7 @@ export type WSClientMessage =
       attachmentMetadata?: AttachmentMetadata | null;
     }
   | { type: "typing"; chatId: string; isTyping: boolean }
-  | { type: "mark_read"; chatId: string; messageId: string };
+  | { type: "mark_read"; chatId: string; messageId?: string };
 
 export type WSServerMessage =
   | { type: "auth_ok"; user: User }

@@ -1179,6 +1179,22 @@ a {
   flex-shrink: 0;
 }
 
+.message-row.incoming.selection-mode .message-select-check {
+  order: 2;
+}
+
+.message-row.incoming.selection-mode .message {
+  order: 1;
+}
+
+.message-row.own.selection-mode .message-select-check {
+  order: 0;
+}
+
+.message-row.own.selection-mode .message {
+  order: 1;
+}
+
 .message-row.selection-mode .message {
   align-self: center;
 }

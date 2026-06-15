@@ -266,14 +266,14 @@ export interface MessageItem {
 
 export type ReadCursor = { userId: string; lastReadMessageId: string };
 
-export async function markChatReadApi(chatId: string, messageId: string): Promise<void> {
+export async function markChatReadApi(chatId: string, messageId?: string): Promise<void> {
   const res = await fetch(`${getApiUrl()}/chats/${encodeURIComponent(chatId)}/read`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${getToken()}`,
     },
-    body: JSON.stringify({ messageId }),
+    body: JSON.stringify(messageId ? { messageId } : {}),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));

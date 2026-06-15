@@ -16,7 +16,8 @@ import {
   signUserMedia,
   filenameFromPath,
 } from "../services/mediaAccess";
-import { getReadCursors, getUserReadCursorsByChat, upsertReadCursor } from "../services/readReceipts";
+import { getReadCursors, getUserReadCursorsByChat } from "../services/readReceipts";
+import { advanceReadCursor } from "../services/chatRead";
 
 function toUser(u: typeof users.$inferSelect) {
   return toPublicProfile(u);
@@ -542,12 +543,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
   .post("/:id/read", async ({ user, params, body, set }) => {
     const u = requireAuth(set)(user);
     const { id: chatId } = params;
-    const payload = body as { messageId?: string };
-    const messageId = payload.messageId?.trim();
-    if (!messageId) {
-      set.status = 400;
-      return { error: "messageId required" };
-    }
+    const payload = (typeof body === "object" && body !== null ? body : {}) as { messageId?: string };
     const [member] = await db
       .select()
       .from(chatMembers)
@@ -557,8 +553,8 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       set.status = 403;
       return { error: "Not a member of this chat" };
     }
-    const advanced = await upsertReadCursor(chatId, u.id, messageId);
-    if (advanced) {
+    const { advanced, messageId } = await advanceReadCursor(chatId, u.id, payload.messageId);
+    if (advanced && messageId) {
       await publishChatEvent(chatId, {
         type: "read_receipt",
         chatId,
@@ -566,7 +562,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         messageId,
       });
     }
-    return { ok: true };
+    return { ok: true, messageId };
   })
   .get("/:id/messages", async ({ user, params, query, set }) => {
     const u = requireAuth(set)(user);
