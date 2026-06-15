@@ -3,13 +3,17 @@ import { Link, Outlet, useNavigate, useParams, useLocation } from "react-router-
 import SettingsModal from "../components/SettingsModal";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
-import { getChats, createDm, createGroup, searchUser } from "../api";
-import type { Chat } from "@melon/shared";
+import { getChats, createDm, createGroup, searchUser, getContacts, addContact } from "../api";
+import type { Chat, User } from "@melon/shared";
 import { getUploadsBaseUrl } from "../config";
 import { BrandIcon } from "../components/BrandIcon";
+import { IconPlus } from "../components/Icons";
+import Profile from "./Profile";
 
 export type ChatLayoutOutletContext = {
   openSettings: () => void;
+  openProfile: (userId?: string) => void;
+  addContact: (userId: string) => Promise<void>;
 };
 
 export default function ChatLayout() {
@@ -37,12 +41,43 @@ export default function ChatLayout() {
   const [sidebarUser, setSidebarUser] = useState<{ id: string; username: string; yandexLogin?: string | null; avatarUrl: string | null } | null>(null);
   const [sidebarLoading, setSidebarLoading] = useState(false);
   const [sidebarError, setSidebarError] = useState("");
+  const [sidebarTab, setSidebarTab] = useState<"chats" | "contacts">("chats");
+  const [contacts, setContacts] = useState<User[]>([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [profileUserId, setProfileUserId] = useState<string | null | undefined>(undefined);
+  const [dmPickContact, setDmPickContact] = useState(false);
   const newChatMenuRef = useRef<HTMLDivElement>(null);
+
+  function openProfile(userId?: string) {
+    setProfileUserId(userId ?? null);
+  }
+
+  async function handleAddContact(userId: string) {
+    await addContact(userId);
+    if (sidebarTab === "contacts") void loadContacts();
+  }
+
+  function loadContacts() {
+    setContactsLoading(true);
+    getContacts()
+      .then(setContacts)
+      .catch(() => setContacts([]))
+      .finally(() => setContactsLoading(false));
+  }
+
+  useEffect(() => {
+    if (sidebarTab === "contacts") loadContacts();
+  }, [sidebarTab]);
 
   useEffect(() => {
     const state = location.state as { openSettings?: boolean } | null;
     if (state?.openSettings) {
       setSettingsOpen(true);
+      navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
+    }
+    const profileState = state as { openProfile?: string | null } | null;
+    if (profileState && "openProfile" in (profileState ?? {})) {
+      setProfileUserId(profileState.openProfile ?? null);
       navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
     }
   }, [location.state, location.pathname, location.search, navigate]);
@@ -64,6 +99,9 @@ export default function ChatLayout() {
           }
           return copy;
         });
+      }
+      if (msg.type === "message_deleted") {
+        window.dispatchEvent(new Event("wm:refresh-chats"));
       }
     });
   }, [subscribe]);
@@ -293,14 +331,20 @@ export default function ChatLayout() {
                 <button type="button" className="sidebar-search-action primary" onClick={() => void startDm(sidebarUser.id)}>
                   Написать
                 </button>
-                <Link to={`/profile/${sidebarUser.id}`} className="sidebar-search-action" onClick={() => { setSidebarUser(null); setSidebarQuery(""); }}>
+                <Link to={`/profile/${sidebarUser.id}`} className="sidebar-search-action" onClick={(e) => { e.preventDefault(); openProfile(sidebarUser.id); setSidebarUser(null); setSidebarQuery(""); }}>
                   Профиль
                 </Link>
               </div>
             </div>
           )}
         </div>
+        <div className="sidebar-tabs">
+          <button type="button" className={sidebarTab === "chats" ? "active" : ""} onClick={() => setSidebarTab("chats")}>Чаты</button>
+          <button type="button" className={sidebarTab === "contacts" ? "active" : ""} onClick={() => setSidebarTab("contacts")}>Контакты</button>
+        </div>
         <div className="chat-list">
+          {sidebarTab === "chats" ? (
+          <>
           {loading ? (
             <p className="chat-list-empty">Загрузка…</p>
           ) : chats.length === 0 ? (
@@ -322,6 +366,32 @@ export default function ChatLayout() {
               </Link>
             ))
           )}
+          </>
+          ) : contactsLoading ? (
+            <p className="chat-list-empty">Загрузка…</p>
+          ) : contacts.length === 0 ? (
+            <p className="chat-list-empty">Нет контактов</p>
+          ) : (
+            contacts.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className="chat-item chat-item-btn"
+                onClick={() => openProfile(c.id)}
+              >
+                <div className="chat-item-avatar">
+                  {c.avatarUrl ? (
+                    <img src={c.avatarUrl.startsWith("http") ? c.avatarUrl : `${getUploadsBaseUrl()}${c.avatarUrl}`} alt="" className="chat-item-avatar-img" />
+                  ) : (
+                    <span className="chat-item-avatar-letter">{(c.yandexLogin ?? c.username).slice(0, 1).toUpperCase()}</span>
+                  )}
+                </div>
+                <div className="chat-item-body">
+                  <p className="chat-item-name">{c.yandexLogin ?? c.username}</p>
+                </div>
+              </button>
+            ))
+          )}
         </div>
         <div className="sidebar-footer">
           <div className="new-chat-wrap" ref={newChatMenuRef}>
@@ -333,7 +403,7 @@ export default function ChatLayout() {
               title="Новый чат"
               aria-expanded={newChatMenuOpen}
             >
-              +
+              <IconPlus size={26} />
             </button>
             {newChatMenuOpen && (
               <div className="new-chat-menu">
@@ -349,18 +419,38 @@ export default function ChatLayout() {
         </div>
       </aside>
       <main className="main">
-        <Outlet context={{ openSettings: () => setSettingsOpen(true) } satisfies ChatLayoutOutletContext} />
+        <Outlet context={{
+          openSettings: () => setSettingsOpen(true),
+          openProfile,
+          addContact: handleAddContact,
+        } satisfies ChatLayoutOutletContext} />
       </main>
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
 
+      {profileUserId !== undefined && (
+        <Profile
+          modal
+          userIdProp={profileUserId ?? undefined}
+          onClose={() => setProfileUserId(undefined)}
+          onOpenSettings={() => { setProfileUserId(undefined); setSettingsOpen(true); }}
+          onAddContact={handleAddContact}
+        />
+      )}
+
       {dmOpen && (
         <div
           className="search-overlay"
-          onClick={(e) => { if (e.target === e.currentTarget) { setDmOpen(false); setDmUser(null); setDmError(""); } }}
+          onClick={(e) => { if (e.target === e.currentTarget) { setDmOpen(false); setDmUser(null); setDmError(""); setDmPickContact(false); } }}
         >
-          <div className="search-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="search-modal search-modal-wide" onClick={(e) => e.stopPropagation()}>
             <h3>Новый диалог</h3>
+            <div className="dm-modal-tabs">
+              <button type="button" className={!dmPickContact ? "active" : ""} onClick={() => setDmPickContact(false)}>Поиск</button>
+              <button type="button" className={dmPickContact ? "active" : ""} onClick={() => { setDmPickContact(true); loadContacts(); }}>Контакты</button>
+            </div>
+            {!dmPickContact ? (
+            <>
             <div className="search-id-row">
               <input
                 type="text"
@@ -394,7 +484,26 @@ export default function ChatLayout() {
                 </button>
               </div>
             )}
-            <button type="button" className="close" onClick={() => { setDmOpen(false); setDmUser(null); setDmError(""); }}>
+            </>
+            ) : (
+              <div className="dm-contacts-list">
+                {contacts.length === 0 ? (
+                  <p className="search-hint">Нет контактов — добавьте из профиля</p>
+                ) : (
+                  contacts.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className="dm-contact-item"
+                      onClick={() => void startDm(c.id)}
+                    >
+                      <span className="dm-contact-name">{c.yandexLogin ?? c.username}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+            <button type="button" className="close" onClick={() => { setDmOpen(false); setDmUser(null); setDmError(""); setDmPickContact(false); }}>
               Закрыть
             </button>
           </div>

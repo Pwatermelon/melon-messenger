@@ -9,6 +9,14 @@ import type { ChatLayoutOutletContext } from "./ChatLayout";
 import BirthdayInfoBlock from "../components/BirthdayInfoBlock";
 import ImageLightbox from "../components/ImageLightbox";
 
+type ProfileProps = {
+  modal?: boolean;
+  onClose?: () => void;
+  userIdProp?: string;
+  onOpenSettings?: () => void;
+  onAddContact?: (userId: string) => Promise<void>;
+};
+
 function mediaUrl(path: string | null | undefined): string | null {
   if (!path) return null;
   return path.startsWith("http") ? path : `${getUploadsBaseUrl()}${path}`;
@@ -23,13 +31,17 @@ function buildAvatarPaths(profile: User): string[] {
   return paths;
 }
 
-export default function Profile() {
-  const { userId } = useParams<{ userId?: string }>();
+export default function Profile({ modal, onClose, userIdProp, onOpenSettings, onAddContact }: ProfileProps = {}) {
+  const { userId: routeUserId } = useParams<{ userId?: string }>();
+  const userId = userIdProp ?? routeUserId;
   const navigate = useNavigate();
-  const { openSettings } = useOutletContext<ChatLayoutOutletContext>();
+  const outlet = useOutletContext<ChatLayoutOutletContext | null>();
+  const openSettings = onOpenSettings ?? outlet?.openSettings;
+  const addContactFn = onAddContact ?? outlet?.addContact;
   const { user: me, updateUser } = useAuth();
   const isOwn = !userId || userId === me?.id;
   const targetId = userId ?? me?.id;
+  const [contactAdded, setContactAdded] = useState(false);
 
   const [profile, setProfile] = useState<User | null>(isOwn && me ? me : null);
   const [loading, setLoading] = useState(!isOwn);
@@ -182,15 +194,29 @@ export default function Profile() {
   const avatarUrls = avatarPaths.map((p) => mediaUrl(p)).filter(Boolean) as string[];
   const photoUrls = photos.map((p) => mediaUrl(p)).filter(Boolean) as string[];
 
-  return (
-    <div className="profile-page">
+  const body = (
+    <div className={`profile-page${modal ? " profile-page-modal" : ""}`}>
       <div className="profile-toolbar">
-        <button type="button" className="profile-back" onClick={() => navigate(-1)}>← Назад</button>
-        {isOwn && (
-          <button type="button" className="profile-settings-link" onClick={openSettings}>
-            Настройки
-          </button>
-        )}
+        <button type="button" className="profile-back" onClick={() => (onClose ? onClose() : navigate(-1))}>
+          {modal ? "×" : "← Назад"}
+        </button>
+        <div className="profile-toolbar-actions">
+          {!isOwn && addContactFn && profile && (
+            <button
+              type="button"
+              className="profile-add-contact"
+              onClick={() => void addContactFn(profile.id).then(() => setContactAdded(true))}
+              disabled={contactAdded}
+            >
+              {contactAdded ? "В контактах" : "В контакты"}
+            </button>
+          )}
+          {isOwn && openSettings && (
+            <button type="button" className="profile-settings-link" onClick={openSettings}>
+              Настройки
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="profile-cover-wrap">
@@ -378,4 +404,19 @@ export default function Profile() {
       )}
     </div>
   );
+
+  if (modal && onClose) {
+    return (
+      <div
+        className="search-overlay profile-overlay"
+        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      >
+        <div className="profile-modal" onClick={(e) => e.stopPropagation()}>
+          {body}
+        </div>
+      </div>
+    );
+  }
+
+  return body;
 }

@@ -1,21 +1,27 @@
 import { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useOutletContext } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
-import { HoldVoiceRecorder } from "../components/HoldVoiceRecorder";
-import { HoldCircleRecorder } from "../components/HoldCircleRecorder";
+import { ComposeRecorder } from "../components/ComposeRecorder";
 import { VoiceMessagePlayer } from "../components/VoiceMessagePlayer";
+import { CircleMessagePlayer } from "../components/CircleMessagePlayer";
+import { MessageContextMenu } from "../components/MessageContextMenu";
+import { ForwardMessageModal } from "../components/ForwardMessageModal";
 import BirthdayInfoBlock from "../components/BirthdayInfoBlock";
-import { getChats, getMessages, uploadFile, addGroupMembers, removeGroupMember, getUserByYandexLogin, deleteChat, updateGroup } from "../api";
+import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo } from "../components/Icons";
+import { getChats, getMessages, uploadFile, addGroupMembers, removeGroupMember, getUserByYandexLogin, deleteChat, updateGroup, deleteMessage, forwardMessage } from "../api";
+import { extFromBlobType } from "../utils/mediaMime";
 import { compressImage } from "../utils/imageCompress";
 import type { Chat, Message } from "@melon/shared";
 import type { MessageItem } from "../api";
 import { getUploadsBaseUrl, getWsUrl } from "../config";
+import type { ChatLayoutOutletContext } from "./ChatLayout";
 
 export default function ChatRoom() {
   const { chatId } = useParams<{ chatId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { openProfile, addContact: addToContacts } = useOutletContext<ChatLayoutOutletContext>();
   const { send, ready, status, reconnect, subscribe } = useWebSocketContext();
   const [chat, setChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -32,6 +38,13 @@ export default function ChatRoom() {
   const [groupAddError, setGroupAddError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const longPressRef = useRef<number | null>(null);
+  const [messageMenu, setMessageMenu] = useState<{ message: Message; x: number; y: number } | null>(null);
+  const [forwardTarget, setForwardTarget] = useState<Message | null>(null);
+  const [forwardChats, setForwardChats] = useState<Chat[]>([]);
+  const [forwarding, setForwarding] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const selectionMode = selectedIds.size > 0;
 
   useEffect(() => {
     if (!lightboxImage) return;
@@ -53,6 +66,19 @@ export default function ChatRoom() {
     return () => window.removeEventListener("keydown", onKey);
   }, [contactInfoOpen, selectedMemberId]);
 
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [chatId]);
+
+  useEffect(() => {
+    if (!selectionMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedIds(new Set());
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectionMode]);
+
   const otherMember = chat?.type === "dm" ? chat.members.find((m) => m.id !== user?.id) : null;
 
   useEffect(() => {
@@ -62,6 +88,9 @@ export default function ChatRoom() {
           if (prev.some((m) => m.id === msg.message.id)) return prev;
           return [...prev, msg.message];
         });
+      }
+      if (msg.type === "message_deleted" && msg.chatId === chatId) {
+        setMessages((prev) => prev.filter((m) => m.id !== msg.messageId));
       }
     });
   }, [subscribe, chatId]);
@@ -191,7 +220,7 @@ export default function ChatRoom() {
     setSending(true);
     try {
       const mime = blob.type || "audio/webm";
-      const ext = mime.includes("ogg") ? "ogg" : "webm";
+      const ext = extFromBlobType(mime, "audio");
       const file = new File([blob], `voice.${ext}`, { type: mime });
       const { path } = await uploadFile(file);
       await sendMessage({
@@ -213,7 +242,7 @@ export default function ChatRoom() {
     setSending(true);
     try {
       const mime = blob.type || "video/webm";
-      const ext = mime.includes("mp4") ? "mp4" : "webm";
+      const ext = extFromBlobType(mime, "video");
       const file = new File([blob], `circle.${ext}`, { type: mime });
       const { path } = await uploadFile(file);
       await sendMessage({
@@ -249,6 +278,87 @@ export default function ChatRoom() {
   }
 
   const isGroupAdmin = Boolean(chat?.type === "group" && chat.members.find((m) => m.id === user?.id)?.role === "admin");
+
+  function canDeleteMessage(m: Message): boolean {
+    if (!user) return false;
+    if (m.senderId === user.id) return true;
+    return isGroupAdmin;
+  }
+
+  function toggleMessageSelect(messageId: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(messageId)) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+  }
+
+  function openMessageMenu(clientX: number, clientY: number, m: Message) {
+    setMessageMenu({ message: m, x: clientX, y: clientY });
+  }
+
+  function onMessageContextMenu(e: React.MouseEvent, m: Message) {
+    e.preventDefault();
+    openMessageMenu(e.clientX, e.clientY, m);
+  }
+
+  function onMessageTouchStart(e: React.TouchEvent, m: Message) {
+    const touch = e.touches[0];
+    if (!touch) return;
+    longPressRef.current = window.setTimeout(() => {
+      openMessageMenu(touch.clientX, touch.clientY, m);
+      longPressRef.current = null;
+    }, 500);
+  }
+
+  function onMessageTouchEnd() {
+    if (longPressRef.current != null) {
+      clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+  }
+
+  async function handleDeleteSelected() {
+    if (!chatId || selectedIds.size === 0) return;
+    const ids = [...selectedIds];
+    try {
+      await Promise.all(ids.map((id) => deleteMessage(chatId, id)));
+      setMessages((prev) => prev.filter((m) => !ids.includes(m.id)));
+      setSelectedIds(new Set());
+      window.dispatchEvent(new Event("wm:refresh-chats"));
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  function handleForwardStart(m: Message) {
+    setMessageMenu(null);
+    setForwardTarget(m);
+    getChats()
+      .then((list) => setForwardChats(list as Chat[]))
+      .catch(() => setForwardChats([]));
+  }
+
+  async function handleForwardTo(targetChatId: string) {
+    if (!chatId || !forwardTarget) return;
+    setForwarding(true);
+    try {
+      const msg = await forwardMessage(targetChatId, chatId, forwardTarget.id);
+      if (targetChatId === chatId) {
+        setMessages((prev) => {
+          if (prev.some((x) => x.id === msg.id)) return prev;
+          return [...prev, msg as Message];
+        });
+      }
+      setForwardTarget(null);
+      window.dispatchEvent(new Event("wm:refresh-chats"));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setForwarding(false);
+    }
+  }
 
   async function handleDeleteChat() {
     if (!chatId) return;
@@ -317,7 +427,30 @@ export default function ChatRoom() {
 
   return (
     <>
-      <div className="chat-header">
+      <div className={`chat-header${selectionMode ? " chat-header-select" : ""}`}>
+        {selectionMode ? (
+          <>
+            <button
+              type="button"
+              className="chat-header-select-cancel"
+              onClick={() => setSelectedIds(new Set())}
+              aria-label="Отмена"
+            >
+              ×
+            </button>
+            <span className="chat-header-select-count">
+              {selectedIds.size} {selectedIds.size === 1 ? "сообщение" : selectedIds.size < 5 ? "сообщения" : "сообщений"}
+            </span>
+            <button
+              type="button"
+              className="chat-header-select-delete"
+              onClick={() => void handleDeleteSelected()}
+            >
+              <IconTrash size={18} /> Удалить
+            </button>
+          </>
+        ) : (
+          <>
         <button
           type="button"
           className="chat-header-user"
@@ -357,18 +490,53 @@ export default function ChatRoom() {
             Disconnected. <button type="button" onClick={reconnect} className="link-button">Retry</button> (or log out and log in)
           </span>
         )}
+          </>
+        )}
       </div>
       <div className="messages" ref={listRef}>
         {loading ? (
           <p style={{ color: "var(--muted)", padding: "1rem" }}>Loading messages…</p>
         ) : (
-          messages.map((m) => (
+          messages.map((m) => {
+            const mt = m.messageType ?? "text";
+            const naked = mt === "circle" || mt === "voice" || mt === "image";
+            const own = m.senderId === user?.id;
+            const selectable = canDeleteMessage(m);
+            const selected = selectedIds.has(m.id);
+            return (
             <div
               key={m.id}
-              className={`message ${m.senderId === user?.id ? "own" : ""}`}
+              className={`message-row ${own ? "own" : "incoming"}${selected ? " is-selected" : ""}${selectionMode ? " selection-mode" : ""}`}
+            >
+              {own && selectable && (
+                <button
+                  type="button"
+                  className="message-row-hit"
+                  onClick={() => toggleMessageSelect(m.id)}
+                  aria-label={selected ? "Снять выбор" : "Выбрать сообщение"}
+                />
+              )}
+              {selected && selectable && (
+                <div className="message-select-check is-checked" aria-hidden>
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path d="M2.5 6l2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+              )}
+            <div
+              className={`message ${own ? "own" : ""}${naked ? " message-naked" : ""}`}
+              onContextMenu={(e) => onMessageContextMenu(e, m)}
+              onTouchStart={(e) => onMessageTouchStart(e, m)}
+              onTouchEnd={onMessageTouchEnd}
+              onTouchCancel={onMessageTouchEnd}
             >
               {(chat?.type === "group" || (m.sender && m.senderId !== user?.id)) && (
                 <div className="message-sender">{m.sender?.username ?? "?"}</div>
+              )}
+              {m.attachmentMetadata?.forwardedFrom && (
+                <div className="message-forwarded">
+                  Переслано от {m.attachmentMetadata.forwardedFrom.username}
+                </div>
               )}
               {(m.messageType ?? "text") === "text" && (
                 <p className="message-content">{displayContent(m)}</p>
@@ -394,12 +562,12 @@ export default function ChatRoom() {
               )}
               {(m.messageType ?? "text") === "location" && m.attachmentMetadata?.lat != null && (
                 <a
-                  href={`https://www.openstreetmap.org/?mlat=${m.attachmentMetadata.lat}&mlon=${m.attachmentMetadata.lng}&zoom=15`}
+                  href={`https://yandex.ru/maps/?pt=${m.attachmentMetadata.lng},${m.attachmentMetadata.lat}&z=16&l=map`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="message-location"
                 >
-                  📍 Location
+                  <IconLocation size={16} /> Геопозиция
                 </a>
               )}
               {(m.messageType ?? "text") === "voice" && m.attachmentUrl && (
@@ -409,21 +577,26 @@ export default function ChatRoom() {
                 />
               )}
               {(m.messageType ?? "text") === "circle" && m.attachmentUrl && (
-                <div className="message-circle-wrap">
-                  <video
-                    className="message-circle"
-                    src={m.attachmentUrl.startsWith("http") ? m.attachmentUrl : `${getUploadsBaseUrl()}${m.attachmentUrl}`}
-                    controls
-                    playsInline
-                    preload="metadata"
-                  />
-                </div>
+                <CircleMessagePlayer
+                  src={m.attachmentUrl.startsWith("http") ? m.attachmentUrl : `${getUploadsBaseUrl()}${m.attachmentUrl}`}
+                  duration={m.attachmentMetadata?.duration}
+                />
               )}
               <div className="message-time">
                 {m.createdAt ? new Date(m.createdAt).toLocaleTimeString() : ""}
               </div>
             </div>
-          ))
+              {!own && selectable && (
+                <button
+                  type="button"
+                  className="message-row-hit"
+                  onClick={() => toggleMessageSelect(m.id)}
+                  aria-label={selected ? "Снять выбор" : "Выбрать сообщение"}
+                />
+              )}
+            </div>
+          );
+          })
         )}
         <div ref={messagesEndRef} />
       </div>
@@ -439,21 +612,21 @@ export default function ChatRoom() {
           <div className="compose-attach-wrap">
             <button
               type="button"
-              className="compose-btn compose-btn-icon"
+              className="compose-btn compose-btn-icon compose-btn-attach"
               onClick={() => setAttachMenuOpen((o) => !o)}
               disabled={!ready || sending}
-              title="Attach"
+              title="Вложение"
             >
-              📎
+              <IconAttach size={22} />
             </button>
             {attachMenuOpen && (
               <>
                 <div className="compose-attach-backdrop" onClick={() => setAttachMenuOpen(false)} />
                 <div className="compose-attach-menu">
-                  <button type="button" onClick={() => openAttach("image/*")}>🖼 Photo</button>
-                  <button type="button" onClick={() => openAttach("video/*")}>🎬 Video</button>
-                  <button type="button" onClick={() => openAttach("*/*")}>📄 File</button>
-                  <button type="button" onClick={() => { setAttachMenuOpen(false); handleLocation(); }}>📍 Location</button>
+                  <button type="button" onClick={() => openAttach("image/*")}><IconPhoto size={18} /> Фото</button>
+                  <button type="button" onClick={() => openAttach("video/*")}><IconVideo size={18} /> Видео</button>
+                  <button type="button" onClick={() => openAttach("*/*")}><IconFile size={18} /> Файл</button>
+                  <button type="button" onClick={() => { setAttachMenuOpen(false); handleLocation(); }}><IconLocation size={18} /> Геометка</button>
                 </div>
               </>
             )}
@@ -462,16 +635,18 @@ export default function ChatRoom() {
             type="text"
             className="compose-input"
             data-testid="compose-input"
-            placeholder="Type a message..."
+            placeholder="Сообщение…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={!ready}
           />
-          <button type="submit" className="compose-btn compose-btn-send" data-testid="compose-send" disabled={!ready || sending || !input.trim()}>
-            Send
-          </button>
-          <HoldCircleRecorder disabled={!ready || sending} onSend={handleCircleSend} />
-          <HoldVoiceRecorder disabled={!ready || sending} onSend={handleVoiceSend} />
+          {input.trim() ? (
+            <button type="submit" className="compose-btn compose-btn-send" data-testid="compose-send" disabled={!ready || sending}>
+              <IconSend size={20} />
+            </button>
+          ) : (
+            <ComposeRecorder disabled={!ready || sending} onVoiceSend={handleVoiceSend} onCircleSend={handleCircleSend} />
+          )}
         </form>
       </div>
       {lightboxImage && (
@@ -534,10 +709,17 @@ export default function ChatRoom() {
                   className="contact-info-profile-btn"
                   onClick={() => {
                     setContactInfoOpen(false);
-                    navigate(`/profile/${otherMember.id}`);
+                    openProfile(otherMember.id);
                   }}
                 >
                   Открыть профиль
+                </button>
+                <button
+                  type="button"
+                  className="contact-info-profile-btn"
+                  onClick={() => void addToContacts(otherMember.id)}
+                >
+                  В контакты
                 </button>
                 <button
                   type="button"
@@ -584,10 +766,17 @@ export default function ChatRoom() {
                       className="contact-info-profile-btn"
                       onClick={() => {
                         setContactInfoOpen(false);
-                        navigate(`/profile/${m.id}`);
+                        openProfile(m.id);
                       }}
                     >
                       Открыть профиль
+                    </button>
+                    <button
+                      type="button"
+                      className="contact-info-profile-btn"
+                      onClick={() => void addToContacts(m.id)}
+                    >
+                      В контакты
                     </button>
                         {isGroupAdmin && m.id !== user?.id && (
                       <button
@@ -710,6 +899,26 @@ export default function ChatRoom() {
             ) : null}
           </div>
         </div>
+      )}
+
+      {messageMenu && (
+        <MessageContextMenu
+          x={messageMenu.x}
+          y={messageMenu.y}
+          onForward={() => handleForwardStart(messageMenu.message)}
+          onClose={() => setMessageMenu(null)}
+        />
+      )}
+
+      {forwardTarget && (
+        <ForwardMessageModal
+          chats={forwardChats}
+          userId={user?.id}
+          currentChatId={chatId}
+          sending={forwarding}
+          onSelect={(id) => void handleForwardTo(id)}
+          onClose={() => !forwarding && setForwardTarget(null)}
+        />
       )}
     </>
   );

@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from "react";
+import { pickVoiceMime } from "../utils/mediaMime";
 
 export function useVoiceRecorder() {
   const [recording, setRecording] = useState(false);
@@ -13,7 +14,8 @@ export function useVoiceRecorder() {
   const start = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const mime = pickVoiceMime();
+      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
       chunksRef.current = [];
       recorder.ondataavailable = (e) => {
         if (e.data.size) chunksRef.current.push(e.data);

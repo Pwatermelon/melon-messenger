@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { Routes, Route, Navigate, Outlet, useParams } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import { WebSocketProvider } from "./context/WebSocketContext";
 import Login from "./pages/Login";
@@ -9,7 +9,6 @@ import AdminPanel from "./pages/AdminPanel";
 import Platinum from "./pages/Platinum";
 import ChatLayout from "./pages/ChatLayout";
 import ChatRoom from "./pages/ChatRoom";
-import Profile from "./pages/Profile";
 import IconPreview from "./pages/IconPreview";
 import { BrandIcon } from "./components/BrandIcon";
 
@@ -42,6 +41,11 @@ function EmptyChat() {
   );
 }
 
+function ProfileRedirect() {
+  const { userId } = useParams();
+  return <Navigate to="/" replace state={{ openProfile: userId ?? null }} />;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -59,8 +63,8 @@ export default function App() {
           <Route index element={<EmptyChat />} />
           <Route path="chat/:chatId" element={<ChatRoom />} />
           <Route path="settings" element={<Navigate to="/" replace state={{ openSettings: true }} />} />
-          <Route path="profile" element={<Profile />} />
-          <Route path="profile/:userId" element={<Profile />} />
+          <Route path="profile" element={<Navigate to="/" replace state={{ openProfile: null }} />} />
+          <Route path="profile/:userId" element={<ProfileRedirect />} />
         </Route>
       </Route>
 

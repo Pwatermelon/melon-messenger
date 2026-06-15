@@ -12,6 +12,7 @@ async function ensureUploadDir() {
 }
 
 function extFromMime(mime: string): string {
+  const base = mime.split(";")[0].trim().toLowerCase();
   const map: Record<string, string> = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
@@ -25,10 +26,12 @@ function extFromMime(mime: string): string {
     "audio/webm": ".webm",
     "audio/ogg": ".ogg",
     "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/aac": ".aac",
     "application/pdf": ".pdf",
     "application/zip": ".zip",
   };
-  return map[mime] ?? "";
+  return map[base] ?? "";
 }
 
 export const uploadRoutes = new Elysia({ prefix: "/upload" })

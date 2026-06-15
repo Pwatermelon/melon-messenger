@@ -74,6 +74,9 @@ const selectQuery = `SELECT chat_id, message_id, sender_id, content, created_at,
   FROM ${MESSAGES_TABLE} WHERE chat_id = ? LIMIT ?`;
 const selectFromQuery = `SELECT chat_id, message_id, sender_id, content, created_at, message_type, attachment_url, attachment_metadata, encrypted
   FROM ${MESSAGES_TABLE} WHERE chat_id = ? AND message_id < ? LIMIT ?`;
+const selectOneQuery = `SELECT chat_id, message_id, sender_id, content, created_at, message_type, attachment_url, attachment_metadata, encrypted
+  FROM ${MESSAGES_TABLE} WHERE chat_id = ? AND message_id = ?`;
+const deleteOneQuery = `DELETE FROM ${MESSAGES_TABLE} WHERE chat_id = ? AND message_id = ?`;
 const deleteByChatQuery = `DELETE FROM ${MESSAGES_TABLE} WHERE chat_id = ?`;
 
 export interface InsertMessageOpts {
@@ -138,6 +141,55 @@ export async function getMessages(
       encrypted: row.encrypted === true,
     };
   }) as MessageRow[];
+}
+
+function mapRow(row: {
+  chat_id?: { toString(): string } | string;
+  message_id?: { toString(): string } | string;
+  sender_id?: { toString(): string } | string;
+  content?: unknown;
+  created_at?: Date;
+  message_type?: unknown;
+  attachment_url?: unknown;
+  attachment_metadata?: unknown;
+  encrypted?: boolean | null;
+}): MessageRow {
+  let attachment_metadata: string | null = null;
+  try {
+    if (row.attachment_metadata != null) attachment_metadata = decryptAtRest(String(row.attachment_metadata));
+  } catch {}
+  return {
+    chat_id: row.chat_id?.toString?.() ?? String(row.chat_id),
+    message_id: row.message_id?.toString?.() ?? String(row.message_id),
+    sender_id: row.sender_id?.toString?.() ?? String(row.sender_id),
+    content: decryptAtRest(String(row.content)),
+    created_at: row.created_at as Date,
+    message_type: row.message_type != null ? String(row.message_type) : null,
+    attachment_url: row.attachment_url != null ? String(row.attachment_url) : null,
+    attachment_metadata,
+    encrypted: row.encrypted === true,
+  };
+}
+
+export async function getMessage(chatId: string, messageId: string): Promise<MessageRow | null> {
+  try {
+    const result = await scyllaClient.execute(selectOneQuery, [chatId, messageId], { prepare: true });
+    const row = result.rows[0];
+    if (!row) return null;
+    return mapRow(row);
+  } catch (err) {
+    console.warn("[Scylla] getMessage failed:", err);
+    return null;
+  }
+}
+
+export async function deleteMessage(chatId: string, messageId: string): Promise<void> {
+  try {
+    await scyllaClient.execute(deleteOneQuery, [chatId, messageId], { prepare: true });
+  } catch (err) {
+    console.warn("[Scylla] deleteMessage failed:", err);
+    throw err;
+  }
 }
 
 export async function deleteChatMessages(chatId: string): Promise<void> {

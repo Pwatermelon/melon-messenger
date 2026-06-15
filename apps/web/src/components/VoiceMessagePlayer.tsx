@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { IconPlay, IconPause } from "./Icons";
+
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
@@ -11,6 +13,7 @@ export function VoiceMessagePlayer({ src, duration: metaDuration }: { src: strin
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(metaDuration ?? 0);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -39,6 +42,12 @@ export function VoiceMessagePlayer({ src, duration: metaDuration }: { src: strin
     };
   }, [src]);
 
+  useEffect(() => {
+    setError(false);
+    setPlaying(false);
+    setProgress(0);
+  }, [src]);
+
   function toggle() {
     const audio = audioRef.current;
     if (!audio) return;
@@ -46,7 +55,10 @@ export function VoiceMessagePlayer({ src, duration: metaDuration }: { src: strin
       audio.pause();
       setPlaying(false);
     } else {
-      void audio.play().then(() => setPlaying(true)).catch(() => {});
+      setError(false);
+      void audio.play()
+        .then(() => setPlaying(true))
+        .catch(() => setError(true));
     }
   }
 
@@ -57,9 +69,9 @@ export function VoiceMessagePlayer({ src, duration: metaDuration }: { src: strin
 
   return (
     <div className="voice-player">
-      <audio ref={audioRef} src={src} preload="metadata" />
+      <audio ref={audioRef} src={src} preload="auto" />
       <button type="button" className="voice-player-btn" onClick={toggle} aria-label={playing ? "Пауза" : "Воспроизвести"}>
-        {playing ? "⏸" : "▶"}
+        {playing ? <IconPause size={18} /> : <IconPlay size={18} />}
       </button>
       <div className="voice-player-body">
         <div className={`voice-player-wave ${playing ? "voice-player-wave-active" : ""}`}>
@@ -75,7 +87,7 @@ export function VoiceMessagePlayer({ src, duration: metaDuration }: { src: strin
           <div className="voice-player-fill" style={{ width: `${progress * 100}%` }} />
         </div>
       </div>
-      <span className="voice-player-time">{formatTime(duration)}</span>
+      <span className="voice-player-time">{error ? "Ошибка" : formatTime(duration)}</span>
     </div>
   );
 }

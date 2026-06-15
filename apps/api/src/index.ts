@@ -1,6 +1,6 @@
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
-import { join } from "path";
+import { join, extname } from "path";
 import { sql } from "drizzle-orm";
 import { paymentRoutes } from "./routes/payments";
 import { pushRoutes } from "./routes/push";
@@ -9,6 +9,7 @@ import { rateLimitPlugin } from "./middleware/rateLimit";
 import { authRoutes } from "./routes/auth";
 import { adminRoutes } from "./routes/admin";
 import { chatRoutes } from "./routes/chats";
+import { contactRoutes } from "./routes/contacts";
 import { uploadRoutes, UPLOAD_DIR } from "./routes/upload";
 import { wsHandlers, setWSServer, setupRedisSubscriber } from "./ws";
 import { initScylla } from "./services/scylla";
@@ -17,6 +18,23 @@ import { validateProductionEnv } from "./lib/envCheck";
 import { e2eRoutes, isE2eEnabled } from "./routes/e2e";
 
 const PORT = Number(process.env.PORT) || 3000;
+
+const UPLOAD_MIME: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
+  ".m4a": "audio/mp4",
+  ".aac": "audio/aac",
+  ".ogg": "audio/ogg",
+  ".mp3": "audio/mpeg",
+  ".pdf": "application/pdf",
+  ".zip": "application/zip",
+};
 
 async function main() {
   validateProductionEnv();
@@ -62,6 +80,14 @@ async function main() {
         created_at timestamptz NOT NULL DEFAULT now()
       )
     `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS user_contacts (
+        user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        contact_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (user_id, contact_user_id)
+      )
+    `);
   } catch (e) {
     console.warn("Schema migration (optional):", e);
   }
@@ -101,7 +127,14 @@ async function main() {
           set.status = 404;
           return "Not found";
         }
-        return new Response(file, { headers: { "Cache-Control": "public, max-age=86400" } });
+        const ext = extname(filename).toLowerCase();
+        const contentType = UPLOAD_MIME[ext] ?? file.type ?? "application/octet-stream";
+        return new Response(file, {
+          headers: {
+            "Cache-Control": "public, max-age=86400",
+            "Content-Type": contentType,
+          },
+        });
       } catch {
         set.status = 404;
         return "Not found";
@@ -114,6 +147,7 @@ async function main() {
     .use(pushRoutes)
     .use(isE2eEnabled() ? e2eRoutes : new Elysia())
     .use(chatRoutes)
+    .use(contactRoutes)
     .use(uploadRoutes)
     .ws("/ws", wsHandlers);
 

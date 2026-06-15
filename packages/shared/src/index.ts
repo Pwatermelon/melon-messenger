@@ -51,6 +51,7 @@ export interface AttachmentMetadata {
   duration?: number;
   lat?: number;
   lng?: number;
+  forwardedFrom?: { userId: string; username: string };
 }
 
 export interface Message {
@@ -83,6 +84,7 @@ export type WSServerMessage =
   | { type: "auth_ok"; user: User }
   | { type: "auth_error"; error: string }
   | { type: "message"; message: Message }
+  | { type: "message_deleted"; chatId: string; messageId: string }
   | { type: "typing"; chatId: string; userId: string; isTyping: boolean }
   | { type: "presence"; userId: string; online: boolean }
   | { type: "error"; error: string };

@@ -171,6 +171,34 @@ export async function getUserById(id: string): Promise<User | null> {
   return res.json();
 }
 
+export async function getContacts(): Promise<User[]> {
+  const res = await fetch(`${getApiUrl()}/contacts`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error("Failed to load contacts");
+  return res.json();
+}
+
+export async function addContact(userId: string): Promise<User> {
+  const res = await fetch(`${getApiUrl()}/contacts/${encodeURIComponent(userId)}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Failed to add contact");
+  }
+  return res.json();
+}
+
+export async function removeContact(userId: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/contacts/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error("Failed to remove contact");
+}
+
 export async function updateProfile(updates: {
   username?: string;
   avatarUrl?: string | null;
@@ -247,6 +275,35 @@ export async function getMessages(
   });
   if (!res.ok) throw new Error("Failed to load messages");
   return res.json();
+}
+
+export async function deleteMessage(chatId: string, messageId: string): Promise<void> {
+  const res = await fetch(
+    `${getApiUrl()}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${getToken()}` } }
+  );
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Не удалось удалить сообщение");
+  }
+}
+
+export async function forwardMessage(
+  targetChatId: string,
+  fromChatId: string,
+  messageId: string
+): Promise<MessageItem> {
+  const res = await fetch(`${getApiUrl()}/chats/${encodeURIComponent(targetChatId)}/messages/forward`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ fromChatId, messageId }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Не удалось переслать сообщение");
+  return data.message as MessageItem;
 }
 
 export async function deleteChat(chatId: string): Promise<void> {

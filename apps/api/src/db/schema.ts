@@ -67,6 +67,16 @@ export const chatMembers = pgTable(
   (t) => [primaryKey({ columns: [t.chatId, t.userId] })]
 );
 
+export const userContacts = pgTable(
+  "user_contacts",
+  {
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    contactUserId: uuid("contact_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.contactUserId] })]
+);
+
 export const usersRelations = relations(users, ({ many }) => ({
   chatMembers: many(chatMembers),
   payments: many(payments),

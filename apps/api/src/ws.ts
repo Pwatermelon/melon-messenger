@@ -29,6 +29,12 @@ export function setWSServer(server: { publish: (topic: string, data: string) => 
   wsServerRef = server;
 }
 
+export async function publishChatEvent(chatId: string, payload: WSServerMessage): Promise<void> {
+  const data = JSON.stringify(payload);
+  await redis.publishToChat(chatId, data);
+  wsServerRef?.publish(chatTopic(chatId), data);
+}
+
 function chatTopic(chatId: string) {
   return `chat:${chatId}`;
 }
@@ -207,8 +213,7 @@ export const wsHandlers = {
             attachmentMetadata: attachmentMetadata ?? null,
           };
           const payload: WSServerMessage = { type: "message", message };
-          await redis.publishToChat(chatId, JSON.stringify(payload));
-          wsServerRef?.publish(chatTopic(chatId), JSON.stringify(payload));
+          await publishChatEvent(chatId, payload);
 
           const members = await db
             .select({ userId: chatMembers.userId })

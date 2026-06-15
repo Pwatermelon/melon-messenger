@@ -2,12 +2,24 @@ import { Elysia } from "elysia";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
 import { authPlugin, requireAuth } from "../auth";
 import { db, users, chats, chatMembers } from "../db";
-import { getMessages as scyllaGetMessages, deleteChatMessages } from "../services/scylla";
+import { getMessages as scyllaGetMessages, getMessage as scyllaGetMessage, deleteMessage as scyllaDeleteMessage, insertMessage as scyllaInsertMessage, deleteChatMessages } from "../services/scylla";
+import { publishChatEvent } from "../ws";
+import { notifyUser } from "../services/webPush";
+import type { AttachmentMetadata, Message as MessageDto, MessageType } from "@melon/shared";
 import { toPublicProfile } from "../lib/userDto";
 import { usersShareChat } from "../lib/chatAccess";
 
 function toUser(u: typeof users.$inferSelect) {
   return toPublicProfile(u);
+}
+
+function parseAttachmentMetadata(raw: string | null | undefined): AttachmentMetadata | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as AttachmentMetadata;
+  } catch {
+    return null;
+  }
 }
 
 export const chatRoutes = new Elysia({ prefix: "/chats" })
@@ -385,6 +397,104 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       };
     });
     return { messages: messages.slice().reverse() };
+  })
+  .delete("/:id/messages/:messageId", async ({ user, params, set }) => {
+    const u = requireAuth(set)(user);
+    const { id: chatId, messageId } = params;
+    const [member] = await db
+      .select()
+      .from(chatMembers)
+      .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, u.id)))
+      .limit(1);
+    if (!member) {
+      set.status = 403;
+      return { error: "Not a member of this chat" };
+    }
+    const row = await scyllaGetMessage(chatId, messageId);
+    if (!row) {
+      set.status = 404;
+      return { error: "Message not found" };
+    }
+    const [chatRow] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1);
+    const canDelete = row.sender_id === u.id || (chatRow?.type === "group" && member.role === "admin");
+    if (!canDelete) {
+      set.status = 403;
+      return { error: "Cannot delete this message" };
+    }
+    await scyllaDeleteMessage(chatId, messageId);
+    await publishChatEvent(chatId, { type: "message_deleted", chatId, messageId });
+    return { success: true };
+  })
+  .post("/:id/messages/forward", async ({ user, params, body, set }) => {
+    const u = requireAuth(set)(user);
+    const targetChatId = params.id;
+    const payload = body as { fromChatId?: string; messageId?: string };
+    const fromChatId = payload.fromChatId?.trim();
+    const messageId = payload.messageId?.trim();
+    if (!fromChatId || !messageId) {
+      set.status = 400;
+      return { error: "fromChatId and messageId required" };
+    }
+    const [targetMember] = await db
+      .select()
+      .from(chatMembers)
+      .where(and(eq(chatMembers.chatId, targetChatId), eq(chatMembers.userId, u.id)))
+      .limit(1);
+    if (!targetMember) {
+      set.status = 403;
+      return { error: "Not a member of target chat" };
+    }
+    const [sourceMember] = await db
+      .select()
+      .from(chatMembers)
+      .where(and(eq(chatMembers.chatId, fromChatId), eq(chatMembers.userId, u.id)))
+      .limit(1);
+    if (!sourceMember) {
+      set.status = 403;
+      return { error: "Not a member of source chat" };
+    }
+    const row = await scyllaGetMessage(fromChatId, messageId);
+    if (!row) {
+      set.status = 404;
+      return { error: "Message not found" };
+    }
+    const [originalSender] = await db.select().from(users).where(eq(users.id, row.sender_id)).limit(1);
+    const originalMeta = parseAttachmentMetadata(row.attachment_metadata) ?? {};
+    const forwardedFrom = originalMeta.forwardedFrom ?? {
+      userId: row.sender_id,
+      username: originalSender?.username ?? originalSender?.yandexLogin ?? "Пользователь",
+    };
+    const attachmentMetadata: AttachmentMetadata = { ...originalMeta, forwardedFrom };
+    const { messageId: newId, createdAt } = await scyllaInsertMessage(targetChatId, u.id, row.content, {
+      messageType: (row.message_type as MessageType) ?? "text",
+      attachmentUrl: row.attachment_url ?? null,
+      attachmentMetadata,
+    });
+    const [senderUser] = await db.select().from(users).where(eq(users.id, u.id)).limit(1);
+    const message: MessageDto = {
+      id: newId,
+      chatId: targetChatId,
+      senderId: u.id,
+      content: row.content,
+      createdAt: createdAt.toISOString(),
+      sender: senderUser ? toUser(senderUser) : undefined,
+      messageType: (row.message_type as MessageType) ?? "text",
+      attachmentUrl: row.attachment_url ?? null,
+      attachmentMetadata,
+    };
+    await publishChatEvent(targetChatId, { type: "message", message });
+    const members = await db
+      .select({ userId: chatMembers.userId })
+      .from(chatMembers)
+      .where(eq(chatMembers.chatId, targetChatId));
+    const preview = row.content.slice(0, 120) || "Пересланное сообщение";
+    const title = senderUser?.username ?? "Watermelon";
+    for (const m of members) {
+      if (m.userId !== u.id) {
+        notifyUser(m.userId, title, preview).catch(() => {});
+      }
+    }
+    return { message };
   })
   .put("/:id", async ({ user, params, body, set }) => {
     const u = requireAuth(set)(user);
