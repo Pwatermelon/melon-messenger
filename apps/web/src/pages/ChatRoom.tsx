@@ -21,6 +21,7 @@ import { mediaUrl, mediaDownloadUrl } from "../utils/mediaUrl";
 import { buildReplyTo } from "../utils/messagePreview";
 import { linkifyText } from "../utils/linkify";
 import { parseLocationCoords } from "../utils/yandexMaps";
+import { captureScrollAnchor, restoreScrollAnchor, type ScrollAnchor } from "../utils/messageListScroll";
 
 type ChatRoomProps = {
   chatId: string;
@@ -39,6 +40,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -54,6 +56,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const [groupAddError, setGroupAddError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const topSentinelRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const pendingInitialScrollRef = useRef(false);
   const fileDragDepthRef = useRef(0);
@@ -73,7 +76,10 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const hasMoreOlderRef = useRef(true);
   const loadingOlderRef = useRef(false);
   const loadingRef = useRef(true);
-  const pendingScrollRestoreRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+  const prependingOlderRef = useRef(false);
+  const pendingAnchorRef = useRef<ScrollAnchor | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -218,43 +224,54 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     const oldest = messagesRef.current[0];
     if (!oldest) return;
 
-    loadingOlderRef.current = true;
-    setLoadingOlder(true);
     const listEl = listRef.current;
     if (listEl) {
-      pendingScrollRestoreRef.current = {
-        scrollHeight: listEl.scrollHeight,
-        scrollTop: listEl.scrollTop,
-      };
+      pendingAnchorRef.current = captureScrollAnchor(listEl, oldest.id);
     }
 
+    loadingOlderRef.current = true;
+    prependingOlderRef.current = true;
+    setLoadingOlder(true);
+
+    let didPrepend = false;
     try {
       const { messages: older } = await getMessages(chatId, MESSAGE_PAGE_SIZE, oldest.id);
       const batch = older as Message[];
       if (batch.length < MESSAGE_PAGE_SIZE) {
         hasMoreOlderRef.current = false;
+        setHasMoreOlder(false);
       }
       if (batch.length === 0) {
         hasMoreOlderRef.current = false;
+        setHasMoreOlder(false);
         return;
       }
       setMessages((prev) => {
         const ids = new Set(prev.map((m) => m.id));
         const fresh = batch.filter((m) => !ids.has(m.id));
-        if (fresh.length === 0) pendingScrollRestoreRef.current = null;
-        return fresh.length > 0 ? [...fresh, ...prev] : prev;
+        if (fresh.length === 0) {
+          hasMoreOlderRef.current = false;
+          setHasMoreOlder(false);
+          return prev;
+        }
+        didPrepend = true;
+        return [...fresh, ...prev];
       });
     } catch (err) {
-      pendingScrollRestoreRef.current = null;
       console.error(err);
     } finally {
       loadingOlderRef.current = false;
-      setLoadingOlder(false);
+      if (!didPrepend) {
+        prependingOlderRef.current = false;
+        pendingAnchorRef.current = null;
+        setLoadingOlder(false);
+      }
     }
   }, [chatId]);
 
   useEffect(() => {
     if (!chatId || messages.length === 0 || !user?.id) return;
+    if (prependingOlderRef.current || loadingOlderRef.current) return;
     markChatRead(messages[messages.length - 1]!.id);
   }, [chatId, messages, user?.id, ready]);
 
@@ -270,19 +287,22 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     loadingRef.current = true;
     setLoadingOlder(false);
     loadingOlderRef.current = false;
+    prependingOlderRef.current = false;
+    pendingAnchorRef.current = null;
     hasMoreOlderRef.current = true;
+    setHasMoreOlder(true);
     setMessages([]);
     getChat(chatId)
       .then((c) => {
         if (cancelled) return;
         if (!c) {
-          onClose();
+          onCloseRef.current();
           return;
         }
         setChat(c as Chat);
       })
       .catch(() => {
-        if (!cancelled) onClose();
+        if (!cancelled) onCloseRef.current();
       });
 
     getMessages(chatId, MESSAGE_PAGE_SIZE)
@@ -291,13 +311,14 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
           setMessages(list as Message[]);
           const more = list.length >= MESSAGE_PAGE_SIZE;
           hasMoreOlderRef.current = more;
+          setHasMoreOlder(more);
           if (cursors?.length) applyReadCursors(cursors);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setMessages([]);
-          onClose();
+          onCloseRef.current();
         }
       })
       .finally(() => {
@@ -309,16 +330,51 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     return () => {
       cancelled = true;
     };
-  }, [chatId, onClose]);
+  }, [chatId]);
 
   useLayoutEffect(() => {
-    const pending = pendingScrollRestoreRef.current;
-    if (!pending) return;
-    const el = listRef.current;
-    if (!el) return;
-    pendingScrollRestoreRef.current = null;
-    el.scrollTop = pending.scrollTop + (el.scrollHeight - pending.scrollHeight);
+    const anchor = pendingAnchorRef.current;
+    if (!anchor || !prependingOlderRef.current) return;
+    const list = listRef.current;
+    if (!list) return;
+
+    const stick = () => restoreScrollAnchor(list, anchor);
+
+    stick();
+    requestAnimationFrame(stick);
+
+    const ro = new ResizeObserver(() => stick());
+    ro.observe(list);
+
+    const done = window.setTimeout(() => {
+      ro.disconnect();
+      pendingAnchorRef.current = null;
+      prependingOlderRef.current = false;
+      setLoadingOlder(false);
+    }, 600);
+
+    return () => {
+      ro.disconnect();
+      window.clearTimeout(done);
+    };
   }, [messages]);
+
+  useEffect(() => {
+    const root = listRef.current;
+    const sentinel = topSentinelRef.current;
+    if (!root || !sentinel || loading) return;
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        if (loadingOlderRef.current || loadingRef.current || !hasMoreOlderRef.current) return;
+        void loadOlderMessages();
+      },
+      { root, rootMargin: "80px 0px 0px 0px", threshold: 0 }
+    );
+    io.observe(sentinel);
+    return () => io.disconnect();
+  }, [chatId, loading, loadOlderMessages, messages.length]);
 
   useEffect(() => {
     return () => {
@@ -342,17 +398,15 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     if (!list) return;
     const onScroll = () => {
       stickToBottomRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 120;
-      if (list.scrollTop < 120 && hasMoreOlderRef.current && !loadingOlderRef.current && !loadingRef.current) {
-        void loadOlderMessages();
-      }
     };
     list.addEventListener("scroll", onScroll, { passive: true });
     return () => list.removeEventListener("scroll", onScroll);
-  }, [chatId, loadOlderMessages]);
+  }, [chatId]);
 
   useEffect(() => {
-    if (loading || messages.length === 0) return;
-    if (pendingScrollRestoreRef.current || loadingOlderRef.current) return;
+    if (loading && messages.length === 0) return;
+    if (messages.length === 0) return;
+    if (pendingAnchorRef.current || prependingOlderRef.current || loadingOlderRef.current) return;
 
     if (pendingInitialScrollRef.current) {
       const snap = () => {
@@ -909,14 +963,19 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
           if (!(e.target as HTMLElement).closest(".message")) e.preventDefault();
         }}
       >
-        {loading ? (
+        {loading && messages.length === 0 ? (
           <p style={{ color: "var(--muted)", padding: "1rem" }}>Loading messages…</p>
         ) : (
           <>
-            {loadingOlder && (
-              <p className="messages-load-older" aria-busy="true">
-                Загрузка…
-              </p>
+            <div ref={topSentinelRef} className="messages-top-sentinel" aria-hidden />
+            {(hasMoreOlder || loadingOlder) && (
+              <div className="messages-history-head" aria-live="polite">
+                {loadingOlder ? (
+                  <span className="messages-load-older-spinner" aria-label="Загрузка истории" />
+                ) : (
+                  <span className="messages-history-hint">Прокрутите вверх для истории</span>
+                )}
+              </div>
             )}
             {messages.map((m) => {
             const mt = m.messageType ?? "text";

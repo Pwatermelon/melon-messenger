@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { IconLocation } from "./Icons";
-import { loadYandexMaps } from "../utils/yandexMaps";
+import { getYandexMapsApiKey, loadYandexMaps } from "../utils/yandexMaps";
 
 type Props = {
   onConfirm: (lat: number, lng: number) => void;
@@ -17,10 +17,15 @@ export function LocationPickerModal({ onConfirm, onCancel }: Props) {
   const mapNodeRef = useRef<HTMLDivElement>(null);
   const mapHandleRef = useRef<MapHandle | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(Boolean(getYandexMapsApiKey()));
+  const [geoLoading, setGeoLoading] = useState(false);
+  const [mapError, setMapError] = useState(() =>
+    getYandexMapsApiKey() ? "" : "Карта недоступна без ключа Yandex Maps API. Можно отправить геопозицию кнопкой ниже."
+  );
 
   useEffect(() => {
+    if (!getYandexMapsApiKey()) return;
+
     let destroyed = false;
     let map: { destroy: () => void } | null = null;
 
@@ -59,6 +64,7 @@ export function LocationPickerModal({ onConfirm, onCancel }: Props) {
 
         map = mapInst;
         mapHandleRef.current = { setPoint };
+        setMapError("");
 
         mapInst.events.add("click", (e) => {
           const c = e.get("coords") as number[];
@@ -75,7 +81,8 @@ export function LocationPickerModal({ onConfirm, onCancel }: Props) {
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(
             (pos) => finishInit(pos.coords.latitude, pos.coords.longitude),
-            () => finishInit(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng)
+            () => finishInit(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),
+            { enableHighAccuracy: true, timeout: 12000 }
           );
         } else {
           finishInit(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng);
@@ -83,7 +90,11 @@ export function LocationPickerModal({ onConfirm, onCancel }: Props) {
       })
       .catch((err: unknown) => {
         if (!destroyed) {
-          setError(err instanceof Error ? err.message : "Не удалось загрузить карту");
+          setMapError(
+            err instanceof Error
+              ? `${err.message}. Можно отправить геопозицию кнопкой «Моё местоположение».`
+              : "Карта не загрузилась. Можно отправить геопозицию кнопкой «Моё местоположение»."
+          );
           setLoading(false);
         }
       });
@@ -96,12 +107,24 @@ export function LocationPickerModal({ onConfirm, onCancel }: Props) {
   }, []);
 
   function useMyLocation() {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      setMapError("Геолокация не поддерживается в этом браузере");
+      return;
+    }
+    setGeoLoading(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        mapHandleRef.current?.setPoint(pos.coords.latitude, pos.coords.longitude, true);
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setCoords({ lat, lng });
+        mapHandleRef.current?.setPoint(lat, lng, true);
+        setGeoLoading(false);
       },
-      () => setError("Не удалось определить местоположение")
+      () => {
+        setMapError("Не удалось определить местоположение. Разрешите доступ к геолокации в браузере.");
+        setGeoLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   }
 
@@ -117,9 +140,9 @@ export function LocationPickerModal({ onConfirm, onCancel }: Props) {
           ×
         </button>
         <h3>Выберите точку на карте</h3>
-        <p className="location-picker-hint">Нажмите на карту или перетащите метку</p>
-        {error ? (
-          <p className="location-picker-error">{error}</p>
+        <p className="location-picker-hint">Нажмите на карту, перетащите метку или отправьте своё местоположение</p>
+        {mapError ? (
+          <p className="location-picker-error">{mapError}</p>
         ) : (
           <div className="location-picker-map" ref={mapNodeRef} aria-busy={loading}>
             {loading && <div className="location-picker-loading">Загрузка карты…</div>}
@@ -131,8 +154,8 @@ export function LocationPickerModal({ onConfirm, onCancel }: Props) {
           </p>
         )}
         <div className="location-picker-actions">
-          <button type="button" className="location-picker-geo-btn" onClick={useMyLocation} disabled={Boolean(error)}>
-            <IconLocation size={16} /> Моё местоположение
+          <button type="button" className="location-picker-geo-btn" onClick={useMyLocation} disabled={geoLoading}>
+            <IconLocation size={16} /> {geoLoading ? "Определяем…" : "Моё местоположение"}
           </button>
           <div className="location-picker-actions-right">
             <button type="button" className="btn-secondary" onClick={onCancel}>
@@ -141,7 +164,7 @@ export function LocationPickerModal({ onConfirm, onCancel }: Props) {
             <button
               type="button"
               className="btn-primary"
-              disabled={!coords || Boolean(error)}
+              disabled={!coords || geoLoading}
               onClick={() => coords && onConfirm(coords.lat, coords.lng)}
             >
               Отправить

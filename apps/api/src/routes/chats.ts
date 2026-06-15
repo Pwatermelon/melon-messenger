@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import { eq, and, inArray, sql } from "drizzle-orm";
 import { authPlugin, requireAuth } from "../auth";
 import { db, users, chats, chatMembers } from "../db";
-import { getMessages as scyllaGetMessages, getMessage as scyllaGetMessage, deleteMessage as scyllaDeleteMessage, insertMessage as scyllaInsertMessage, deleteChatMessages, updateMessageContent as scyllaUpdateMessageContent, countUnreadMessages as scyllaCountUnreadMessages } from "../services/scylla";
+import { getMessages as scyllaGetMessages, getMessage as scyllaGetMessage, deleteMessage as scyllaDeleteMessage, insertMessage as scyllaInsertMessage, deleteChatMessages, updateMessageContent as scyllaUpdateMessageContent } from "../services/scylla";
 import { publishChatEvent, kickUserFromChat } from "../ws";
 import { notifyUser } from "../services/webPush";
 import type { AttachmentMetadata, Message as MessageDto, MessageType, Message } from "@melon/shared";
@@ -18,6 +18,7 @@ import {
 } from "../services/mediaAccess";
 import { getReadCursors, getUserReadCursorsByChat } from "../services/readReceipts";
 import { advanceReadCursor } from "../services/chatRead";
+import { resolveUnreadCount, incrementUnreadForChat } from "../services/chatUnread";
 
 function toUser(u: typeof users.$inferSelect) {
   return toPublicProfile(u);
@@ -103,7 +104,7 @@ async function buildChatDto(
   }
   let unreadCount = 0;
   try {
-    unreadCount = await scyllaCountUnreadMessages(chat.id, lastRead, viewerId);
+    unreadCount = await resolveUnreadCount(chat.id, viewerId, lastRead);
   } catch {
     unreadCount = 0;
   }
@@ -234,7 +235,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       const lastRead = readCursorsByChat.get(row.chatId) ?? null;
       let unreadCount = 0;
       try {
-        unreadCount = await scyllaCountUnreadMessages(row.chatId, lastRead, u.id);
+        unreadCount = await resolveUnreadCount(row.chatId, u.id, lastRead);
       } catch {
         unreadCount = 0;
       }
@@ -537,7 +538,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
     }
     const readMap = await getUserReadCursorsByChat(u.id);
     const lastRead = readMap.get(chatId) ?? null;
-    const count = await scyllaCountUnreadMessages(chatId, lastRead, u.id);
+    const count = await resolveUnreadCount(chatId, u.id, lastRead);
     return { count };
   })
   .post("/:id/read", async ({ user, params, body, set }) => {
@@ -726,6 +727,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       attachmentMetadata,
     };
     await publishChatEvent(targetChatId, { type: "message", message });
+    await incrementUnreadForChat(targetChatId, u.id).catch(() => {});
     const members = await db
       .select({ userId: chatMembers.userId })
       .from(chatMembers)

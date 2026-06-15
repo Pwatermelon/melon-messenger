@@ -1131,6 +1131,44 @@ a {
   color: var(--muted);
 }
 
+.messages-top-sentinel {
+  height: 1px;
+  width: 100%;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.messages-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  flex-shrink: 0;
+  margin-bottom: 0.25rem;
+}
+
+.messages-history-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+.messages-load-older-spinner {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: messages-history-spin 0.65s linear infinite;
+}
+
+@keyframes messages-history-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .message-row {
   display: flex;
   width: 100%;

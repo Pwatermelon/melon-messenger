@@ -97,6 +97,15 @@ async function main() {
         PRIMARY KEY (chat_id, user_id)
       )
     `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS chat_unread_counts (
+        chat_id uuid NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+        user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        unread_count int NOT NULL DEFAULT 0,
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (chat_id, user_id)
+      )
+    `);
   } catch (e) {
     console.warn("Schema migration (optional):", e);
   }

@@ -11,6 +11,7 @@ import * as redis from "./services/redis";
 import { notifyUser } from "./services/webPush";
 import { grantMediaFromAttachment } from "./services/mediaAccess";
 import { advanceReadCursor } from "./services/chatRead";
+import { incrementUnreadForChat } from "./services/chatUnread";
 import { trackSocket, untrackSocket } from "./wsRegistry";
 import type { WSClientMessage, WSServerMessage, Message } from "@melon/shared";
 
@@ -209,6 +210,12 @@ export const wsHandlers = {
             }
           );
           await grantMediaFromAttachment(attachmentUrl, chatId);
+          const mt = messageType ?? "text";
+          if (mt !== "system") {
+            await incrementUnreadForChat(chatId, ws.data.userId).catch((err) => {
+              console.warn("[WS] incrementUnread failed:", err);
+            });
+          }
           const [u] = await db.select().from(users).where(eq(users.id, ws.data.userId)).limit(1);
           const message: Message = {
             id: messageId,
