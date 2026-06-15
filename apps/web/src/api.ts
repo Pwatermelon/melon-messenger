@@ -266,6 +266,21 @@ export interface MessageItem {
 
 export type ReadCursor = { userId: string; lastReadMessageId: string };
 
+export async function markChatReadApi(chatId: string, messageId: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/chats/${encodeURIComponent(chatId)}/read`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ messageId }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { error?: string }).error ?? "Failed to mark read");
+  }
+}
+
 export async function getChatUnreadCount(chatId: string): Promise<number> {
   const res = await fetch(`${getApiUrl()}/chats/${encodeURIComponent(chatId)}/unread-count`, {
     headers: { Authorization: `Bearer ${getToken()}` },

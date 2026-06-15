@@ -27,8 +27,13 @@ export function MessageContextMenu({ x, y, onReply, onForward, onEdit, onClose }
       if (!menu || menu.contains(e.target as Node)) return;
       onClose();
     };
-    window.addEventListener("pointerdown", onPointerDown, true);
-    return () => window.removeEventListener("pointerdown", onPointerDown, true);
+    const id = window.setTimeout(() => {
+      window.addEventListener("pointerdown", onPointerDown, true);
+    }, 0);
+    return () => {
+      window.clearTimeout(id);
+      window.removeEventListener("pointerdown", onPointerDown, true);
+    };
   }, [onClose]);
 
   useEffect(() => {

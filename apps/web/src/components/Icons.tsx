@@ -21,8 +21,13 @@ export function IconCircle({ size = 20, className }: IconProps) {
 export function IconAttach({ size = 20, className }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
-      <path d="m21 12-9.5 9.5a5.5 5.5 0 0 1-7.8-7.8L14 12.7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="m16 8.3 3.7-3.7a3 3 0 1 1 4.2 4.2L17.7 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M16.5 6.2v9.3a3.8 3.8 0 1 1-7.6 0V5.4a2.2 2.2 0 1 1 4.4 0v9.6a1.4 1.4 0 1 1-2.8 0V6.5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

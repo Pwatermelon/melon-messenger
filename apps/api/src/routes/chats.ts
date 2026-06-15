@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import { eq, and, inArray, desc, sql } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { authPlugin, requireAuth } from "../auth";
 import { db, users, chats, chatMembers } from "../db";
 import { getMessages as scyllaGetMessages, getMessage as scyllaGetMessage, deleteMessage as scyllaDeleteMessage, insertMessage as scyllaInsertMessage, deleteChatMessages, updateMessageContent as scyllaUpdateMessageContent, countUnreadMessages as scyllaCountUnreadMessages } from "../services/scylla";
@@ -16,7 +16,7 @@ import {
   signUserMedia,
   filenameFromPath,
 } from "../services/mediaAccess";
-import { getReadCursors, getUserReadCursorsByChat } from "../services/readReceipts";
+import { getReadCursors, getUserReadCursorsByChat, upsertReadCursor } from "../services/readReceipts";
 
 function toUser(u: typeof users.$inferSelect) {
   return toPublicProfile(u);
@@ -164,8 +164,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       })
       .from(chatMembers)
       .innerJoin(chats, eq(chats.id, chatMembers.chatId))
-      .where(eq(chatMembers.userId, u.id))
-      .orderBy(desc(chats.createdAt));
+      .where(eq(chatMembers.userId, u.id));
 
     const result: ChatDto[] = [];
     const readCursorsByChat = await getUserReadCursorsByChat(u.id);
@@ -215,6 +214,14 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       });
     }
     const signed = await Promise.all(result.map((chat) => signChatDto(chat, u.id)));
+    signed.sort((a, b) => {
+      const at = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
+      const bt = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
+      if (bt !== at) return bt - at;
+      const ac = a.createdAt ? Date.parse(a.createdAt) : 0;
+      const bc = b.createdAt ? Date.parse(b.createdAt) : 0;
+      return bc - ac;
+    });
     return signed;
   })
   .post("/dm", async ({ user, body, set }) => {
@@ -517,6 +524,35 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
     const lastRead = readMap.get(chatId) ?? null;
     const count = await scyllaCountUnreadMessages(chatId, lastRead, u.id);
     return { count };
+  })
+  .post("/:id/read", async ({ user, params, body, set }) => {
+    const u = requireAuth(set)(user);
+    const { id: chatId } = params;
+    const payload = body as { messageId?: string };
+    const messageId = payload.messageId?.trim();
+    if (!messageId) {
+      set.status = 400;
+      return { error: "messageId required" };
+    }
+    const [member] = await db
+      .select()
+      .from(chatMembers)
+      .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, u.id)))
+      .limit(1);
+    if (!member) {
+      set.status = 403;
+      return { error: "Not a member of this chat" };
+    }
+    const advanced = await upsertReadCursor(chatId, u.id, messageId);
+    if (advanced) {
+      await publishChatEvent(chatId, {
+        type: "read_receipt",
+        chatId,
+        userId: u.id,
+        messageId,
+      });
+    }
+    return { ok: true };
   })
   .get("/:id/messages", async ({ user, params, query, set }) => {
     const u = requireAuth(set)(user);

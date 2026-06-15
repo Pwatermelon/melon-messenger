@@ -290,46 +290,15 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
   const avatarUrls = avatarPaths.map((p) => mediaFullUrl(p)).filter(Boolean) as string[];
   const photoUrls = photos.map((p) => mediaFullUrl(p)).filter(Boolean) as string[];
 
-  const showModalTopBar = modal && (isOwn ? !!openSettings : !!profile);
-  const showPageToolbar = !modal && ((!isOwn && !!profile) || (isOwn && !!openSettings));
+  const showPageToolbar = !modal && !isOwn && !!profile;
 
   const body = (
     <div className={`profile-page${modal ? " profile-page-modal" : ""}`}>
       {showPageToolbar && (
       <div className="profile-toolbar">
-        {!modal && (
-          <button type="button" className="profile-back" onClick={() => navigate(-1)}>
-            ← Назад
-          </button>
-        )}
-        <div className="profile-toolbar-actions">
-          {!isOwn && profile && (
-            isContact ? (
-              <button
-                type="button"
-                className="profile-remove-contact"
-                onClick={() => void handleRemoveContact()}
-                disabled={contactBusy}
-              >
-                {contactBusy ? "…" : "Удалить из контактов"}
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="profile-add-contact"
-                onClick={() => void handleAddContact()}
-                disabled={contactBusy}
-              >
-                {contactBusy ? "…" : "В контакты"}
-              </button>
-            )
-          )}
-          {isOwn && openSettings && (
-            <button type="button" className="profile-settings-link" onClick={openSettings}>
-              Настройки
-            </button>
-          )}
-        </div>
+        <button type="button" className="profile-back" onClick={() => navigate(-1)}>
+          ← Назад
+        </button>
       </div>
       )}
 
@@ -412,16 +381,44 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
             isToday={profile.isBirthdayToday}
           />
         )}
-        {!isOwn && onStartDm && (
-          <button
-            type="button"
-            className="btn profile-write-btn"
-            onClick={() => void handleWriteMessage()}
-            disabled={dmBusy || contactBusy}
-          >
-            {dmBusy ? "…" : "Написать"}
-          </button>
-        )}
+        <div className="profile-actions">
+          {!isOwn && onStartDm && (
+            <button
+              type="button"
+              className="btn profile-action-btn profile-action-btn-primary"
+              onClick={() => void handleWriteMessage()}
+              disabled={dmBusy || contactBusy}
+            >
+              {dmBusy ? "…" : "Написать"}
+            </button>
+          )}
+          {!isOwn && profile && (
+            isContact ? (
+              <button
+                type="button"
+                className="profile-action-btn profile-action-btn-secondary profile-action-btn-danger"
+                onClick={() => void handleRemoveContact()}
+                disabled={contactBusy}
+              >
+                {contactBusy ? "…" : "Удалить из контактов"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="profile-action-btn profile-action-btn-secondary"
+                onClick={() => void handleAddContact()}
+                disabled={contactBusy}
+              >
+                {contactBusy ? "…" : "В контакты"}
+              </button>
+            )
+          )}
+          {isOwn && openSettings && (
+            <button type="button" className="profile-action-btn profile-action-btn-secondary" onClick={openSettings}>
+              Настройки
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="profile-section">
@@ -562,37 +559,6 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
           onPointerDown={overlayDismiss.onModalPointerDown}
           onClick={(e) => e.stopPropagation()}
         >
-          {showModalTopBar && (
-            <div className="profile-modal-topbar">
-              {isOwn && openSettings ? (
-                <button type="button" className="profile-settings-link" onClick={openSettings}>
-                  Настройки
-                </button>
-              ) : !isOwn && profile ? (
-                isContact ? (
-                  <button
-                    type="button"
-                    className="profile-remove-contact"
-                    onClick={() => void handleRemoveContact()}
-                    disabled={contactBusy}
-                  >
-                    {contactBusy ? "…" : "Удалить из контактов"}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="profile-add-contact"
-                    onClick={() => void handleAddContact()}
-                    disabled={contactBusy}
-                  >
-                    {contactBusy ? "…" : "В контакты"}
-                  </button>
-                )
-              ) : (
-                <span />
-              )}
-            </div>
-          )}
           <button type="button" className="modal-close" onClick={onClose} aria-label="Закрыть">
             ×
           </button>

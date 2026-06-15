@@ -14,7 +14,7 @@ import { userAvatarLetter, userDisplayName } from "../utils/userDisplay";
 import Profile from "./Profile";
 import ChatRoom from "./ChatRoom";
 import { APP_VERSION } from "../version";
-import { applyMessageToChatList } from "../utils/chatListUpdate";
+import { applyMessageToChatList, sortChatsByRecent } from "../utils/chatListUpdate";
 import { useCompactLayout } from "../hooks/useCompactLayout";
 
 function EmptyChat() {
@@ -187,14 +187,28 @@ export default function ChatLayout() {
   }, [subscribe, closeChat, refreshChatUnreadCount]);
 
   function refreshChats() {
-    getChats().then((list) => setChats(list as Chat[]));
+    getChats().then((list) => {
+      const activeId = activeChatIdRef.current;
+      setChats(
+        sortChatsByRecent(
+          (list as Chat[]).map((c) => (c.id === activeId ? { ...c, unreadCount: 0 } : c))
+        )
+      );
+    });
   }
 
   useEffect(() => {
     let cancelled = false;
     getChats()
       .then((list) => {
-        if (!cancelled) setChats(list as Chat[]);
+        if (!cancelled) {
+          const activeId = activeChatIdRef.current;
+          setChats(
+            sortChatsByRecent(
+              (list as Chat[]).map((c) => (c.id === activeId ? { ...c, unreadCount: 0 } : c))
+            )
+          );
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

@@ -9,7 +9,7 @@ import { ForwardMessageModal } from "../components/ForwardMessageModal";
 import ImageCropModal from "../components/ImageCropModal";
 import BirthdayInfoBlock from "../components/BirthdayInfoBlock";
 import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo, IconBack } from "../components/Icons";
-import { getChat, getChats, getMessages, uploadFile, addGroupMembers, removeGroupMember, getUserByYandexLogin, deleteChat, updateGroup, deleteMessage, editMessage, forwardMessage, signMediaPaths } from "../api";
+import { getChat, getChats, getMessages, uploadFile, addGroupMembers, removeGroupMember, getUserByYandexLogin, deleteChat, updateGroup, deleteMessage, editMessage, forwardMessage, signMediaPaths, markChatReadApi } from "../api";
 import { extFromBlobType } from "../utils/mediaMime";
 import { compressImage, isGifFile } from "../utils/imageCompress";
 import type { Chat, Message, AttachmentMetadata } from "@melon/shared";
@@ -84,12 +84,15 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview, 
   }
 
   function markChatRead(messageId: string) {
-    if (!chatId || !ready || !user?.id) return;
+    if (!chatId || !user?.id) return;
     const mine = readCursorsRef.current[user.id];
     if (mine && mine >= messageId) return;
     readCursorsRef.current[user.id] = messageId;
     setReadCursors((prev) => ({ ...prev, [user.id]: messageId }));
-    send({ type: "mark_read", chatId, messageId });
+    if (ready) {
+      send({ type: "mark_read", chatId, messageId });
+    }
+    void markChatReadApi(chatId, messageId).catch(() => {});
   }
 
   function isMessageReadByPeers(m: Message): boolean {
@@ -236,9 +239,9 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview, 
   }, [chatId]);
 
   useEffect(() => {
-    if (!chatId || !ready || messages.length === 0) return;
-    markChatRead(messages[messages.length - 1].id);
-  }, [chatId, ready, messages]);
+    if (!chatId || messages.length === 0) return;
+    markChatRead(messages[messages.length - 1]!.id);
+  }, [chatId, messages]);
 
   useEffect(() => {
     if (!chatId) return;
@@ -617,6 +620,25 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview, 
     openMessageMenu(e.clientX, e.clientY, m);
   }
 
+  function onMessageRowClick(e: React.MouseEvent, m: Message) {
+    if (!canDeleteMessage(m)) return;
+    const t = e.target as HTMLElement;
+    if (t.closest(".voice-player, .circle-player, .message-reply-quote, a, button, video, audio, input, textarea")) return;
+    if (t.closest(".message")) return;
+    toggleMessageSelect(m.id);
+  }
+
+  function onMessageBubbleClick(e: React.MouseEvent, m: Message) {
+    const t = e.target as HTMLElement;
+    if (t.closest(".voice-player, .circle-player, .message-reply-quote, a, button, video, audio")) return;
+    e.stopPropagation();
+    if (selectionMode && canDeleteMessage(m)) {
+      toggleMessageSelect(m.id);
+      return;
+    }
+    openMessageMenu(e.clientX, e.clientY, m);
+  }
+
   function onMessageTouchStart(e: React.TouchEvent, m: Message) {
     const target = e.target as HTMLElement;
     if (target.closest(".voice-player, .circle-player")) return;
@@ -874,18 +896,10 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview, 
               key={m.id}
               data-message-id={m.id}
               className={`message-row ${own ? "own" : "incoming"}${selectionMode ? " selection-mode" : ""}`}
+              onClick={(e) => onMessageRowClick(e, m)}
             >
               <div
                 className={`message-row-body${selected ? " is-selected" : ""}`}
-                onClick={
-                  selectionMode && selectable
-                    ? (e) => {
-                        const t = e.target as HTMLElement;
-                        if (t.closest(".voice-player, .circle-player")) return;
-                        toggleMessageSelect(m.id);
-                      }
-                    : undefined
-                }
                 role={selectionMode && selectable ? "button" : undefined}
                 tabIndex={selectionMode && selectable ? 0 : undefined}
                 onKeyDown={
@@ -910,12 +924,13 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview, 
                 )}
             <div
               className={`message ${own ? "own" : ""}${naked ? " message-naked" : ""}${mt === "circle" ? " message-circle" : ""}${mt === "voice" ? " message-voice" : ""}`}
+              onClick={(e) => onMessageBubbleClick(e, m)}
               onContextMenu={(e) => onMessageContextMenu(e, m)}
               onTouchStart={(e) => onMessageTouchStart(e, m)}
               onTouchEnd={onMessageTouchEnd}
               onTouchCancel={onMessageTouchEnd}
             >
-              {(chat?.type === "group" || (m.sender && m.senderId !== user?.id)) && (
+              {chat?.type === "group" && !own && (
                 <div className="message-sender">{m.sender?.username ?? "?"}</div>
               )}
               {m.attachmentMetadata?.forwardedFrom && (
