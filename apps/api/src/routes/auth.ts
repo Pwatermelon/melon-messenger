@@ -4,7 +4,7 @@ import * as jose from "jose";
 import { db, users } from "../db";
 import { eq } from "drizzle-orm";
 import { toPrivateProfile, parseAvatarHistory, parseProfilePhotos } from "../lib/userDto";
-import { ensureProfileMediaRegistered } from "../services/mediaAccess";
+import { ensureProfileMediaRegistered, signUserMedia } from "../services/mediaAccess";
 import {
   buildYandexAuthorizeUrl,
   createOAuthState,
@@ -107,7 +107,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       set.status = 401;
       return { error: "Unauthorized" };
     }
-    return toPrivateProfile(u);
+    return signUserMedia(toPrivateProfile(u), u.id);
   })
   .put("/me", async ({ request, set }) => {
     const u = await verifyBearerUser(request);
@@ -158,7 +158,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     if (typeof body.birthdayVisible === "boolean") {
       updates.birthdayVisible = body.birthdayVisible;
     }
-    if (Object.keys(updates).length === 0) return toPrivateProfile(u);
+    if (Object.keys(updates).length === 0) return signUserMedia(toPrivateProfile(u), u.id);
     const [updated] = await db.update(users).set(updates).where(eq(users.id, u.id)).returning();
     await ensureProfileMediaRegistered(updated!.id, [
       updated!.avatarUrl,
@@ -166,6 +166,6 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       ...parseProfilePhotos(updated!.profilePhotos),
       ...parseAvatarHistory(updated!.avatarHistory),
     ]);
-    return toPrivateProfile(updated!);
+    return signUserMedia(toPrivateProfile(updated!), updated!.id);
   })
   .post("/logout", () => ({ ok: true }));

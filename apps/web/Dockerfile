@@ -9,6 +9,8 @@ COPY packages ./packages
 COPY apps/web ./apps/web
 
 WORKDIR /app/apps/web
+ARG WM_VERSION=dev
+ENV VITE_APP_VERSION=${WM_VERSION}
 RUN npm install
 RUN npm run build
 

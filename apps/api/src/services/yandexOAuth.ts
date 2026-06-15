@@ -2,6 +2,7 @@ import * as jose from "jose";
 import { eq } from "drizzle-orm";
 import { db, users } from "../db";
 import { toPrivateProfile } from "../lib/userDto";
+import { signUserMedia } from "./mediaAccess";
 import { parseYandexBirthday } from "@melon/shared";
 
 export const YANDEX_CLIENT_ID = process.env.YANDEX_CLIENT_ID ?? "";
@@ -203,7 +204,7 @@ export async function exchangeYandexCode(
   }
 
   const token = await signAppJwt(user!.id);
-  return { token, user: toPrivateProfile(user!) };
+  return { token, user: await signUserMedia(toPrivateProfile(user!), user!.id) };
 }
 
 export function getOAuthConfig() {

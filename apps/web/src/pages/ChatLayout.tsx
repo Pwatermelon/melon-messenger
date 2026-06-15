@@ -11,6 +11,7 @@ import { IconPlus } from "../components/Icons";
 import { UserListLabel } from "../components/UserListLabel";
 import { userAvatarLetter, userDisplayName } from "../utils/userDisplay";
 import Profile from "./Profile";
+import { APP_VERSION } from "../version";
 
 export type ChatLayoutOutletContext = {
   openSettings: () => void;
@@ -279,7 +280,12 @@ export default function ChatLayout() {
         <div className="sidebar-header">
           <h2 className="sidebar-title">
             <BrandIcon size={28} className="sidebar-brand-icon" />
-            Watermelon
+            <span className="sidebar-title-text">
+              Watermelon
+              <span className="sidebar-version" title={`Версия ${APP_VERSION}`}>
+                v{APP_VERSION}
+              </span>
+            </span>
           </h2>
           <button
             type="button"

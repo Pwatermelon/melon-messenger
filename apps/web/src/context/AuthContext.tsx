@@ -47,24 +47,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (!token || user) return;
+    if (!token) return;
+    let cancelled = false;
     setIsLoading(true);
     fetch(`${getApiUrl()}/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((u) => {
+        if (cancelled) return;
         if (u) {
           setUser(u);
           localStorage.setItem(USER_KEY, JSON.stringify(u));
         } else {
           setToken(null);
+          setUser(null);
           localStorage.removeItem(TOKEN_KEY);
+          localStorage.removeItem(USER_KEY);
         }
       })
       .catch(() => {})
-      .finally(() => setIsLoading(false));
-  }, [token, user]);
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   const loginWithYandex = useCallback(() => {
     window.location.href = `${getApiUrl()}/auth/yandex`;

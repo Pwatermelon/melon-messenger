@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
@@ -14,6 +14,32 @@ import ImageCropModal from "./ImageCropModal";
 type Props = {
   onClose: () => void;
 };
+
+function SettingsSwitch({
+  checked,
+  disabled,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      className={`settings-switch${checked ? " is-on" : ""}`}
+      disabled={disabled}
+      onClick={onChange}
+    >
+      <span className="settings-switch-thumb" />
+    </button>
+  );
+}
 
 export default function SettingsModal({ onClose }: Props) {
   const { user, updateUser, logout, token } = useAuth();
@@ -34,6 +60,12 @@ export default function SettingsModal({ onClose }: Props) {
   const birthday = user?.birthday ?? null;
   const birthdayLabel = birthday ? formatBirthdayLabel(birthday) : null;
 
+  useEffect(() => {
+    setUsername(user?.username ?? "");
+    setAvatarUrl(user?.avatarUrl ?? null);
+    setBirthdayVisible(user?.birthdayVisible ?? false);
+  }, [user]);
+
   async function copyLogin() {
     if (!yandexLogin) return;
     try {
@@ -45,9 +77,8 @@ export default function SettingsModal({ onClose }: Props) {
     }
   }
 
-  const avatarDisplayUrl = avatarUrl
-    ? mediaUrl(avatarUrl)
-    : null;
+  const avatarDisplayUrl = avatarUrl ? mediaUrl(avatarUrl) : null;
+  const nameDirty = username.trim() !== (user?.username ?? "").trim();
 
   async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -160,139 +191,158 @@ export default function SettingsModal({ onClose }: Props) {
           onCancel={() => setCropFile(null)}
         />
       )}
-    <div
-      className="search-overlay"
-      data-testid="settings-modal"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="settings-modal-header">
-          <h2>Настройки</h2>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Закрыть">
+      <div
+        className="search-overlay settings-overlay"
+        data-testid="settings-modal"
+        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      >
+        <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+          <button type="button" className="modal-close settings-modal-close" onClick={onClose} aria-label="Закрыть">
             ×
           </button>
-        </div>
-        <div className="settings-modal-body">
-          <div className="settings-section">
-            <h3>Профиль</h3>
-            <Link to="/profile" className="settings-profile-link" onClick={onClose}>
-              Редактировать профиль →
-            </Link>
-            <div className="settings-avatar-row">
-              <div className="settings-avatar-wrap">
-                {avatarDisplayUrl ? (
-                  <img src={avatarDisplayUrl} alt="" className="settings-avatar" />
-                ) : (
-                  <div className="settings-avatar-placeholder">
-                    {(user?.username ?? "?").slice(0, 1).toUpperCase()}
-                  </div>
-                )}
-              </div>
-              <div>
+
+          <div className="settings-hero">
+            <div className="settings-hero-avatar-wrap">
+              {avatarDisplayUrl ? (
+                <img src={avatarDisplayUrl} alt="" className="settings-hero-avatar" />
+              ) : (
+                <div className="settings-hero-avatar settings-hero-avatar-placeholder">
+                  {(user?.username ?? "?").slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/*"
+                onChange={handleAvatarChange}
+                className="settings-hero-file-input"
+              />
+              <button
+                type="button"
+                className="settings-hero-avatar-btn"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={saving}
+                aria-label="Сменить аватар"
+              >
+                📷
+              </button>
+            </div>
+            <h2 className="settings-hero-name">{user?.username ?? "Профиль"}</h2>
+            {yandexLogin && (
+              <button type="button" className="settings-hero-login" onClick={() => void copyLogin()}>
+                {loginCopied ? "Скопировано ✓" : `@${yandexLogin}`}
+              </button>
+            )}
+          </div>
+
+          <div className="settings-modal-body">
+            {message && <p className="settings-toast">{message}</p>}
+
+            <section className="settings-card">
+              <h3 className="settings-card-title">Имя</h3>
+              <div className="settings-name-row">
                 <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept="image/*"
-                  onChange={handleAvatarChange}
-                  style={{ display: "none" }}
+                  id="settings-username"
+                  type="text"
+                  className="settings-name-input"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Ваше имя"
+                  onKeyDown={(e) => e.key === "Enter" && nameDirty && void handleSaveProfile()}
                 />
                 <button
                   type="button"
-                  className="btn btn-secondary"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={saving}
+                  className="btn settings-name-save"
+                  onClick={() => void handleSaveProfile()}
+                  disabled={saving || !username.trim() || !nameDirty}
                 >
-                  {saving ? "…" : "Сменить аватар"}
+                  {saving ? "…" : "Сохранить"}
                 </button>
               </div>
-            </div>
-            <div className="settings-field">
-              <label htmlFor="settings-username">Имя (отображаемое)</label>
-              <input
-                id="settings-username"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Ваше имя"
-              />
-              <button type="button" className="btn" onClick={handleSaveProfile} disabled={saving || !username.trim()}>
-                Сохранить имя
-              </button>
-            </div>
-            {yandexLogin && (
-              <div className="settings-field">
-                <label>Ваш логин</label>
-                <button type="button" className="settings-id-code" onClick={copyLogin}>
-                  {loginCopied ? "Скопировано" : yandexLogin}
-                </button>
-              </div>
-            )}
-            {message && <p className="settings-message">{message}</p>}
-          </div>
-          <div className="settings-section">
-            <h3>Конфиденциальность</h3>
-            {birthday ? (
-              <>
-                <label className="settings-checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={birthdayVisible}
-                    onChange={() => void toggleBirthdayVisible()}
-                    disabled={privacyLoading}
-                  />
-                  <span>Показывать день рождения другим пользователям</span>
-                </label>
-                <BirthdayInfoBlock
-                  label={birthdayLabel!}
-                  age={birthday ? getBirthdayAge(birthday) : null}
-                  compact
-                />
-                <p className="settings-hint">Другие увидят дату только при включённой галочке.</p>
-              </>
-            ) : (
-              <p className="settings-hint">Появится после следующего входа.</p>
-            )}
-          </div>
-          <div className="settings-section">
-            <h3>Уведомления</h3>
-            <button type="button" className="btn btn-secondary" onClick={() => void togglePush()} disabled={pushLoading}>
-              {pushLoading ? "…" : pushEnabled ? "Push: вкл" : "Push: выкл"}
-            </button>
-          </div>
-          <div className="settings-section">
-            <h3>Тема</h3>
-            <div className="settings-theme-row">
-              <button
-                type="button"
-                className={`settings-theme-btn ${theme === "dark" ? "active" : ""}`}
-                onClick={() => setTheme("dark")}
-              >
-                Тёмная
-              </button>
-              <button
-                type="button"
-                className={`settings-theme-btn ${theme === "light" ? "active" : ""}`}
-                onClick={() => setTheme("light")}
-              >
-                Светлая
-              </button>
-            </div>
-          </div>
-          {user?.isAdmin && (
-            <div className="settings-section">
-              <Link to="/admin" className="settings-admin-link" onClick={onClose}>
-                Beta-доступ (админ)
+              <Link to="/profile" className="settings-row-link" onClick={onClose}>
+                <span>Полный профиль</span>
+                <span className="settings-row-chevron" aria-hidden>›</span>
               </Link>
-            </div>
-          )}
-          <div className="settings-section">
-            <button type="button" className="settings-logout" onClick={handleLogout}>
+            </section>
+
+            <section className="settings-card">
+              <h3 className="settings-card-title">Конфиденциальность</h3>
+              {birthday ? (
+                <>
+                  <div className="settings-row">
+                    <div className="settings-row-text">
+                      <span className="settings-row-label">День рождения</span>
+                      <span className="settings-row-hint">Виден другим в профиле</span>
+                    </div>
+                    <SettingsSwitch
+                      checked={birthdayVisible}
+                      disabled={privacyLoading}
+                      onChange={() => void toggleBirthdayVisible()}
+                      label="Показывать день рождения"
+                    />
+                  </div>
+                  <BirthdayInfoBlock
+                    label={birthdayLabel!}
+                    age={birthday ? getBirthdayAge(birthday) : null}
+                    compact
+                  />
+                </>
+              ) : (
+                <p className="settings-card-hint">День рождения подтянется при следующем входе через Яндекс.</p>
+              )}
+            </section>
+
+            <section className="settings-card">
+              <h3 className="settings-card-title">Уведомления</h3>
+              <div className="settings-row">
+                <div className="settings-row-text">
+                  <span className="settings-row-label">Push-уведомления</span>
+                  <span className="settings-row-hint">Сообщения в фоне</span>
+                </div>
+                <SettingsSwitch
+                  checked={pushEnabled}
+                  disabled={pushLoading}
+                  onChange={() => void togglePush()}
+                  label="Push-уведомления"
+                />
+              </div>
+            </section>
+
+            <section className="settings-card">
+              <h3 className="settings-card-title">Оформление</h3>
+              <div className="settings-theme-segment">
+                <button
+                  type="button"
+                  className={`settings-theme-segment-btn${theme === "dark" ? " active" : ""}`}
+                  onClick={() => setTheme("dark")}
+                >
+                  Тёмная
+                </button>
+                <button
+                  type="button"
+                  className={`settings-theme-segment-btn${theme === "light" ? " active" : ""}`}
+                  onClick={() => setTheme("light")}
+                >
+                  Светлая
+                </button>
+              </div>
+            </section>
+
+            {user?.isAdmin && (
+              <section className="settings-card settings-card-flat">
+                <Link to="/admin" className="settings-row-link" onClick={onClose}>
+                  <span>Beta-доступ (админ)</span>
+                  <span className="settings-row-chevron" aria-hidden>›</span>
+                </Link>
+              </section>
+            )}
+
+            <button type="button" className="settings-logout-btn" onClick={handleLogout}>
               Выйти из аккаунта
             </button>
           </div>
         </div>
       </div>
-    </div>
     </>
   );
 }

@@ -52,6 +52,8 @@ jobs:
           bun-version: latest
       - run: bun install
       - run: bun run --cwd apps/web build
+        env:
+          VITE_APP_VERSION: ${{ needs.gate.outputs.version }}
 
   smoke:
     runs-on: ubuntu-latest
@@ -142,6 +144,8 @@ jobs:
           context: .
           file: apps/web/Dockerfile
           push: true
+          build-args: |
+            WM_VERSION=${{ steps.meta.outputs.version }}
           tags: |
             ${{ steps.meta.outputs.web }}:${{ steps.meta.outputs.version }}
 
