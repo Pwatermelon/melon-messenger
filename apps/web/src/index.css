@@ -3806,6 +3806,7 @@ a {
   text-decoration: none;
   font-weight: 600;
   font-size: 0.95rem;
+  white-space: nowrap;
   transition: transform 0.15s, opacity 0.15s;
 }
 
@@ -3830,6 +3831,7 @@ a {
   justify-content: center;
   width: 1.75rem;
   height: 1.75rem;
+  flex-shrink: 0;
   background: rgba(255,255,255,0.2);
   border-radius: 6px;
   font-size: 0.75rem;
