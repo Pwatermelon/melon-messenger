@@ -24,11 +24,11 @@ export default function BetaWelcome() {
         <div className="beta-social">
           <a href={BETA_LINKS.vk} target="_blank" rel="noopener noreferrer" className="beta-social-btn beta-social-vk">
             <span className="beta-social-icon">VK</span>
-            Паблик ВКонтакте
+            vk.com/watermelon_messenger
           </a>
           <a href={BETA_LINKS.telegram} target="_blank" rel="noopener noreferrer" className="beta-social-btn beta-social-tg">
             <span className="beta-social-icon">TG</span>
-            Канал в Telegram
+            @watermelon_messenger
           </a>
         </div>
 

@@ -43,17 +43,17 @@ export default function BetaPending() {
           Администратор проверит заявку и откроет доступ к мессенджеру.
         </p>
         <p className="beta-hint">
-          Пока ждёте — подпишитесь на новости, чтобы не пропустить запуск:
+          Пока ждёте — подпишитесь на наши каналы, чтобы следить за новостями и релизами:
         </p>
 
         <div className="beta-social">
           <a href={BETA_LINKS.vk} target="_blank" rel="noopener noreferrer" className="beta-social-btn beta-social-vk">
             <span className="beta-social-icon">VK</span>
-            Паблик ВКонтакте
+            vk.com/watermelon_messenger
           </a>
           <a href={BETA_LINKS.telegram} target="_blank" rel="noopener noreferrer" className="beta-social-btn beta-social-tg">
             <span className="beta-social-icon">TG</span>
-            Канал в Telegram
+            @watermelon_messenger
           </a>
         </div>
 
