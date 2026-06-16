@@ -1,0 +1,43 @@
+# Production overlay for local prod testing (build from source).
+# Prefer deploy/docker-compose.yml on the server (pull from Docker Hub).
+#
+# docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+
+services:
+  api:
+    environment:
+      NODE_ENV: production
+      E2E_TEST_SECRET: ""
+      ADMIN_YANDEX_LOGINS: ${ADMIN_YANDEX_LOGINS:-platinumwatermelon}
+    restart: always
+
+  web:
+    volumes:
+      - ./deploy/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - certbot-conf:/etc/letsencrypt:ro
+      - certbot-www:/var/www/certbot:ro
+    ports:
+      - "443:443"
+      - "80:80"
+    restart: always
+
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    volumes:
+      - certbot-www:/var/www/certbot
+      - certbot-conf:/etc/letsencrypt
+    entrypoint: /bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done;'
+
+  postgres:
+    restart: always
+
+  redis:
+    restart: always
+
+  scylla:
+    restart: always
+
+volumes:
+  certbot-www:
+  certbot-conf:

@@ -1,5 +1,5 @@
 {
-  "name": "melon-messenger",
+  "name": "watermelon-messenger",
   "private": true,
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
@@ -7,11 +7,15 @@
     "dev:api": "bun run --cwd apps/api dev",
     "dev:web": "bun run --cwd apps/web dev",
     "build": "bun run --cwd apps/api build && bun run --cwd apps/web build",
+    "test": "bun test apps/api/src/tests/unit.test.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "db:generate": "bun run --cwd apps/api db:generate",
     "db:migrate": "bun run --cwd apps/api db:migrate",
     "db:studio": "bun run --cwd apps/api db:studio"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "concurrently": "^9.1.0",
+    "@playwright/test": "^1.49.1"
   }
 }

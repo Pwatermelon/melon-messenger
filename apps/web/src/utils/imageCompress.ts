@@ -1,12 +1,27 @@
 /**
  * Сжимает изображение через canvas: ресайз по макс. стороне + JPEG quality.
- * Возвращает Blob (JPEG) или исходный файл, если сжатие не удалось.
+ * GIF и другие анимированные форматы не трогаем — canvas убивает анимацию.
  */
 const MAX_SIDE = 1200;
 const JPEG_QUALITY = 0.82;
 
+export function isGifFile(file: File): boolean {
+  return file.type === "image/gif" || /\.gif$/i.test(file.name);
+}
+
+export async function isGifFileDeep(file: File): Promise<boolean> {
+  if (isGifFile(file)) return true;
+  try {
+    const head = new Uint8Array(await file.slice(0, 3).arrayBuffer());
+    return head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46;
+  } catch {
+    return false;
+  }
+}
+
 export async function compressImage(file: File): Promise<File> {
   if (!file.type.startsWith("image/")) return file;
+  if (await isGifFileDeep(file)) return file;
   return new Promise<File>((resolve) => {
     const img = new Image();
     const url = URL.createObjectURL(file);

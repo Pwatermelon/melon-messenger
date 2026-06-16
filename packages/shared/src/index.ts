@@ -1,15 +1,31 @@
 // Shared types between API and Web
 
 export type ChatType = "dm" | "group";
+export type SubscriptionTier = "free" | "platinum";
+
+export * from "./birthday";
 
 export interface User {
   id: string;
-  email: string;
+  email?: string;
   username: string;
   avatarUrl: string | null;
+  coverUrl?: string | null;
+  bio?: string | null;
+  profilePhotos?: string[];
   createdAt: string;
-  /** Legacy field from the old E2E experiment (base64) */
-  publicKey?: string | null;
+  subscriptionTier?: SubscriptionTier;
+  subscriptionExpiresAt?: string | null;
+  yandexId?: string | null;
+  yandexLogin?: string | null;
+  birthday?: string | null;
+  birthdayVisible?: boolean;
+  birthdayLabel?: string | null;
+  birthdayAge?: number | null;
+  isBirthdayToday?: boolean;
+  avatarHistory?: string[];
+  betaApproved?: boolean;
+  isAdmin?: boolean;
 }
 
 export interface Chat {
@@ -22,45 +38,73 @@ export interface Chat {
   lastMessagePreview: string | null;
   members: (User & { role: string })[];
   unreadCount?: number;
+  /** Push notifications muted for the current viewer */
+  notificationsMuted?: boolean;
+}
+
+export type ChatSharedCategory = "media" | "files" | "voice" | "links";
+
+export interface ChatSharedItem {
+  messageId: string;
+  messageType: MessageType;
+  attachmentUrl: string | null;
+  attachmentMetadata?: AttachmentMetadata | null;
+  content: string;
+  createdAt: string;
+  sender?: User;
+  links?: string[];
 }
 
 /** Message content type */
-export type MessageType = "text" | "image" | "file" | "video" | "location" | "voice";
+export type MessageType = "text" | "image" | "file" | "video" | "location" | "voice" | "circle" | "system";
+
+/** Single file in a message (album supports up to 5) */
+export interface MessageAttachment {
+  url: string;
+  fileName?: string;
+  mimeType?: string;
+  size?: number;
+}
 
 /** Attachment metadata (JSON) */
 export interface AttachmentMetadata {
-  /** Original file name */
   fileName?: string;
-  /** MIME type */
   mimeType?: string;
-  /** File size in bytes */
   size?: number;
-  /** Voice: duration in seconds */
   duration?: number;
-  /** Location: lat, lng */
   lat?: number;
   lng?: number;
+  attachments?: MessageAttachment[];
+  forwardedFrom?: { userId: string; username: string };
+  replyTo?: {
+    messageId: string;
+    senderId: string;
+    senderName: string;
+    preview: string;
+    messageType?: MessageType;
+  };
 }
 
 export interface Message {
   id: string;
   chatId: string;
   senderId: string;
-  /** Message content (plain text for clients) */
   content: string;
   createdAt: string;
+  editedAt?: string | null;
   sender?: User;
-  /** Default "text" */
   messageType?: MessageType;
-  /** URL to attachment (e.g. /uploads/xxx) */
   attachmentUrl?: string | null;
-  /** JSON metadata for attachment */
   attachmentMetadata?: AttachmentMetadata | null;
-  /** Legacy: true if content was E2E-encrypted by old clients */
-  encrypted?: boolean;
+  reactions?: MessageReaction[];
 }
 
-// WebSocket message types
+export interface MessageReaction {
+  emoji: string;
+  userId: string;
+  username?: string;
+}
+
 export type WSClientMessage =
   | { type: "auth"; token: string }
   | { type: "subscribe"; chatId: string }
@@ -72,14 +116,21 @@ export type WSClientMessage =
       messageType?: MessageType;
       attachmentUrl?: string | null;
       attachmentMetadata?: AttachmentMetadata | null;
-      encrypted?: boolean;
     }
-  | { type: "typing"; chatId: string; isTyping: boolean };
+  | { type: "typing"; chatId: string; isTyping: boolean }
+  | { type: "mark_read"; chatId: string; messageId?: string }
+  | { type: "reaction"; chatId: string; messageId: string; emoji: string | null };
 
 export type WSServerMessage =
   | { type: "auth_ok"; user: User }
   | { type: "auth_error"; error: string }
   | { type: "message"; message: Message }
+  | { type: "message_edited"; chatId: string; message: Message }
+  | { type: "message_deleted"; chatId: string; messageId: string }
+  | { type: "chat_removed"; chatId: string }
+  | { type: "chat_members_changed"; chatId: string }
+  | { type: "read_receipt"; chatId: string; userId: string; messageId: string }
+  | { type: "reaction"; chatId: string; messageId: string; reactions: MessageReaction[] }
   | { type: "typing"; chatId: string; userId: string; isTyping: boolean }
   | { type: "presence"; userId: string; online: boolean }
   | { type: "error"; error: string };

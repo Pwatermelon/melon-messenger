@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback } from "rea
 
 type Theme = "dark" | "light";
 
-const STORAGE_KEY = "melon_theme";
+const STORAGE_KEY = "wm_theme";
 
 const ThemeContext = createContext<{ theme: Theme; setTheme: (t: Theme) => void } | null>(null);
 

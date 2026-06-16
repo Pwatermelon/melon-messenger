@@ -1,54 +1,65 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { getApiUrl } from "../config";
+import { BrandIcon } from "../components/BrandIcon";
+
+const ERRORS: Record<string, string> = {
+  yandex_denied: "Авторизация отменена",
+  yandex_failed: "Не удалось войти через Яндекс",
+  yandex_not_configured: "Yandex OAuth не настроен на сервере",
+};
 
 export default function Login() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const { login, isLoading, user } = useAuth();
-  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const errorCode = params.get("error");
+  const { user } = useAuth();
+  const [oauthReady, setOauthReady] = useState<boolean | null>(null);
 
-  if (user) navigate("/", { replace: true });
+  useEffect(() => {
+    fetch(`${getApiUrl()}/auth/yandex/config`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((c: { configured?: boolean } | null) => setOauthReady(c?.configured ?? false))
+      .catch(() => setOauthReady(false));
+  }, []);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    try {
-      await login(email, password);
-      navigate("/", { replace: true });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
-    }
+  if (user) {
+    window.location.replace("/");
+    return null;
   }
 
   return (
-    <div className="auth-page">
-      <div className="auth-card">
-        <h1>Melon</h1>
-        <p className="auth-subtitle">Sign in to continue</p>
-        <form onSubmit={handleSubmit}>
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoComplete="email"
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            autoComplete="current-password"
-          />
-          {error && <p className="auth-error">{error}</p>}
-          <button type="submit" disabled={isLoading}>
-            {isLoading ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
+    <div className="login-page">
+      <div className="login-bg" aria-hidden />
+      <div className="login-content">
+        <div className="login-brand">
+          <div className="login-logo">
+            <BrandIcon size={88} />
+          </div>
+          <h1>Watermelon</h1>
+          <p className="login-tagline">Безопасный мессенджер нового поколения</p>
+        </div>
+
+        <div className="login-card">
+          <h2>Вход</h2>
+          <p className="login-hint">Используйте Яндекс ID — это единственный способ авторизации</p>
+
+          {errorCode && ERRORS[errorCode] && (
+            <p className="auth-error">{ERRORS[errorCode]}</p>
+          )}
+
+          {oauthReady === false ? (
+            <button type="button" className="yandex-btn" disabled>
+              <span className="yandex-btn-icon">Я</span>
+              Yandex OAuth не настроен
+            </button>
+          ) : (
+            <a href="/api/auth/yandex" className="yandex-btn">
+              <span className="yandex-btn-icon">Я</span>
+              Войти через Яндекс ID
+            </a>
+          )}
+        </div>
       </div>
     </div>
   );

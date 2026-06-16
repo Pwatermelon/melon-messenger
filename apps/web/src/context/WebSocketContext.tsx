@@ -35,7 +35,7 @@ export function WebSocketProvider({ children, token }: { children: ReactNode; to
   const listenersRef = useRef<Set<Listener>>(new Set());
   const tokenRef = useRef(token);
   const autoRetryCountRef = useRef(0);
-  const autoRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoRetryTimeoutRef = useRef<number | null>(null);
   tokenRef.current = token;
 
   const subscribe = useCallback((fn: Listener) => {

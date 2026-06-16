@@ -42,9 +42,7 @@ export function getWsUrl(): string {
   return "ws://localhost:3000/ws";
 }
 
-/** Базовый URL для картинок/файлов (uploads). При том же хосте — origin. */
+/** Базовый URL для картинок/файлов (uploads). Совпадает с хостом API. */
 export function getUploadsBaseUrl(): string {
-  const env = import.meta.env.VITE_API_URL;
-  if (env && String(env).trim()) return String(env).replace(/\/$/, "").replace(/\/api$/, "");
-  return getOrigin() || "http://localhost:3000";
+  return getApiUrl().replace(/\/api$/, "");
 }
