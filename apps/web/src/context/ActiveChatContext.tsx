@@ -17,13 +17,23 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   );
 
   const openChat = useCallback(async (id: string) => {
+    setActiveChatId(id);
+    sessionStorage.setItem(STORAGE_KEY, id);
     try {
       const chat = await getChat(id);
-      if (!chat) return false;
-      setActiveChatId(id);
-      sessionStorage.setItem(STORAGE_KEY, id);
+      if (!chat) {
+        setActiveChatId((current) => (current === id ? null : current));
+        if (sessionStorage.getItem(STORAGE_KEY) === id) {
+          sessionStorage.removeItem(STORAGE_KEY);
+        }
+        return false;
+      }
       return true;
     } catch {
+      setActiveChatId((current) => (current === id ? null : current));
+      if (sessionStorage.getItem(STORAGE_KEY) === id) {
+        sessionStorage.removeItem(STORAGE_KEY);
+      }
       return false;
     }
   }, []);
@@ -36,17 +46,23 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const stored = sessionStorage.getItem(STORAGE_KEY);
     if (!stored) return;
+    let cancelled = false;
     getChat(stored)
       .then((chat) => {
+        if (cancelled) return;
         if (!chat) {
           sessionStorage.removeItem(STORAGE_KEY);
-          setActiveChatId(null);
+          setActiveChatId((current) => (current === stored ? null : current));
         }
       })
       .catch(() => {
+        if (cancelled) return;
         sessionStorage.removeItem(STORAGE_KEY);
-        setActiveChatId(null);
+        setActiveChatId((current) => (current === stored ? null : current));
       });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (

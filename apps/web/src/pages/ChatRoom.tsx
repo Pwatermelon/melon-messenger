@@ -61,6 +61,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const [chat, setChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -109,6 +110,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const prependingOlderRef = useRef(false);
   const pendingPrependRef = useRef<PrependScrollState | null>(null);
   const [prependTick, setPrependTick] = useState(0);
+  const [reloadNonce, setReloadNonce] = useState(0);
   const lastMarkedReadRef = useRef<string | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -446,17 +448,18 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     pendingPrependRef.current = null;
     hasMoreOlderRef.current = true;
     setMessages([]);
+    setLoadError("");
     getChat(chatId)
       .then((c) => {
         if (cancelled) return;
         if (!c) {
-          onCloseRef.current();
+          setLoadError("Не удалось открыть чат");
           return;
         }
         setChat(c as Chat);
       })
       .catch(() => {
-        if (!cancelled) onCloseRef.current();
+        if (!cancelled) setLoadError("Не удалось открыть чат");
       });
 
     getMessages(chatId, MESSAGE_PAGE_SIZE)
@@ -480,7 +483,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
       .catch(() => {
         if (!cancelled) {
           setMessages([]);
-          onCloseRef.current();
+          setLoadError("Не удалось загрузить сообщения");
         }
       })
       .finally(() => {
@@ -492,7 +495,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     return () => {
       cancelled = true;
     };
-  }, [chatId]);
+  }, [chatId, reloadNonce]);
 
   useLayoutEffect(() => {
     const pending = pendingPrependRef.current;
@@ -1297,8 +1300,15 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
           if (!(e.target as HTMLElement).closest(".message")) e.preventDefault();
         }}
       >
-        {loading && messages.length === 0 ? (
-          <p style={{ color: "var(--muted)", padding: "1rem" }}>Loading messages…</p>
+        {loadError && messages.length === 0 ? (
+          <div className="chat-load-error">
+            <p>{loadError}</p>
+            <button type="button" className="btn-secondary" onClick={() => setReloadNonce((n) => n + 1)}>
+              Повторить
+            </button>
+          </div>
+        ) : loading && messages.length === 0 ? (
+          <p className="chat-load-hint">Загрузка сообщений…</p>
         ) : (
           <>
             <div ref={topSentinelRef} className="messages-top-sentinel" aria-hidden />

@@ -32,7 +32,7 @@
       "type": "stat",
       "title": "Uptime процесса",
       "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
-      "targets": [{ "expr": "wm_process_uptime_seconds", "refId": "A" }],
+      "targets": [{ "expr": "time() - wm_process_start_time_seconds", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "s" } },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
     },
@@ -42,7 +42,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "targets": [
         { "expr": "wm_process_resident_memory_bytes", "legendFormat": "RSS", "refId": "A" },
-        { "expr": "wm_process_heap_bytes", "legendFormat": "heap", "refId": "B" }
+        { "expr": "wm_nodejs_heap_size_used_bytes", "legendFormat": "heap used", "refId": "B" },
+        { "expr": "wm_nodejs_heap_size_total_bytes", "legendFormat": "heap total", "refId": "C" }
       ],
       "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 15 } } }
     },
@@ -51,7 +52,8 @@
       "title": "Event loop / CPU процесса",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "targets": [
-        { "expr": "rate(wm_process_cpu_seconds_total[5m])", "legendFormat": "CPU cores", "refId": "A" }
+        { "expr": "rate(wm_process_cpu_seconds_total[5m])", "legendFormat": "CPU cores", "refId": "A" },
+        { "expr": "wm_nodejs_eventloop_lag_seconds", "legendFormat": "event loop lag", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line" } } }
     },

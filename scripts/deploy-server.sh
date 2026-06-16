@@ -145,6 +145,14 @@ echo "    Web: plwatermelon/watermelon-messenger-web:${VERSION}"
 $COMPOSE pull api web
 $COMPOSE up -d --remove-orphans
 
+echo "==> Monitoring stack"
+$COMPOSE up -d prometheus grafana node-exporter postgres-exporter redis-exporter
+if ! $COMPOSE ps prometheus 2>/dev/null | grep -qE 'running|Up'; then
+  echo "WARN: prometheus is not running — Grafana dashboards will be empty."
+  echo "      Check: $COMPOSE logs prometheus"
+  echo "      If mount failed, remove erroneous dirs under deploy/monitoring/ and redeploy."
+fi
+
 ensure_tls
 
 echo "==> Waiting for https://${DOMAIN}/api/health ..."

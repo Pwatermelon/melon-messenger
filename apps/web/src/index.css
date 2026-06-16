@@ -1435,6 +1435,26 @@ a {
   position: relative;
 }
 
+.chat-load-hint {
+  color: var(--muted);
+  padding: 1rem;
+  margin: 0;
+}
+
+.chat-load-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 2rem 1rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.chat-load-error p {
+  margin: 0;
+}
+
 .messages-unread-divider {
   display: flex;
   align-items: center;
@@ -2579,6 +2599,15 @@ a {
   font-size: 0.85rem;
   color: var(--muted);
   line-height: 1.45;
+}
+
+.profile-header .profile-info-block {
+  display: inline-flex;
+  width: auto;
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: left;
 }
 
 .profile-info-block {

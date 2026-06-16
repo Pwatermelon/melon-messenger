@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Makes black outer background transparent in watermelon PNG icons.
+ * Cuts a circular alpha mask around the watermelon icon.
+ * Preserves original pixels inside the circle — no color replacement.
  * Usage: node scripts/fix-icon-transparency.mjs
  */
 import { readFileSync, writeFileSync, existsSync } from "fs";
@@ -21,38 +22,33 @@ const files = [
   "yandex-oauth-icon.png",
 ];
 
-function isBg(r, g, b, a) {
-  return a > 0 && r <= 28 && g <= 28 && b <= 28;
-}
+/** Soft edge in pixels for anti-aliased circle cutout. */
+const FEATHER_PX = 1.25;
 
-function floodTransparent(png) {
+function applyCircularMask(png) {
   const { width: w, height: h, data } = png;
-  const visited = new Uint8Array(w * h);
-  const stack = [];
+  const cx = (w - 1) / 2;
+  const cy = (h - 1) / 2;
+  const radius = Math.min(w, h) / 2;
 
-  for (let x = 0; x < w; x++) {
-    stack.push([x, 0], [x, h - 1]);
-  }
   for (let y = 0; y < h; y++) {
-    stack.push([0, y], [w - 1, y]);
-  }
+    for (let x = 0; x < w; x++) {
+      const o = (w * y + x) * 4;
+      const dx = x - cx;
+      const dy = y - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
 
-  const idx = (x, y) => (w * y + x) * 4;
+      if (dist >= radius) {
+        data[o + 3] = 0;
+        continue;
+      }
 
-  while (stack.length) {
-    const [x, y] = stack.pop();
-    if (x < 0 || y < 0 || x >= w || y >= h) continue;
-    const i = w * y + x;
-    if (visited[i]) continue;
-    const o = idx(x, y);
-    const r = data[o];
-    const g = data[o + 1];
-    const b = data[o + 2];
-    const a = data[o + 3];
-    if (!isBg(r, g, b, a)) continue;
-    visited[i] = 1;
-    data[o + 3] = 0;
-    stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+      if (FEATHER_PX > 0 && dist > radius - FEATHER_PX) {
+        const t = (radius - dist) / FEATHER_PX;
+        const factor = Math.max(0, Math.min(1, t));
+        data[o + 3] = Math.round(data[o + 3] * factor);
+      }
+    }
   }
 
   return png;
@@ -64,9 +60,8 @@ for (const name of files) {
     console.warn("skip", name);
     continue;
   }
-  const buf = readFileSync(path);
-  const png = PNG.sync.read(buf);
-  floodTransparent(png);
+  const png = PNG.sync.read(readFileSync(path));
+  applyCircularMask(png);
   writeFileSync(path, PNG.sync.write(png));
-  console.log(name, "ok", `corner alpha=${png.data[3]}`);
+  console.log(name, "ok", `${png.width}x${png.height}`, `corner alpha=${png.data[3]}`);
 }
