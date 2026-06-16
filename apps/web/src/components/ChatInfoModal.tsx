@@ -4,7 +4,7 @@ import BirthdayInfoBlock from "./BirthdayInfoBlock";
 import MediaLightbox, { type MediaLightboxItem } from "./MediaLightbox";
 import CircleLightbox from "./CircleLightbox";
 import { VoiceMessagePlayer } from "./VoiceMessagePlayer";
-import { IconBell, IconBellOff, IconFile } from "./Icons";
+import { IconBell, IconBellOff, IconFile, IconUser } from "./Icons";
 import { getChatShared, updateChatNotifications } from "../api";
 import { mediaDownloadUrl, mediaUrl } from "../utils/mediaUrl";
 
@@ -573,7 +573,8 @@ export default function ChatInfoModal({
                 openProfile(otherMember.id);
               }}
             >
-              Профиль
+              <IconUser size={22} />
+              <span>Профиль</span>
             </button>
           )}
           <button

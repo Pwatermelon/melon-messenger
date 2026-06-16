@@ -24,6 +24,7 @@ import {
 import { getReadCursors, getUserReadCursorsByChat } from "../services/readReceipts";
 import { advanceReadCursor } from "../services/chatRead";
 import { resolveUnreadCount, incrementUnreadForChat } from "../services/chatUnread";
+import { getReactionsForMessages, setMessageReaction } from "../services/reactions";
 import { trackMessageCreated } from "../services/prometheus";
 
 function toUser(u: typeof users.$inferSelect) {
