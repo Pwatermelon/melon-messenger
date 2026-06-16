@@ -1442,14 +1442,8 @@ a {
   position: relative;
 }
 
-.messages.messages-settling {
-  opacity: 0;
-  pointer-events: none;
-}
-
 .messages.messages-ready {
   opacity: 1;
-  transition: opacity 0.28s ease-out;
 }
 
 .chat-load-hint {
@@ -1596,6 +1590,32 @@ a {
   display: flex;
   width: 100%;
   align-items: flex-end;
+}
+
+.message-row.message-row-naked-incoming {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  margin-bottom: 0.15rem;
+}
+
+.message-row.message-row-naked-incoming .message-row-body {
+  align-items: flex-start;
+  width: 100%;
+  max-width: 85%;
+}
+
+.message-row-sender {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 0 0 0.05rem 0.15rem;
+  color: var(--muted);
+  max-width: min(260px, 85vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1.25;
 }
 
 .message-row.incoming {

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { useVoiceRecorder } from "../hooks/useVoiceRecorder";
 import { useCircleRecorder } from "../hooks/useCircleRecorder";
 import { IconCircle, IconMic, IconSend } from "./Icons";
-import { shouldAcquireMediaEarly, type RecordMediaKind } from "../utils/mediaAccess";
 
 type RecordMode = "voice" | "circle";
 type Gesture = "none" | "cancel" | "lock";
@@ -48,6 +47,7 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
   const disabledRef = useRef(false);
   const modeRef = useRef(mode);
   const recordingRef = useRef(false);
+  const recordErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeMode = mode;
   const recording = activeMode === "voice" ? voice.recording : circle.recording;
@@ -90,6 +90,18 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
   }, [circle.error]);
 
   useEffect(() => {
+    if (!recordError) return;
+    if (recordErrorTimerRef.current) clearTimeout(recordErrorTimerRef.current);
+    recordErrorTimerRef.current = setTimeout(() => setRecordError(null), 4500);
+    return () => {
+      if (recordErrorTimerRef.current) {
+        clearTimeout(recordErrorTimerRef.current);
+        recordErrorTimerRef.current = null;
+      }
+    };
+  }, [recordError]);
+
+  useEffect(() => {
     if (activeMode === "circle" && circle.recording && circle.duration >= maxDuration) {
       void finishSend();
     }
@@ -117,22 +129,39 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
     if (sendingRef.current) return;
     sendingRef.current = true;
     const isVoice = modeRef.current === "voice";
+    const shownDuration = isVoice ? voice.duration : circle.duration;
     const { blob, duration: d } = isVoice ? await voice.stop() : await circle.stop();
     setLocked(false);
     lockedRef.current = false;
     setGesture("none");
     setAnchor(null);
     holdActivatedRef.current = false;
+    const hadRecording = recordingStartedRef.current;
     recordingStartedRef.current = false;
+    const effectiveDuration = Math.max(d, shownDuration);
     const min = isVoice ? MIN_VOICE_BYTES : MIN_CIRCLE_BYTES;
-    if (blob.size < min) {
-      setRecordError(isVoice ? "Слишком короткая запись" : "Не удалось записать кружок — удерживайте кнопку дольше");
+    if (!hadRecording && effectiveDuration < 1) {
       sendingRef.current = false;
       activeRecorder().releaseAcquire();
       return;
     }
-    if (isVoice) await onVoiceSend(blob, d);
-    else await onCircleSend(blob, d);
+    if (blob.size < min) {
+      setRecordError(
+        effectiveDuration >= 1
+          ? isVoice
+            ? "Не удалось сохранить запись"
+            : "Не удалось записать кружок"
+          : isVoice
+            ? "Слишком короткая запись"
+            : "Не удалось записать кружок — удерживайте кнопку дольше"
+      );
+      sendingRef.current = false;
+      activeRecorder().releaseAcquire();
+      return;
+    }
+    setRecordError(null);
+    if (isVoice) await onVoiceSend(blob, effectiveDuration);
+    else await onCircleSend(blob, effectiveDuration);
     sendingRef.current = false;
   }
 
@@ -157,6 +186,7 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
     lockedRef.current = false;
     setGesture("none");
     setAnchor(null);
+    setRecordError(null);
   }
 
   async function acquireRecording(): Promise<boolean> {
@@ -288,12 +318,9 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
     document.addEventListener("touchcancel", onDocTouchEnd, { passive: false });
 
     void (async () => {
-      const kind: RecordMediaKind = modeRef.current;
-      if (await shouldAcquireMediaEarly(kind)) {
-        const p = acquireRecording();
-        startPromiseRef.current = p;
-        await p;
-      }
+      const p = acquireRecording();
+      startPromiseRef.current = p;
+      await p;
     })();
 
     holdTimerRef.current = setTimeout(() => {

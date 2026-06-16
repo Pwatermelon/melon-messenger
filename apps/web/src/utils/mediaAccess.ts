@@ -15,10 +15,8 @@ export async function queryMediaPermission(
 }
 
 /** Запрашивать поток сразу на pointerdown — пока жест активен (Safari / «один раз»). */
-export async function shouldAcquireMediaEarly(kind: RecordMediaKind): Promise<boolean> {
-  if (kind === "circle") return true;
-  const mic = await queryMediaPermission("microphone");
-  return mic === "prompt" || mic === "unknown";
+export async function shouldAcquireMediaEarly(_kind: RecordMediaKind): Promise<boolean> {
+  return true;
 }
 
 export function readCachedCircleConstraintIndex(): number | null {

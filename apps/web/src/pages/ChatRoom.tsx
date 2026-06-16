@@ -564,7 +564,11 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
 
     const stick = () => {
       if (finished) return;
-      restorePrependScroll(list, pending);
+      const ok = restorePrependScroll(list, pending);
+      if (!ok && pending.anchorMessageId) {
+        requestAnimationFrame(stick);
+        return;
+      }
       const h = list.scrollHeight;
       if (h === lastHeight) stableFrames += 1;
       else {
@@ -663,7 +667,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     const firstUnread = serverUnreadCount > 0 ? unreadBounds.first : null;
 
     const snap = () => {
-      if (!listRef.current) return;
+      if (!listRef.current || sessionChatId !== chatId) return;
       if (firstUnread) {
         stickToBottomRef.current = false;
         scrollListToMessage(listRef.current, firstUnread.id, "start", 16);
@@ -674,52 +678,35 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
       }
     };
 
-    let finished = false;
-    let lastHeight = -1;
-    let stableFrames = 0;
-
-    const finish = () => {
-      if (finished || sessionChatId !== chatId) return;
-      finished = true;
-      ro.disconnect();
-      window.clearTimeout(maxWait);
-      snap();
-      pendingInitialScrollRef.current = false;
-      setMessagesReady(true);
-      refreshUnreadJumpCount();
-      if (!firstUnread) tryMarkReadFromScroll();
-    };
-
-    const onLayout = () => {
-      if (finished || sessionChatId !== chatId) return;
-      snap();
-      const h = list.scrollHeight;
-      if (h === lastHeight) stableFrames += 1;
-      else {
-        lastHeight = h;
-        stableFrames = 0;
-      }
-      if (stableFrames >= 3) finish();
-    };
-
     snap();
-    requestAnimationFrame(onLayout);
+    requestAnimationFrame(snap);
+    pendingInitialScrollRef.current = false;
+    setMessagesReady(true);
+    refreshUnreadJumpCount();
+    if (!firstUnread) tryMarkReadFromScroll();
 
-    const ro = new ResizeObserver(() => onLayout());
+    let refineFrames = 0;
+    const refine = () => {
+      if (sessionChatId !== chatId) return;
+      snap();
+      refineFrames += 1;
+      if (refineFrames < 6) requestAnimationFrame(refine);
+    };
+    requestAnimationFrame(refine);
+
+    const ro = new ResizeObserver(() => snap());
     ro.observe(list);
-
-    const maxWait = window.setTimeout(finish, 2800);
+    const maxWait = window.setTimeout(() => ro.disconnect(), 1200);
 
     return () => {
-      finished = true;
       ro.disconnect();
       window.clearTimeout(maxWait);
     };
   }, [
     chatId,
-    messages,
     loading,
     loadingOlder,
+    messages.length,
     unreadBounds.first,
     serverUnreadCount,
     refreshUnreadJumpCount,
@@ -1406,7 +1393,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
           </div>
         )}
       <div
-        className={`messages${messagesReady ? " messages-ready" : messages.length > 0 ? " messages-settling" : ""}`}
+        className="messages"
         ref={listRef}
         onContextMenu={(e) => {
           if (!(e.target as HTMLElement).closest(".message")) e.preventDefault();
@@ -1458,6 +1445,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
             }
             const naked = mt === "circle" || mt === "voice" || mt === "image";
             const own = m.senderId === user?.id;
+            const showRowSender = chat?.type === "group" && !own && naked;
             const peerReaders = own ? getPeerReaders(m) : [];
             const selectable = canDeleteMessage(m);
             const selected = selectedIds.has(m.id);
@@ -1475,9 +1463,12 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
               )}
             <div
               data-message-id={m.id}
-              className={`message-row ${own ? "own" : "incoming"}${selectionMode ? " selection-mode" : ""}${highlightMessageId === m.id ? " message-row-target-highlight" : ""}`}
+              className={`message-row ${own ? "own" : "incoming"}${showRowSender ? " message-row-naked-incoming" : ""}${selectionMode ? " selection-mode" : ""}${highlightMessageId === m.id ? " message-row-target-highlight" : ""}`}
               onClick={(e) => onMessageRowClick(e, m)}
             >
+              {showRowSender && (
+                <div className="message-row-sender">{m.sender?.username ?? "?"}</div>
+              )}
               <div
                 className={`message-row-body${selected ? " is-selected" : ""}`}
                 role={selectionMode && selectable ? "button" : undefined}
@@ -1510,7 +1501,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
               onTouchEnd={onMessageTouchEnd}
               onTouchCancel={onMessageTouchEnd}
             >
-              {chat?.type === "group" && !own && (
+              {chat?.type === "group" && !own && !showRowSender && (
                 <div className="message-sender">{m.sender?.username ?? "?"}</div>
               )}
               {m.attachmentMetadata?.forwardedFrom && (

@@ -36,14 +36,18 @@ export function capturePrependScroll(listEl: HTMLElement): PrependScrollState {
   };
 }
 
-export function restorePrependScroll(listEl: HTMLElement, state: PrependScrollState): void {
+export function restorePrependScroll(listEl: HTMLElement, state: PrependScrollState): boolean {
   if (state.anchorMessageId) {
     const anchorTop = getMessageContentTop(listEl, state.anchorMessageId);
     if (anchorTop != null) {
       listEl.scrollTop = anchorTop + state.anchorOffset;
-      return;
+      return true;
     }
   }
   const delta = listEl.scrollHeight - state.scrollHeight;
-  listEl.scrollTop = state.scrollTop + delta;
+  if (delta > 0) {
+    listEl.scrollTop = state.scrollTop + delta;
+    return true;
+  }
+  return false;
 }
