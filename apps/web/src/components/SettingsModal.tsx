@@ -11,6 +11,7 @@ import { logoutViaYandex } from "../lib/yandexLogout";
 import { formatBirthdayLabel, getBirthdayAge } from "@melon/shared";
 import BirthdayInfoBlock from "./BirthdayInfoBlock";
 import ImageCropModal from "./ImageCropModal";
+import StickerPacksSettings from "./StickerPacksSettings";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 
 type Props = {
@@ -60,6 +61,7 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
   const [birthdayVisible, setBirthdayVisible] = useState(user?.birthdayVisible ?? false);
   const [privacyLoading, setPrivacyLoading] = useState(false);
   const [cropFile, setCropFile] = useState<File | null>(null);
+  const [stickerPacksOpen, setStickerPacksOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const yandexLogin = user?.yandexLogin ?? null;
@@ -210,6 +212,7 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
           onCancel={() => setCropFile(null)}
         />
       )}
+      {stickerPacksOpen && <StickerPacksSettings onClose={() => setStickerPacksOpen(false)} />}
       <div
         className="search-overlay settings-overlay"
         data-testid="settings-modal"
@@ -349,6 +352,15 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
                   label="Push-уведомления"
                 />
               </div>
+            </section>
+
+            <section className="settings-card">
+              <h3 className="settings-card-title">Стикеры</h3>
+              <button type="button" className="settings-row-link" onClick={() => setStickerPacksOpen(true)}>
+                <span>Стикерпаки</span>
+                <span className="settings-row-chevron" aria-hidden>›</span>
+              </button>
+              <p className="settings-card-hint">Создавайте свои наборы или добавляйте чужие из чата.</p>
             </section>
 
             <section className="settings-card">

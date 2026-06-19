@@ -196,7 +196,8 @@ function mapRow(row: {
 
 export async function getMessage(chatId: string, messageId: string): Promise<MessageRow | null> {
   try {
-    const result = await scyllaClient.execute(selectOneQuery, [chatId, messageId], { prepare: true });
+    const id = types.TimeUuid.fromString(messageId.trim().toLowerCase());
+    const result = await scyllaClient.execute(selectOneQuery, [chatId, id], { prepare: true });
     const row = result.rows[0];
     if (!row) return null;
     return mapRow(row);

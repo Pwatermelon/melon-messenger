@@ -94,7 +94,6 @@ export default function ChatInfoModal({
   const memberCount = chat.members.length;
 
   const [tab, setTab] = useState<TabId>(defaultTab);
-  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [muteBusy, setMuteBusy] = useState(false);
   const [sharedByTab, setSharedByTab] = useState<Partial<Record<ChatSharedCategory, ChatSharedItem[]>>>({});
   const [hasMoreByTab, setHasMoreByTab] = useState<Partial<Record<ChatSharedCategory, boolean>>>({});
@@ -110,7 +109,6 @@ export default function ChatInfoModal({
 
   useEffect(() => {
     if (!open) {
-      setSelectedMemberId(null);
       setLightbox(null);
       setCircleLightbox(null);
       resetShared();
@@ -131,12 +129,11 @@ export default function ChatInfoModal({
         setCircleLightbox(null);
         return;
       }
-      if (selectedMemberId) setSelectedMemberId(null);
-      else onClose();
+      onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, selectedMemberId, lightbox, circleLightbox, onClose]);
+  }, [open, lightbox, circleLightbox, onClose]);
 
   const loadShared = useCallback(async (category: ChatSharedCategory, before?: string) => {
     setLoadingTab(category);
@@ -191,52 +188,7 @@ export default function ChatInfoModal({
     setLightbox({ items: mediaItems, index });
   }
 
-  function renderMemberDetail(m: User & { role?: string }) {
-    return (
-      <>
-        <button type="button" className="contact-info-back" onClick={() => setSelectedMemberId(null)}>
-          ← Назад
-        </button>
-        <div className="contact-info-avatar-wrap">
-          {m.avatarUrl ? (
-            <img src={mediaUrl(m.avatarUrl)} alt="" className="contact-info-avatar" />
-          ) : (
-            <div className="contact-info-avatar-placeholder">{(m.username ?? "?").slice(0, 1).toUpperCase()}</div>
-          )}
-        </div>
-        <p className="contact-info-name">{m.username}</p>
-        {m.yandexLogin && (
-          <div className="contact-info-id-block">
-            <span className="contact-info-label">Логин</span>
-            <code className="contact-info-code">{m.yandexLogin}</code>
-          </div>
-        )}
-        <button
-          type="button"
-          className="contact-info-profile-btn"
-          onClick={() => {
-            onClose();
-            openProfile(m.id);
-          }}
-        >
-          Открыть профиль
-        </button>
-        {isGroupAdmin && m.id !== currentUserId && (
-          <button type="button" className="contact-info-remove-btn" onClick={() => onRemoveGroupMember(m.id)}>
-            Удалить из группы
-          </button>
-        )}
-      </>
-    );
-  }
-
   function renderParticipants() {
-    if (selectedMemberId) {
-      const m = chat.members.find((x) => x.id === selectedMemberId);
-      if (!m) return null;
-      return renderMemberDetail(m);
-    }
-
     if (!isGroup && otherMember) {
       return null;
     }
@@ -273,7 +225,14 @@ export default function ChatInfoModal({
         <ul className="contact-info-members">
           {chat.members.map((m) => (
             <li key={m.id} className="contact-info-member">
-              <button type="button" className="contact-info-member-btn" onClick={() => setSelectedMemberId(m.id)}>
+              <button
+                type="button"
+                className="contact-info-member-btn"
+                onClick={() => {
+                  onClose();
+                  openProfile(m.id);
+                }}
+              >
                 <div className="contact-info-member-avatar">
                   {m.avatarUrl ? (
                     <img src={mediaUrl(m.avatarUrl)} alt="" />
@@ -584,6 +543,7 @@ export default function ChatInfoModal({
               type="button"
               role="tab"
               aria-selected={tab === t.id}
+              title={t.label}
               className={`chat-info-tab${tab === t.id ? " chat-info-tab-active" : ""}`}
               onClick={() => setTab(t.id)}
             >

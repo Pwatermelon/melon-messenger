@@ -1,6 +1,23 @@
 import type { Chat, Message } from "@melon/shared";
 import { messagePreviewText } from "./messagePreview";
 
+/** Keep server rows as source of truth; retain local-only chats (e.g. just-created DM before list refresh). */
+export function mergeChatLists(local: Chat[], server: Chat[]): Chat[] {
+  const serverIds = new Set(server.map((c) => c.id));
+  const localOnly = local.filter((c) => !serverIds.has(c.id));
+  return sortChatsByRecent([...server, ...localOnly]);
+}
+
+export function upsertChatInList(chats: Chat[], chat: Chat): Chat[] {
+  const prior = chats.find((c) => c.id === chat.id);
+  const merged: Chat = {
+    ...(prior ?? {}),
+    ...chat,
+    unreadCount: prior?.unreadCount ?? chat.unreadCount ?? 0,
+  };
+  return sortChatsByRecent([merged, ...chats.filter((c) => c.id !== chat.id)]);
+}
+
 export function sortChatsByRecent(chats: Chat[]): Chat[] {
   return [...chats].sort((a, b) => {
     const at = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;

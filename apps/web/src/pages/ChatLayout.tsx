@@ -5,17 +5,18 @@ import AdminConsoleModal from "../components/AdminConsoleModal";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import { useActiveChat } from "../context/ActiveChatContext";
-import { getChats, createDm, createGroup, searchUser, getContacts, addContact, getChatUnreadCount } from "../api";
+import { getChats, getChat, createDm, createGroup, searchUser, getContacts, addContact, getChatUnreadCount } from "../api";
 import type { Chat, User, Message } from "@melon/shared";
 import { mediaUrl } from "../utils/mediaUrl";
 import { BrandIcon } from "../components/BrandIcon";
 import { IconPlus } from "../components/Icons";
 import { UserListLabel } from "../components/UserListLabel";
+import { ContactPickItem } from "../components/ContactPickItem";
 import { userAvatarLetter, userDisplayName } from "../utils/userDisplay";
 import Profile from "./Profile";
 import ChatRoom from "./ChatRoom";
 import { APP_VERSION } from "../version";
-import { applyMessageToChatList, sortChatsByRecent } from "../utils/chatListUpdate";
+import { applyMessageToChatList, mergeChatLists, upsertChatInList } from "../utils/chatListUpdate";
 import { playMessageSound } from "../utils/messageSounds";
 import { useCompactLayout } from "../hooks/useCompactLayout";
 
@@ -123,6 +124,10 @@ export default function ChatLayout() {
   }, [dmOpen]);
 
   useEffect(() => {
+    if (groupOpen) loadContacts();
+  }, [groupOpen]);
+
+  useEffect(() => {
     const state = location.state as { openSettings?: boolean } | null;
     if (state?.openSettings) {
       setSettingsOpen(true);
@@ -197,18 +202,18 @@ export default function ChatLayout() {
     });
   }, [subscribe, closeChat, refreshChatUnreadCount]);
 
-  function refreshChats() {
-    getChats().then((list) => {
-      setChats(sortChatsByRecent(list as Chat[]));
+  const refreshChats = useCallback(() => {
+    void getChats().then((list) => {
+      setChats((prev) => mergeChatLists(prev, list as Chat[]));
     });
-  }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     getChats()
       .then((list) => {
         if (!cancelled) {
-          setChats(sortChatsByRecent(list as Chat[]));
+          setChats((prev) => mergeChatLists(prev, list as Chat[]));
         }
       })
       .finally(() => {
@@ -233,7 +238,22 @@ export default function ChatLayout() {
     const onRefresh = () => refreshChats();
     window.addEventListener("wm:refresh-chats", onRefresh);
     return () => window.removeEventListener("wm:refresh-chats", onRefresh);
-  }, []);
+  }, [refreshChats]);
+
+  useEffect(() => {
+    if (!activeChatId || chatsRef.current.some((c) => c.id === activeChatId)) return;
+    let cancelled = false;
+    void getChat(activeChatId).then((c) => {
+      if (cancelled || !c) return;
+      setChats((prev) => {
+        if (prev.some((x) => x.id === activeChatId)) return prev;
+        return upsertChatInList(prev, { ...(c as Chat), unreadCount: 0 });
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeChatId]);
 
   useEffect(() => {
     if (!newChatMenuOpen) return;
@@ -290,18 +310,15 @@ export default function ChatLayout() {
       setSidebarUser(null);
       setSidebarQuery("");
       setSidebarTab("chats");
-      setChats((prev) => {
-        const prior = prev.find((c) => c.id === chat.id);
-        const merged: Chat = { ...(prior ?? {}), ...(chat as Chat), unreadCount: 0 };
-        return sortChatsByRecent([merged, ...prev.filter((c) => c.id !== chat.id)]);
-      });
+      setChats((prev) => upsertChatInList(prev, { ...(chat as Chat), unreadCount: 0 }));
       await openChat(chat.id);
       return true;
     } catch (e) {
       if (e instanceof Error && e.message.includes("already")) {
-        const existing = chats.find((c) => c.members.some((m) => m.id === otherUserId));
+        const existing = chatsRef.current.find((c) => c.members.some((m) => m.id === otherUserId));
         if (existing) {
           setSidebarTab("chats");
+          setChats((prev) => upsertChatInList(prev, existing));
           await openChat(existing.id);
         }
         setDmOpen(false);
@@ -324,11 +341,17 @@ export default function ChatLayout() {
       setGroupSelected([]);
       setGroupAddLogin("");
       setGroupAddError("");
-      setChats((prev) => [chat as Chat, ...prev]);
+      setChats((prev) => upsertChatInList(prev, { ...(chat as Chat), unreadCount: 0 }));
       await openChat(chat.id);
     } catch (err) {
       setGroupError(err instanceof Error ? err.message : "Не удалось создать группу");
     }
+  }
+
+  function addContactToGroup(c: User) {
+    if (c.id === user?.id) return;
+    if (groupSelected.some((x) => x.id === c.id)) return;
+    setGroupSelected((prev) => [...prev, { id: c.id, username: userDisplayName(c) }]);
   }
 
   async function addGroupMemberByLogin() {
@@ -652,14 +675,7 @@ export default function ChatLayout() {
                   <p className="search-hint">Нет контактов — добавьте из профиля</p>
                 ) : (
                   contacts.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      className="dm-contact-item"
-                      onClick={() => void startDm(c.id)}
-                    >
-                      <UserListLabel user={c} nameClassName="dm-contact-name" tagClassName="dm-contact-login" />
-                    </button>
+                    <ContactPickItem key={c.id} user={c} onClick={() => void startDm(c.id)} />
                   ))
                 )}
               </div>
@@ -673,11 +689,12 @@ export default function ChatLayout() {
           className="search-overlay"
           onClick={(e) => { if (e.target === e.currentTarget) setGroupOpen(false); }}
         >
-          <div className="search-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="search-modal search-modal-wide dm-modal" onClick={(e) => e.stopPropagation()}>
             <button type="button" className="modal-close" aria-label="Закрыть" onClick={() => setGroupOpen(false)}>
               ×
             </button>
             <h3>Новая группа</h3>
+            <div className="dm-modal-body">
             <input
               type="text"
               placeholder="Название группы"
@@ -685,7 +702,7 @@ export default function ChatLayout() {
               onChange={(e) => setGroupName(e.target.value)}
               autoFocus
             />
-            <p className="search-hint">Добавьте участников по логину</p>
+            <p className="search-hint">Добавьте участников по логину или из контактов</p>
             <div className="search-id-row">
               <input
                 type="text"
@@ -712,6 +729,27 @@ export default function ChatLayout() {
                 ))}
               </div>
             )}
+            <p className="dm-contacts-label">Контакты</p>
+            <div className="dm-contacts-list">
+              {contactsLoading ? (
+                <p className="search-hint">Загрузка…</p>
+              ) : contacts.length === 0 ? (
+                <p className="search-hint">Нет контактов — добавьте из профиля</p>
+              ) : (
+                contacts.map((c) => {
+                  const selected = groupSelected.some((x) => x.id === c.id);
+                  return (
+                    <ContactPickItem
+                      key={c.id}
+                      user={c}
+                      selected={selected}
+                      disabled={selected || c.id === user?.id}
+                      onClick={() => addContactToGroup(c)}
+                    />
+                  );
+                })
+              )}
+            </div>
             <div className="modal-actions" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -721,6 +759,7 @@ export default function ChatLayout() {
               >
                 Создать группу
               </button>
+            </div>
             </div>
           </div>
         </div>

@@ -62,7 +62,7 @@ export const uploadRoutes = new Elysia({ prefix: "/upload" })
     const bytes = new Uint8Array(await file.arrayBuffer());
     await storage.put(filename, bytes, contentType);
 
-    if (purpose === "profile") {
+    if (purpose === "profile" || purpose === "sticker") {
       await registerProfileMedia(filename, u.id, file.name);
     } else {
       await registerMediaFile(filename, u.id, "chat", file.name);

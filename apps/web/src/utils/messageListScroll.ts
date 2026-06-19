@@ -1,3 +1,14 @@
+/** Scroll to the true bottom; optional sentinel avoids flex/subpixel gaps. */
+export function scrollListToBottom(listEl: HTMLElement, endEl?: HTMLElement | null): void {
+  if (endEl) {
+    endEl.scrollIntoView({ block: "end", inline: "nearest", behavior: "auto" });
+  }
+  const maxTop = Math.max(0, listEl.scrollHeight - listEl.clientHeight);
+  if (listEl.scrollTop < maxTop - 1) {
+    listEl.scrollTop = maxTop;
+  }
+}
+
 export type PrependScrollState = {
   anchorMessageId: string | null;
   /** scrollTop − anchor content top at capture time */

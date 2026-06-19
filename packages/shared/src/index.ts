@@ -56,7 +56,33 @@ export interface ChatSharedItem {
 }
 
 /** Message content type */
-export type MessageType = "text" | "image" | "file" | "video" | "location" | "voice" | "circle" | "system";
+export type MessageType = "text" | "image" | "file" | "video" | "location" | "voice" | "circle" | "system" | "sticker";
+
+export interface StickerPackSummary {
+  id: string;
+  title: string;
+  creatorId: string;
+  creatorUsername?: string;
+  stickerCount: number;
+  isOwned: boolean;
+  isInstalled: boolean;
+  createdAt: string;
+}
+
+export interface StickerItem {
+  id: string;
+  packId: string;
+  emoji: string;
+  /** Signed URL for display */
+  imageUrl: string;
+  /** Canonical `/uploads/...` path for sending messages */
+  imagePath: string;
+  sortOrder: number;
+}
+
+export interface StickerPackDetail extends StickerPackSummary {
+  stickers: StickerItem[];
+}
 
 /** Single file in a message (album supports up to 5) */
 export interface MessageAttachment {
@@ -83,6 +109,12 @@ export interface AttachmentMetadata {
     preview: string;
     messageType?: MessageType;
   };
+  /** Associated emoji for sticker messages */
+  emoji?: string;
+  stickerPackId?: string;
+  stickerId?: string;
+  /** Clickable usernames in group system events */
+  systemMentions?: { userId: string; username: string }[];
 }
 
 export interface Message {

@@ -29,6 +29,8 @@ export function messagePreviewText(
       return "Файл";
     case "location":
       return "Геопозиция";
+    case "sticker":
+      return m.attachmentMetadata?.emoji ? `${m.attachmentMetadata.emoji} Стикер` : "Стикер";
     case "system":
       return m.content.trim().slice(0, 160) || "Событие";
     default:

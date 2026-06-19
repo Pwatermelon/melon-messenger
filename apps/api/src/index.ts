@@ -11,6 +11,7 @@ import { adminRoutes } from "./routes/admin";
 import { adminObservabilityRoutes } from "./routes/adminObservability";
 import { chatRoutes } from "./routes/chats";
 import { contactRoutes } from "./routes/contacts";
+import { stickerPackRoutes } from "./routes/stickerPacks";
 import { uploadRoutes } from "./routes/upload";
 import { mediaRoutes } from "./routes/media";
 import { wsHandlers, setWSServer, setupRedisSubscriber } from "./ws";
@@ -123,6 +124,35 @@ async function main() {
       CREATE INDEX IF NOT EXISTS message_reactions_chat_idx ON message_reactions (chat_id)
     `);
     await db.execute(sql`ALTER TABLE chat_members ADD COLUMN IF NOT EXISTS muted boolean NOT NULL DEFAULT false`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS sticker_packs (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        creator_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title varchar(100) NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS stickers (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        pack_id uuid NOT NULL REFERENCES sticker_packs(id) ON DELETE CASCADE,
+        emoji varchar(32) NOT NULL,
+        image_url text NOT NULL,
+        sort_order int NOT NULL DEFAULT 0,
+        created_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS user_sticker_packs (
+        user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        pack_id uuid NOT NULL REFERENCES sticker_packs(id) ON DELETE CASCADE,
+        added_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (user_id, pack_id)
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS stickers_pack_idx ON stickers (pack_id)
+    `);
   } catch (e) {
     console.warn("Schema migration (optional):", e);
   }
@@ -162,6 +192,7 @@ async function main() {
     .use(isE2eEnabled() ? e2eRoutes : new Elysia())
     .use(chatRoutes)
     .use(contactRoutes)
+    .use(stickerPackRoutes)
     .use(uploadRoutes)
     .use(mediaRoutes)
     .ws("/ws", wsHandlers);

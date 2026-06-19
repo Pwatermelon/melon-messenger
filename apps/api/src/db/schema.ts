@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, pgEnum, primaryKey, boolean } from "drizzle-orm/pg-core";
+import { pgTable, uuid, varchar, text, timestamp, pgEnum, primaryKey, boolean, integer } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
 export const chatTypeEnum = pgEnum("chat_type", ["dm", "group"]);
@@ -100,6 +100,32 @@ export const mediaChatGrants = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [primaryKey({ columns: [t.filename, t.chatId] })]
+);
+
+export const stickerPacks = pgTable("sticker_packs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  creatorId: uuid("creator_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 100 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const stickers = pgTable("stickers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  packId: uuid("pack_id").notNull().references(() => stickerPacks.id, { onDelete: "cascade" }),
+  emoji: varchar("emoji", { length: 32 }).notNull(),
+  imageUrl: text("image_url").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const userStickerPacks = pgTable(
+  "user_sticker_packs",
+  {
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    packId: uuid("pack_id").notNull().references(() => stickerPacks.id, { onDelete: "cascade" }),
+    addedAt: timestamp("added_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.packId] })]
 );
 
 export const usersRelations = relations(users, ({ many }) => ({

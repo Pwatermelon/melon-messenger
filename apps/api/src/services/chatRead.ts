@@ -15,9 +15,10 @@ export async function advanceReadCursor(
   if (!row) {
     return { advanced: false, messageId: null, updatedAt: null };
   }
-  const { advanced, updatedAt } = await upsertReadCursor(chatId, userId, target);
+  const canonicalId = String(row.message_id).trim().toLowerCase();
+  const { advanced, updatedAt } = await upsertReadCursor(chatId, userId, canonicalId);
   if (advanced) {
     await resetUnreadCount(chatId, userId);
   }
-  return { advanced, messageId: target, updatedAt };
+  return { advanced, messageId: canonicalId, updatedAt };
 }

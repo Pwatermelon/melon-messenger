@@ -1,4 +1,4 @@
-import type { AttachmentMetadata, ChatSharedCategory, ChatSharedItem, MessageType, User } from "@melon/shared";
+import type { AttachmentMetadata, ChatSharedCategory, ChatSharedItem, MessageType, StickerItem, StickerPackDetail, StickerPackSummary, User } from "@melon/shared";
 import { getApiUrl } from "./config";
 
 function getToken(): string | null {
@@ -519,7 +519,7 @@ export async function signMediaPaths(paths: string[]): Promise<Record<string, st
 
 export async function uploadFile(
   file: File,
-  opts?: { purpose?: "chat" | "profile" }
+  opts?: { purpose?: "chat" | "profile" | "sticker" }
 ): Promise<{ url: string; path: string; fileName: string; mimeType: string; size: number }> {
   const form = new FormData();
   form.append("file", file);
@@ -550,4 +550,102 @@ export async function uploadFile(
     mimeType: data.mimeType,
     size: data.size,
   };
+}
+
+export async function getStickerPacksLibrary(): Promise<{ owned: StickerPackSummary[]; installed: StickerPackSummary[] }> {
+  const res = await fetch(`${getApiUrl()}/sticker-packs`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error("Failed to load sticker packs");
+  return res.json();
+}
+
+export async function getStickerPack(id: string): Promise<StickerPackDetail> {
+  const res = await fetch(`${getApiUrl()}/sticker-packs/${encodeURIComponent(id)}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error("Failed to load sticker pack");
+  return res.json();
+}
+
+export async function createStickerPack(title: string): Promise<StickerPackSummary> {
+  const res = await fetch(`${getApiUrl()}/sticker-packs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw new Error("Failed to create sticker pack");
+  return res.json();
+}
+
+export async function updateStickerPack(id: string, title: string): Promise<StickerPackSummary> {
+  const res = await fetch(`${getApiUrl()}/sticker-packs/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw new Error("Failed to update sticker pack");
+  return res.json();
+}
+
+export async function deleteStickerPack(id: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/sticker-packs/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error("Failed to delete sticker pack");
+}
+
+export async function addStickerToPack(
+  packId: string,
+  emoji: string,
+  imageUrl: string
+): Promise<StickerItem> {
+  const res = await fetch(`${getApiUrl()}/sticker-packs/${encodeURIComponent(packId)}/stickers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+    body: JSON.stringify({ emoji, imageUrl }),
+  });
+  if (!res.ok) throw new Error("Failed to add sticker");
+  return res.json();
+}
+
+export async function updateStickerEmoji(packId: string, stickerId: string, emoji: string): Promise<StickerItem> {
+  const res = await fetch(
+    `${getApiUrl()}/sticker-packs/${encodeURIComponent(packId)}/stickers/${encodeURIComponent(stickerId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+      body: JSON.stringify({ emoji }),
+    }
+  );
+  if (!res.ok) throw new Error("Failed to update sticker");
+  return res.json();
+}
+
+export async function deleteStickerFromPack(packId: string, stickerId: string): Promise<void> {
+  const res = await fetch(
+    `${getApiUrl()}/sticker-packs/${encodeURIComponent(packId)}/stickers/${encodeURIComponent(stickerId)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${getToken()}` },
+    }
+  );
+  if (!res.ok) throw new Error("Failed to delete sticker");
+}
+
+export async function installStickerPack(id: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/sticker-packs/${encodeURIComponent(id)}/install`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error("Failed to add sticker pack");
+}
+
+export async function uninstallStickerPack(id: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/sticker-packs/${encodeURIComponent(id)}/install`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error("Failed to remove sticker pack");
 }

@@ -11,7 +11,9 @@ import { LocationPickerModal } from "../components/LocationPickerModal";
 import { LocationPreview } from "../components/LocationPreview";
 import ImageCropModal from "../components/ImageCropModal";
 import ChatInfoModal from "../components/ChatInfoModal";
-import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo, IconBack, IconChevronDown } from "../components/Icons";
+import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo, IconBack, IconChevronDown, IconSmile } from "../components/Icons";
+import ComposeEmojiStickerPanel from "../components/ComposeEmojiStickerPanel";
+import StickerPackViewModal from "../components/StickerPackViewModal";
 import { getChat, getChats, getMessages, uploadFile, addGroupMembers, removeGroupMember, getUserByYandexLogin, deleteChat, updateGroup, deleteMessage, editMessage, forwardMessage, signMediaPaths, markChatReadApi, setMessageReaction } from "../api";
 import { extFromBlobType } from "../utils/mediaMime";
 import { compressImage, isGifFileDeep } from "../utils/imageCompress";
@@ -24,15 +26,20 @@ import {
   collectMessageMediaPaths,
   isAlbumImageFile,
 } from "../utils/messageAttachments";
-import type { MessageAttachment } from "@melon/shared";
-import type { Chat, Message, AttachmentMetadata, User } from "@melon/shared";
+import type { Chat, Message, AttachmentMetadata, User, MessageType, StickerItem, StickerPackSummary, MessageAttachment } from "@melon/shared";
+import { buildSystemMessageNodes } from "../utils/systemMessageContent";
 import type { MessageItem } from "../api";
 import { getWsUrl } from "../config";
 import { mediaUrl, mediaDownloadUrl } from "../utils/mediaUrl";
 import { buildReplyTo } from "../utils/messagePreview";
 import { linkifyText } from "../utils/linkify";
 import { parseLocationCoords } from "../utils/yandexMaps";
-import { capturePrependScroll, restorePrependScroll, type PrependScrollState } from "../utils/messageListScroll";
+import {
+  capturePrependScroll,
+  restorePrependScroll,
+  scrollListToBottom,
+  type PrependScrollState,
+} from "../utils/messageListScroll";
 import {
   countUnreadBelowViewport,
   findUnreadBounds,
@@ -70,6 +77,8 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const [groupAvatarCropFile, setGroupAvatarCropFile] = useState<File | null>(null);
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [emojiPanelOpen, setEmojiPanelOpen] = useState(false);
+  const [stickerPackViewId, setStickerPackViewId] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
   const [fileDragActive, setFileDragActive] = useState(false);
   const [contactInfoOpen, setContactInfoOpen] = useState(false);
@@ -100,6 +109,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const selectionMode = selectedIds.size > 0;
   const [readCursors, setReadCursors] = useState<Record<string, string>>({});
+  const [readCursorTimes, setReadCursorTimes] = useState<Record<string, string>>({});
   const readCursorsRef = useRef<Record<string, string>>({});
   const readCursorTimesRef = useRef<Record<string, string>>({});
   const messagesRef = useRef<Message[]>([]);
@@ -114,6 +124,8 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const [reloadNonce, setReloadNonce] = useState(0);
   const lastMarkedReadRef = useRef<string | null>(null);
   const lastMarkedReadChatIdRef = useRef<string | null>(null);
+  const lastPersistedReadRef = useRef<string | null>(null);
+  const markReadRetryRef = useRef<number | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
@@ -137,6 +149,12 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     readCursorsRef.current = map;
     readCursorTimesRef.current = times;
     setReadCursors(map);
+    setReadCursorTimes(times);
+  }
+
+  function canonicalMessageId(messageId: string): string {
+    const found = messagesRef.current.find((m) => m.id.toLowerCase() === messageId.toLowerCase());
+    return found?.id ?? messageId;
   }
 
   function canMarkReadNow(): boolean {
@@ -172,13 +190,49 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     const lastRead = readCursorsRef.current[userKey] ?? readCursorsRef.current[user.id] ?? null;
     const bounds = findUnreadBounds(list, lastRead, user.id, serverUnreadCountRef.current);
 
-    if (stickToBottomRef.current || isMessageVisibleInViewport(listEl, latestId)) {
+    if (stickToBottomRef.current && isMessageVisibleInViewport(listEl, latestId)) {
       return latestId;
     }
     if (bounds.last && isMessageVisibleInViewport(listEl, bounds.last.id)) {
       return bounds.last.id;
     }
     return null;
+  }
+
+  function persistMarkRead(messageId: string, attempt = 0) {
+    if (!chatId || !user?.id) return;
+    const normalized = messageId.toLowerCase();
+    const apiId = canonicalMessageId(messageId);
+
+    if (lastPersistedReadRef.current && compareMessageId(lastPersistedReadRef.current, normalized) >= 0) {
+      serverUnreadCountRef.current = 0;
+      setServerUnreadCount(0);
+      suppressAutoReadRef.current = false;
+      return;
+    }
+
+    const run = async () => {
+      try {
+        if (ready) send({ type: "mark_read", chatId, messageId: apiId });
+        await markChatReadApi(chatId, apiId);
+        lastPersistedReadRef.current = normalized;
+        lastMarkedReadRef.current = normalized;
+        lastMarkedReadChatIdRef.current = chatId;
+        serverUnreadCountRef.current = 0;
+        setServerUnreadCount(0);
+        suppressAutoReadRef.current = false;
+        window.dispatchEvent(new CustomEvent("wm:chat-read", { detail: { chatId } }));
+      } catch (err) {
+        console.warn("mark read failed:", err);
+        if (attempt < 4) {
+          markReadRetryRef.current = window.setTimeout(
+            () => persistMarkRead(messageId, attempt + 1),
+            400 * (attempt + 1)
+          );
+        }
+      }
+    };
+    void run();
   }
 
   function markChatRead(messageId: string) {
@@ -188,25 +242,17 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     const userKey = user.id.toLowerCase();
     const mine = readCursorsRef.current[userKey] ?? readCursorsRef.current[user.id];
     if (mine && compareMessageId(mine, normalized) >= 0) {
-      serverUnreadCountRef.current = 0;
-      setServerUnreadCount(0);
-      suppressAutoReadRef.current = false;
+      persistMarkRead(messageId);
       return;
     }
-    readCursorsRef.current[userKey] = normalized;
-    setReadCursors((prev) => ({ ...prev, [userKey]: normalized }));
     const markedAt = new Date().toISOString();
+    readCursorsRef.current[userKey] = normalized;
     readCursorTimesRef.current[userKey] = markedAt;
+    setReadCursors((prev) => ({ ...prev, [userKey]: normalized }));
+    setReadCursorTimes((prev) => ({ ...prev, [userKey]: markedAt }));
     lastMarkedReadRef.current = normalized;
     lastMarkedReadChatIdRef.current = chatId;
-    serverUnreadCountRef.current = 0;
-    setServerUnreadCount(0);
-    suppressAutoReadRef.current = false;
-    window.dispatchEvent(new CustomEvent("wm:chat-read", { detail: { chatId } }));
-    if (ready) {
-      send({ type: "mark_read", chatId, messageId: normalized });
-    }
-    void markChatReadApi(chatId, normalized).catch(() => {});
+    persistMarkRead(messageId);
   }
 
   function scheduleMarkChatRead(messageId: string) {
@@ -222,12 +268,26 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
 
   function getPeerReaders(m: Message) {
     if (!user?.id || m.senderId.toLowerCase() !== user.id.toLowerCase()) return [];
-    return getMessageReaders(m.id, m.senderId, membersForReadReceipts(), readCursors);
+    return getMessageReaders(
+      m.id,
+      m.senderId,
+      membersForReadReceipts(),
+      readCursors,
+      readCursorTimes,
+      m.createdAt
+    );
   }
 
   function isMessageReadByPeers(m: Message): boolean {
     if (!user?.id || m.senderId.toLowerCase() !== user.id.toLowerCase()) return false;
-    return isMessageReadByAnyPeer(m.id, m.senderId, membersForReadReceipts(), readCursors);
+    return isMessageReadByAnyPeer(
+      m.id,
+      m.senderId,
+      membersForReadReceipts(),
+      readCursors,
+      readCursorTimes,
+      m.createdAt
+    );
   }
 
   useEffect(() => {
@@ -258,9 +318,15 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     setSelectedIds(new Set());
     setReadCursors({});
     readCursorsRef.current = {};
+    setReadCursorTimes({});
     readCursorTimesRef.current = {};
     lastMarkedReadRef.current = null;
     lastMarkedReadChatIdRef.current = null;
+    lastPersistedReadRef.current = null;
+    if (markReadRetryRef.current) {
+      window.clearTimeout(markReadRetryRef.current);
+      markReadRetryRef.current = null;
+    }
     setReplyDraft(null);
     setEditDraft(null);
     stickToBottomRef.current = true;
@@ -342,7 +408,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     return subscribe((msg) => {
       if (msg.type === "message" && msg.message.chatId === chatId) {
         const incoming = msg.message;
-        const fromOther = incoming.senderId !== user?.id;
+        const fromOther = incoming.senderId.toLowerCase() !== user?.id?.toLowerCase();
         const afterAppend = (next: Message[]) => {
           if (fromOther && !stickToBottomRef.current) {
             serverUnreadCountRef.current += 1;
@@ -350,6 +416,8 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
             suppressAutoReadRef.current = true;
           } else if (fromOther && stickToBottomRef.current) {
             scheduleMarkChatRead(incoming.id);
+          } else if (!fromOther && stickToBottomRef.current) {
+            requestAnimationFrame(() => scrollToBottom(false));
           }
           return next;
         };
@@ -388,6 +456,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
         readCursorsRef.current = nextCursors;
         readCursorTimesRef.current = nextTimes;
         setReadCursors(nextCursors);
+        setReadCursorTimes(nextTimes);
       }
       if (msg.type === "reaction" && msg.chatId === chatId) {
         setMessages((prev) =>
@@ -460,8 +529,12 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   useEffect(() => {
     if (!chatId || messages.length === 0 || !user?.id || !canMarkReadNow() || !messagesReady) return;
     if (prependingOlderRef.current || loadingOlderRef.current) return;
+    if (suppressAutoReadRef.current) {
+      refreshUnreadJumpCount();
+      return;
+    }
     tryMarkReadFromScroll();
-  }, [chatId, messages, user?.id, messagesReady, tryMarkReadFromScroll]);
+  }, [chatId, messages, user?.id, messagesReady, tryMarkReadFromScroll, refreshUnreadJumpCount]);
 
   useEffect(() => {
     if (!chatId) return;
@@ -500,6 +573,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
             const mine = myLastReadMessageId.trim().toLowerCase();
             readCursorsRef.current[user.id.toLowerCase()] = mine;
             setReadCursors((prev) => ({ ...prev, [user.id.toLowerCase()]: mine }));
+            lastPersistedReadRef.current = mine;
           }
           suppressAutoReadRef.current = unread > 0;
           setMessages(list as Message[]);
@@ -600,20 +674,25 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
 
   useEffect(() => {
     return () => {
+      if (markReadRetryRef.current) {
+        window.clearTimeout(markReadRetryRef.current);
+        markReadRetryRef.current = null;
+      }
       const id = chatId;
       const lastRead = lastMarkedReadRef.current;
       if (!id || !lastRead || lastMarkedReadChatIdRef.current !== id) return;
-      void markChatReadApi(id, lastRead).catch(() => {});
+      const apiId = canonicalMessageId(lastRead);
+      void markChatReadApi(id, apiId).catch(() => {});
     };
   }, [chatId]);
 
-  const scrollToBottom = useCallback((instant: boolean) => {
+  const scrollToBottom = useCallback((_instant: boolean) => {
     const list = listRef.current;
     if (list) {
-      list.scrollTop = list.scrollHeight;
-      return;
+      scrollListToBottom(list, messagesEndRef.current);
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
     }
-    messagesEndRef.current?.scrollIntoView({ behavior: instant ? "auto" : "smooth", block: "end" });
   }, []);
 
   useEffect(() => {
@@ -652,13 +731,16 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
 
     const snap = () => {
       if (!listRef.current || sessionChatId !== chatId) return;
-      if (firstUnread) {
+      const list = listRef.current;
+      const endEl = messagesEndRef.current;
+      scrollListToBottom(list, endEl);
+      if (firstUnread && !isMessageVisibleInViewport(list, firstUnread.id, 16)) {
         stickToBottomRef.current = false;
-        scrollListToMessage(listRef.current, firstUnread.id, "start", 16);
+        scrollListToMessage(list, firstUnread.id, "start", 16);
       } else {
         stickToBottomRef.current = true;
         suppressAutoReadRef.current = false;
-        listRef.current.scrollTop = listRef.current.scrollHeight;
+        scrollListToBottom(list, endEl);
       }
     };
 
@@ -667,29 +749,17 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     pendingInitialScrollRef.current = false;
     setMessagesReady(true);
     refreshUnreadJumpCount();
-    if (!firstUnread) tryMarkReadFromScroll();
+    tryMarkReadFromScroll();
 
     let refineFrames = 0;
     const refine = () => {
       if (sessionChatId !== chatId) return;
       snap();
       refineFrames += 1;
-      if (refineFrames < 6) requestAnimationFrame(refine);
+      if (refineFrames < 12) requestAnimationFrame(refine);
     };
     requestAnimationFrame(refine);
     requestAnimationFrame(() => tryMarkReadFromScroll());
-
-    const ro = new ResizeObserver(() => {
-      snap();
-      tryMarkReadFromScroll();
-    });
-    ro.observe(list);
-    const maxWait = window.setTimeout(() => ro.disconnect(), 1200);
-
-    return () => {
-      ro.disconnect();
-      window.clearTimeout(maxWait);
-    };
   }, [
     chatId,
     loading,
@@ -722,10 +792,44 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     }
   }, [messages, loading, loadingOlder, messagesReady, scrollToBottom, refreshUnreadJumpCount]);
 
+  useEffect(() => {
+    if (!messagesReady) return;
+    const list = listRef.current;
+    const end = messagesEndRef.current;
+    if (!list || !end) return;
+
+    let raf = 0;
+    const nudgeBottom = () => {
+      if (!stickToBottomRef.current) return;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        if (!stickToBottomRef.current || !listRef.current) return;
+        scrollListToBottom(listRef.current, messagesEndRef.current);
+      });
+    };
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry || !stickToBottomRef.current) return;
+        if (entry.intersectionRatio < 0.99) nudgeBottom();
+      },
+      { root: list, threshold: [0, 0.5, 0.99, 1] }
+    );
+    io.observe(end);
+    list.addEventListener("load", nudgeBottom, true);
+
+    return () => {
+      io.disconnect();
+      list.removeEventListener("load", nudgeBottom, true);
+      cancelAnimationFrame(raf);
+    };
+  }, [messagesReady, chatId]);
+
   function dispatchMessage(
     opts: {
       content: string;
-      messageType?: "text" | "image" | "file" | "video" | "location" | "voice" | "circle";
+      messageType?: MessageType;
       attachmentUrl?: string | null;
       attachmentMetadata?: AttachmentMetadata | null;
     },
@@ -745,11 +849,13 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
       attachmentMetadata: replyMeta,
     });
     playMessageSound("outgoing");
+    stickToBottomRef.current = true;
+    requestAnimationFrame(() => scrollToBottom(false));
   }
 
   async function sendMessage(opts: {
     content: string;
-    messageType?: "text" | "image" | "file" | "video" | "location" | "voice" | "circle";
+    messageType?: MessageType;
     attachmentUrl?: string | null;
     attachmentMetadata?: AttachmentMetadata | null;
   }) {
@@ -773,6 +879,27 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     }
     setInput("");
     await sendMessage({ content: text });
+  }
+
+  function insertEmoji(emoji: string) {
+    setInput((prev) => prev + emoji);
+    composeInputRef.current?.focus();
+  }
+
+  function sendSticker(sticker: StickerItem, pack: StickerPackSummary) {
+    if (!chatId || sending || editDraft) return;
+    setEmojiPanelOpen(false);
+    void sendMessage({
+      content: sticker.emoji,
+      messageType: "sticker",
+      attachmentUrl: sticker.imagePath,
+      attachmentMetadata: {
+        emoji: sticker.emoji,
+        stickerPackId: pack.id,
+        stickerId: sticker.id,
+        mimeType: "image/webp",
+      },
+    });
   }
 
   async function saveEdit(text: string) {
@@ -1426,12 +1553,17 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
                     </div>
                   )}
                   <div className="message-system" data-message-id={m.id}>
-                    <span>{m.content}</span>
+                    <span>
+                      {buildSystemMessageNodes(m.content, (userId) => openProfile(userId), {
+                        mentions: m.attachmentMetadata?.systemMentions,
+                        members: chat?.members,
+                      })}
+                    </span>
                   </div>
                 </div>
               );
             }
-            const naked = mt === "circle" || mt === "voice" || mt === "image";
+            const naked = mt === "circle" || mt === "voice" || mt === "image" || mt === "sticker";
             const own = m.senderId === user?.id;
             const sameSenderCluster =
               chat?.type === "group" &&
@@ -1460,7 +1592,16 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
               onClick={(e) => onMessageRowClick(e, m)}
             >
               {showRowSender && (
-                <div className="message-row-sender">{m.sender?.username ?? "?"}</div>
+                <button
+                  type="button"
+                  className="message-row-sender message-sender-link"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openProfile(m.senderId);
+                  }}
+                >
+                  {m.sender?.username ?? "?"}
+                </button>
               )}
               <div
                 className={`message-row-body${selected ? " is-selected" : ""}`}
@@ -1495,7 +1636,16 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
               onTouchCancel={onMessageTouchEnd}
             >
               {chat?.type === "group" && !own && !showRowSender && (
-                <div className="message-sender">{m.sender?.username ?? "?"}</div>
+                <button
+                  type="button"
+                  className="message-sender message-sender-link"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openProfile(m.senderId);
+                  }}
+                >
+                  {m.sender?.username ?? "?"}
+                </button>
               )}
               {m.attachmentMetadata?.forwardedFrom && (
                 <div className="message-forwarded">
@@ -1550,6 +1700,18 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
                   src={mediaUrl(m.attachmentUrl)}
                   duration={m.attachmentMetadata?.duration}
                 />
+              )}
+              {(m.messageType ?? "text") === "sticker" && m.attachmentUrl && (
+                <button
+                  type="button"
+                  className="message-sticker"
+                  onClick={() => {
+                    const packId = m.attachmentMetadata?.stickerPackId;
+                    if (packId) setStickerPackViewId(packId);
+                  }}
+                >
+                  <img src={mediaUrl(m.attachmentUrl)} alt={m.attachmentMetadata?.emoji ?? "Стикер"} className="message-sticker-img" />
+                </button>
               )}
               {(m.reactions?.length ?? 0) > 0 && (
                 <MessageReactions
@@ -1643,12 +1805,34 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
           onChange={handleFileSelect}
           style={{ display: "none" }}
         />
+        {emojiPanelOpen && !editDraft && (
+          <ComposeEmojiStickerPanel
+            onPickEmoji={insertEmoji}
+            onPickSticker={sendSticker}
+            onClose={() => setEmojiPanelOpen(false)}
+          />
+        )}
         <form onSubmit={handleSubmit} className="compose-form compose-form-inline">
           <div className="compose-attach-wrap">
             <button
               type="button"
+              className={`compose-btn compose-btn-icon compose-btn-emoji${emojiPanelOpen ? " is-active" : ""}`}
+              onClick={() => {
+                setEmojiPanelOpen((o) => !o);
+                setAttachMenuOpen(false);
+              }}
+              disabled={!ready || sending || Boolean(editDraft)}
+              title="Эмодзи и стикеры"
+            >
+              <IconSmile size={22} />
+            </button>
+            <button
+              type="button"
               className="compose-btn compose-btn-icon compose-btn-attach"
-              onClick={() => setAttachMenuOpen((o) => !o)}
+              onClick={() => {
+                setAttachMenuOpen((o) => !o);
+                setEmojiPanelOpen(false);
+              }}
               disabled={!ready || sending || Boolean(editDraft)}
               title="Вложение"
             >
@@ -1687,6 +1871,9 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
         </form>
       </div>
       </div>
+      {stickerPackViewId && (
+        <StickerPackViewModal packId={stickerPackViewId} onClose={() => setStickerPackViewId(null)} />
+      )}
       {lightbox && (
         <ImageLightbox
           images={lightbox.urls}

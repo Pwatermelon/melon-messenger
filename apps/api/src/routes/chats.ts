@@ -132,9 +132,17 @@ async function buildChatDto(
   };
 }
 
-async function publishGroupSystemEvent(chatId: string, actorId: string, content: string): Promise<void> {
+async function publishGroupSystemEvent(
+  chatId: string,
+  actorId: string,
+  content: string,
+  mentions?: { userId: string; username: string }[]
+): Promise<void> {
+  const attachmentMetadata =
+    mentions && mentions.length > 0 ? { systemMentions: mentions } : null;
   const { messageId, createdAt } = await scyllaInsertMessage(chatId, actorId, content, {
     messageType: "system",
+    attachmentMetadata,
   });
   const [actor] = await db.select().from(users).where(eq(users.id, actorId)).limit(1);
   const message: Message = {
@@ -144,6 +152,7 @@ async function publishGroupSystemEvent(chatId: string, actorId: string, content:
     content,
     createdAt: createdAt.toISOString(),
     messageType: "system",
+    attachmentMetadata,
     sender: actor ? toUser(actor) : undefined,
   };
   await publishChatEvent(chatId, { type: "message", message });
@@ -465,7 +474,12 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         .join(", ");
       const [actor] = await db.select().from(users).where(eq(users.id, u.id)).limit(1);
       const text = `${actor?.username ?? "Участник"} добавил(а): ${addedNames}`;
-      await publishGroupSystemEvent(chatId, u.id, text);
+      await publishGroupSystemEvent(chatId, u.id, text, [
+        { userId: u.id, username: actor?.username ?? "Участник" },
+        ...existingUsers
+          .filter((usr) => toAdd.includes(usr.id))
+          .map((usr) => ({ userId: usr.id, username: usr.username })),
+      ]);
       await publishChatEvent(chatId, { type: "chat_members_changed", chatId });
     }
     const members = await db
@@ -521,7 +535,17 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       targetUserId === u.id
         ? `${targetUser?.username ?? "Участник"} покинул(а) группу`
         : `${actor?.username ?? "Участник"} исключил(а) ${targetUser?.username ?? "участника"}`;
-    await publishGroupSystemEvent(chatId, u.id, eventText);
+    await publishGroupSystemEvent(
+      chatId,
+      u.id,
+      eventText,
+      targetUserId === u.id
+        ? [{ userId: targetUserId, username: targetUser?.username ?? "Участник" }]
+        : [
+            { userId: u.id, username: actor?.username ?? "Участник" },
+            { userId: targetUserId, username: targetUser?.username ?? "участника" },
+          ]
+    );
     kickUserFromChat(targetUserId, chatId, { type: "chat_removed", chatId });
     await publishChatEvent(chatId, { type: "chat_members_changed", chatId });
     const members = await db
@@ -887,7 +911,9 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         newAvatar === null
           ? `${actor?.username ?? "Участник"} удалил(а) фото группы`
           : `${actor?.username ?? "Участник"} изменил(а) фото группы`;
-      await publishGroupSystemEvent(chatId, u.id, text);
+      await publishGroupSystemEvent(chatId, u.id, text, [
+        { userId: u.id, username: actor?.username ?? "Участник" },
+      ]);
       await publishChatEvent(chatId, { type: "chat_members_changed", chatId });
     }
     const members = await db
