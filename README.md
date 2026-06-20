@@ -173,7 +173,6 @@ MINIO_ROOT_USER=
 MINIO_ROOT_PASSWORD=
 S3_BUCKET=watermelon-media
 ```
-
 ### Опционально
 
 | Переменные | Назначение |
