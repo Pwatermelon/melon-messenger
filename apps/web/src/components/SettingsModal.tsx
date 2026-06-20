@@ -212,7 +212,6 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
           onCancel={() => setCropFile(null)}
         />
       )}
-      {stickerPacksOpen && <StickerPacksSettings onClose={() => setStickerPacksOpen(false)} />}
       <div
         className="search-overlay settings-overlay"
         data-testid="settings-modal"
@@ -360,7 +359,6 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
                 <span>Стикерпаки</span>
                 <span className="settings-row-chevron" aria-hidden>›</span>
               </button>
-              <p className="settings-card-hint">Создавайте свои наборы или добавляйте чужие из чата.</p>
             </section>
 
             <section className="settings-card">
@@ -405,6 +403,7 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
           </div>
         </div>
       </div>
+      {stickerPacksOpen && <StickerPacksSettings onClose={() => setStickerPacksOpen(false)} />}
     </>
   );
 }

@@ -159,7 +159,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
 
   function canMarkReadNow(): boolean {
     if (typeof document === "undefined") return true;
-    return document.visibilityState === "visible" && document.hasFocus();
+    return document.visibilityState === "visible";
   }
 
   function isMessageSeenForRead(messageId: string): boolean {
@@ -208,6 +208,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
       serverUnreadCountRef.current = 0;
       setServerUnreadCount(0);
       suppressAutoReadRef.current = false;
+      window.dispatchEvent(new CustomEvent("wm:chat-read", { detail: { chatId } }));
       return;
     }
 
@@ -679,10 +680,26 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
         markReadRetryRef.current = null;
       }
       const id = chatId;
+      const list = messagesRef.current;
+      const lastMsg = list[list.length - 1];
+      if (!id || !lastMsg) return;
+
       const lastRead = lastMarkedReadRef.current;
-      if (!id || !lastRead || lastMarkedReadChatIdRef.current !== id) return;
-      const apiId = canonicalMessageId(lastRead);
-      void markChatReadApi(id, apiId).catch(() => {});
+      const atBottom = stickToBottomRef.current;
+      const alreadyMarked =
+        lastRead &&
+        lastMarkedReadChatIdRef.current === id &&
+        compareMessageId(lastRead, lastMsg.id) >= 0;
+
+      if (!atBottom && !alreadyMarked) return;
+
+      const targetId = alreadyMarked ? lastRead! : lastMsg.id;
+      const apiId = canonicalMessageId(targetId);
+      void markChatReadApi(id, apiId)
+        .then(() => {
+          window.dispatchEvent(new CustomEvent("wm:chat-read", { detail: { chatId: id } }));
+        })
+        .catch(() => {});
     };
   }, [chatId]);
 

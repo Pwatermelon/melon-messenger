@@ -228,10 +228,7 @@ export default function ChatInfoModal({
               <button
                 type="button"
                 className="contact-info-member-btn"
-                onClick={() => {
-                  onClose();
-                  openProfile(m.id);
-                }}
+                onClick={() => openProfile(m.id)}
               >
                 <div className="contact-info-member-avatar">
                   {m.avatarUrl ? (
@@ -515,10 +512,7 @@ export default function ChatInfoModal({
             <button
               type="button"
               className="chat-info-action"
-              onClick={() => {
-                onClose();
-                openProfile(otherMember.id);
-              }}
+              onClick={() => openProfile(otherMember.id)}
             >
               <IconUser size={22} />
               <span>Профиль</span>

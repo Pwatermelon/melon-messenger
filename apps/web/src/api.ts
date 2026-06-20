@@ -75,14 +75,22 @@ const chatResponseType = {
 
 export type ChatResponse = typeof chatResponseType;
 
-export async function createGroup(name: string, memberIds: string[]): Promise<ChatResponse> {
+export async function createGroup(
+  name: string,
+  memberIds: string[],
+  avatarUrl?: string | null
+): Promise<ChatResponse> {
   const res = await fetch(`${getApiUrl()}/chats/group`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${getToken()}`,
     },
-    body: JSON.stringify({ name: name.trim(), memberIds }),
+    body: JSON.stringify({
+      name: name.trim(),
+      memberIds,
+      ...(avatarUrl ? { avatarUrl } : {}),
+    }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));

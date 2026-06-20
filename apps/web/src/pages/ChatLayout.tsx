@@ -5,14 +5,16 @@ import AdminConsoleModal from "../components/AdminConsoleModal";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import { useActiveChat } from "../context/ActiveChatContext";
-import { getChats, getChat, createDm, createGroup, searchUser, getContacts, addContact, getChatUnreadCount } from "../api";
+import { getChats, getChat, createDm, createGroup, searchUser, getContacts, addContact, getChatUnreadCount, uploadFile } from "../api";
 import type { Chat, User, Message } from "@melon/shared";
 import { mediaUrl } from "../utils/mediaUrl";
 import { BrandIcon } from "../components/BrandIcon";
 import { IconPlus } from "../components/Icons";
 import { UserListLabel } from "../components/UserListLabel";
 import { ContactPickItem } from "../components/ContactPickItem";
+import ImageCropModal from "../components/ImageCropModal";
 import { userAvatarLetter, userDisplayName } from "../utils/userDisplay";
+import { compressImage } from "../utils/imageCompress";
 import Profile from "./Profile";
 import ChatRoom from "./ChatRoom";
 import { APP_VERSION } from "../version";
@@ -61,6 +63,11 @@ export default function ChatLayout() {
   const [groupAddLogin, setGroupAddLogin] = useState("");
   const [groupAddError, setGroupAddError] = useState("");
   const [groupError, setGroupError] = useState("");
+  const [groupCreating, setGroupCreating] = useState(false);
+  const [groupAvatarPath, setGroupAvatarPath] = useState<string | null>(null);
+  const [groupAvatarPreview, setGroupAvatarPreview] = useState<string | null>(null);
+  const [groupAvatarCropFile, setGroupAvatarCropFile] = useState<File | null>(null);
+  const groupAvatarInputRef = useRef<HTMLInputElement>(null);
   const [sidebarQuery, setSidebarQuery] = useState("");
   const [sidebarUser, setSidebarUser] = useState<{ id: string; username: string; yandexLogin?: string | null; avatarUrl: string | null } | null>(null);
   const [sidebarLoading, setSidebarLoading] = useState(false);
@@ -329,22 +336,63 @@ export default function ChatLayout() {
     }
   }
 
-  async function startGroup() {
-    const name = groupName.trim();
-    if (!name) return;
+  function resetGroupForm() {
+    setGroupName("");
+    setGroupSelected([]);
+    setGroupAddLogin("");
+    setGroupAddError("");
+    setGroupError("");
+    setGroupCreating(false);
+    if (groupAvatarPreview) URL.revokeObjectURL(groupAvatarPreview);
+    setGroupAvatarPreview(null);
+    setGroupAvatarPath(null);
+    setGroupAvatarCropFile(null);
+  }
+
+  function closeGroupModal() {
+    resetGroupForm();
+    setGroupOpen(false);
+  }
+
+  function handleGroupAvatarPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !file.type.startsWith("image/")) return;
+    setGroupAvatarCropFile(file);
+  }
+
+  async function confirmGroupAvatar(cropped: File) {
+    setGroupAvatarCropFile(null);
     setGroupError("");
     try {
+      const compressed = await compressImage(cropped);
+      const preview = URL.createObjectURL(compressed);
+      setGroupAvatarPreview((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return preview;
+      });
+      const { path } = await uploadFile(compressed, { purpose: "profile" });
+      setGroupAvatarPath(path);
+    } catch (err) {
+      setGroupError(err instanceof Error ? err.message : "Не удалось загрузить аватар");
+    }
+  }
+
+  async function startGroup() {
+    const name = groupName.trim();
+    if (!name || groupCreating) return;
+    setGroupError("");
+    setGroupCreating(true);
+    try {
       const ids = groupSelected.map((u) => u.id);
-      const chat = await createGroup(name, ids);
+      const chat = await createGroup(name, ids, groupAvatarPath);
+      resetGroupForm();
       setGroupOpen(false);
-      setGroupName("");
-      setGroupSelected([]);
-      setGroupAddLogin("");
-      setGroupAddError("");
       setChats((prev) => upsertChatInList(prev, { ...(chat as Chat), unreadCount: 0 }));
       await openChat(chat.id);
     } catch (err) {
       setGroupError(err instanceof Error ? err.message : "Не удалось создать группу");
+      setGroupCreating(false);
     }
   }
 
@@ -364,7 +412,10 @@ export default function ChatLayout() {
         setGroupAddError("Пользователь не найден");
         return;
       }
-      if (u.id === user?.id) return;
+      if (u.id === user?.id) {
+        setGroupAddError("Вы уже будете в группе как создатель");
+        return;
+      }
       if (groupSelected.some((x) => x.id === u.id)) return;
       setGroupSelected((prev) => [...prev, { id: u.id, username: userDisplayName(u) }]);
       setGroupAddLogin("");
@@ -570,7 +621,7 @@ export default function ChatLayout() {
                 <button type="button" data-testid="new-dm-btn" onClick={() => { setNewChatMenuOpen(false); setDmOpen(true); }}>
                   Личный чат
                 </button>
-                <button type="button" onClick={() => { setNewChatMenuOpen(false); setGroupError(""); setGroupOpen(true); }}>
+                <button type="button" onClick={() => { setNewChatMenuOpen(false); resetGroupForm(); setGroupOpen(true); }}>
                   Группа
                 </button>
               </div>
@@ -687,22 +738,53 @@ export default function ChatLayout() {
       {groupOpen && (
         <div
           className="search-overlay"
-          onClick={(e) => { if (e.target === e.currentTarget) setGroupOpen(false); }}
+          onClick={(e) => { if (e.target === e.currentTarget) closeGroupModal(); }}
         >
           <div className="search-modal search-modal-wide dm-modal" onClick={(e) => e.stopPropagation()}>
-            <button type="button" className="modal-close" aria-label="Закрыть" onClick={() => setGroupOpen(false)}>
+            <button type="button" className="modal-close" aria-label="Закрыть" onClick={closeGroupModal}>
               ×
             </button>
             <h3>Новая группа</h3>
+            <div className="group-create-header">
+              <input
+                type="file"
+                ref={groupAvatarInputRef}
+                accept="image/*"
+                onChange={handleGroupAvatarPick}
+                style={{ display: "none" }}
+              />
+              <button
+                type="button"
+                className="group-create-avatar"
+                onClick={() => groupAvatarInputRef.current?.click()}
+                aria-label="Выбрать аватар группы"
+              >
+                {groupAvatarPreview ? (
+                  <img src={groupAvatarPreview} alt="" />
+                ) : (
+                  (groupName.trim().slice(0, 1) || "?").toUpperCase()
+                )}
+              </button>
+              <p className="group-create-avatar-hint">Нажмите, чтобы установить фото</p>
+              <input
+                type="text"
+                className="group-create-name-input"
+                placeholder="Название группы"
+                value={groupName}
+                onChange={(e) => setGroupName(e.target.value)}
+                autoFocus
+              />
+            </div>
             <div className="dm-modal-body">
-            <input
-              type="text"
-              placeholder="Название группы"
-              value={groupName}
-              onChange={(e) => setGroupName(e.target.value)}
-              autoFocus
-            />
-            <p className="search-hint">Добавьте участников по логину или из контактов</p>
+            <div className="group-selected">
+              <span className="group-chip group-chip-creator">Вы</span>
+              {groupSelected.map((u) => (
+                <span key={u.id} className="group-chip">
+                  {u.username}
+                  <button type="button" onClick={() => removeFromGroup(u.id)} aria-label="Удалить">×</button>
+                </span>
+              ))}
+            </div>
             <div className="search-id-row">
               <input
                 type="text"
@@ -719,16 +801,6 @@ export default function ChatLayout() {
             </div>
             {groupAddError && <p className="search-error">{groupAddError}</p>}
             {groupError && <p className="search-error">{groupError}</p>}
-            {groupSelected.length > 0 && (
-              <div className="group-selected">
-                {groupSelected.map((u) => (
-                  <span key={u.id} className="group-chip">
-                    {u.username}
-                    <button type="button" onClick={() => removeFromGroup(u.id)} aria-label="Удалить">×</button>
-                  </span>
-                ))}
-              </div>
-            )}
             <p className="dm-contacts-label">Контакты</p>
             <div className="dm-contacts-list">
               {contactsLoading ? (
@@ -755,14 +827,24 @@ export default function ChatLayout() {
                 type="button"
                 className="close btn"
                 onClick={(e) => { e.stopPropagation(); startGroup(); }}
-                disabled={!groupName.trim()}
+                disabled={!groupName.trim() || groupCreating}
               >
-                Создать группу
+                {groupCreating ? "Создание…" : "Создать группу"}
               </button>
             </div>
             </div>
           </div>
         </div>
+      )}
+
+      {groupAvatarCropFile && (
+        <ImageCropModal
+          file={groupAvatarCropFile}
+          variant="avatar"
+          title="Аватар группы"
+          onConfirm={(cropped) => void confirmGroupAvatar(cropped)}
+          onCancel={() => setGroupAvatarCropFile(null)}
+        />
       )}
     </div>
   );

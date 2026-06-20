@@ -62,13 +62,26 @@ export async function resolveUnreadCount(
   lastReadMessageId: string | null
 ): Promise<number> {
   const existing = await getUnreadCount(chatId, userId);
-  if (existing !== null) return existing;
-  let count = 0;
-  try {
-    count = await scyllaCountUnreadMessages(chatId, lastReadMessageId, userId);
-  } catch {
-    count = 0;
+  let count = existing;
+  if (count === null) {
+    try {
+      count = await scyllaCountUnreadMessages(chatId, lastReadMessageId, userId);
+    } catch {
+      count = 0;
+    }
+    await setUnreadCount(chatId, userId, count);
+    return count;
   }
-  await setUnreadCount(chatId, userId, count);
+  if (count > 0) {
+    try {
+      const actual = await scyllaCountUnreadMessages(chatId, lastReadMessageId, userId);
+      if (actual !== count) {
+        await setUnreadCount(chatId, userId, actual);
+        return actual;
+      }
+    } catch {
+      // keep postgres value
+    }
+  }
   return count;
 }

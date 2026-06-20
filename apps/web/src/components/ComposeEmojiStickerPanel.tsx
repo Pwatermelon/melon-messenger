@@ -102,14 +102,16 @@ export default function ComposeEmojiStickerPanel({ onPickEmoji, onPickSticker, o
                     title={p.title}
                     onClick={() => setActivePackId(p.id)}
                   >
-                    {p.title.slice(0, 2)}
+                    {p.title}
                   </button>
                 ))}
               </div>
               {detailLoading ? (
                 <p className="compose-emoji-hint">Загрузка…</p>
               ) : packDetail && activePack ? (
-                <div className="compose-sticker-grid">
+                <>
+                  <p className="compose-sticker-pack-title">{activePack.title}</p>
+                  <div className="compose-sticker-grid">
                   {packDetail.stickers.map((s) => (
                     <button
                       key={s.id}
@@ -121,7 +123,8 @@ export default function ComposeEmojiStickerPanel({ onPickEmoji, onPickSticker, o
                       <img src={s.imageUrl} alt={s.emoji} loading="lazy" />
                     </button>
                   ))}
-                </div>
+                  </div>
+                </>
               ) : (
                 <p className="compose-emoji-hint">Стикеров пока нет</p>
               )}

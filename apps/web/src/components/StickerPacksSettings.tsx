@@ -196,7 +196,7 @@ export default function StickerPacksSettings({ onClose }: Props) {
   }
 
   return (
-    <div className="search-overlay" {...overlayDismiss}>
+    <div className="search-overlay modal-overlay-top" {...overlayDismiss}>
       <div className="search-modal search-modal-wide sticker-packs-settings" onClick={(e) => e.stopPropagation()}>
         <button type="button" className="modal-close" aria-label="Закрыть" onClick={onClose}>
           ×
@@ -230,7 +230,7 @@ export default function StickerPacksSettings({ onClose }: Props) {
                 type="text"
                 value={editTitle}
                 onChange={(e) => setEditTitle(e.target.value)}
-                placeholder="Название стикерпака"
+                placeholder="Название"
               />
               <button type="button" className="btn" disabled={busy || !editTitle.trim()} onClick={() => void handleSaveTitle()}>
                 Сохранить
@@ -285,7 +285,7 @@ export default function StickerPacksSettings({ onClose }: Props) {
                   <div className="search-id-row">
                     <input
                       type="text"
-                      placeholder="Название нового стикерпака"
+                      placeholder="Название"
                       value={newPackTitle}
                       onChange={(e) => setNewPackTitle(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), void handleCreatePack())}

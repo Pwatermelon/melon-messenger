@@ -347,13 +347,19 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
   })
   .post("/group", async ({ user, body, set }) => {
     const u = requireAuth(set)(user);
-    const b = (typeof body === "object" && body !== null ? body : {}) as { name?: string; memberIds?: string[] };
+    const b = (typeof body === "object" && body !== null ? body : {}) as {
+      name?: string;
+      memberIds?: string[];
+      avatarUrl?: string | null;
+    };
     const name = b?.name;
     const memberIds = b?.memberIds;
     if (!name?.trim()) {
       set.status = 400;
       return { error: "name is required" };
     }
+    const avatarUrl =
+      typeof b.avatarUrl === "string" && b.avatarUrl.trim() ? b.avatarUrl.trim() : null;
     const ids = Array.isArray(memberIds) ? [...new Set(memberIds)].filter((id) => id !== u.id) : [];
     if (ids.length > 0) {
       const existing = await db.select().from(users).where(inArray(users.id, ids));
@@ -362,11 +368,19 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         return { error: "Some users not found" };
       }
     }
-    const [chat] = await db.insert(chats).values({ type: "group", name: name.trim() }).returning();
+    const [chat] = await db
+      .insert(chats)
+      .values({ type: "group", name: name.trim(), avatarUrl })
+      .returning();
     await db.insert(chatMembers).values([
       { chatId: chat.id, userId: u.id, role: "admin" },
       ...ids.map((userId) => ({ chatId: chat.id, userId, role: "member" as const })),
     ]);
+    if (avatarUrl) {
+      await ensureChatAvatarRegistered(chat.id, avatarUrl);
+      const filename = filenameFromPath(avatarUrl);
+      if (filename) await grantMediaToChat(filename, chat.id);
+    }
     const members = await db
       .select({ user: users, role: chatMembers.role })
       .from(chatMembers)

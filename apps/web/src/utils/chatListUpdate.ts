@@ -4,8 +4,18 @@ import { messagePreviewText } from "./messagePreview";
 /** Keep server rows as source of truth; retain local-only chats (e.g. just-created DM before list refresh). */
 export function mergeChatLists(local: Chat[], server: Chat[]): Chat[] {
   const serverIds = new Set(server.map((c) => c.id));
+  const localById = new Map(local.map((c) => [c.id, c]));
+  const merged = server.map((s) => {
+    const prior = localById.get(s.id);
+    if (!prior) return s;
+    const localUnread = prior.unreadCount ?? 0;
+    const serverUnread = s.unreadCount ?? 0;
+    // Sidebar already cleared — don't resurrect stale server counter before sync catches up.
+    const unreadCount = localUnread === 0 && serverUnread > 0 ? 0 : serverUnread;
+    return { ...s, unreadCount };
+  });
   const localOnly = local.filter((c) => !serverIds.has(c.id));
-  return sortChatsByRecent([...server, ...localOnly]);
+  return sortChatsByRecent([...merged, ...localOnly]);
 }
 
 export function upsertChatInList(chats: Chat[], chat: Chat): Chat[] {
