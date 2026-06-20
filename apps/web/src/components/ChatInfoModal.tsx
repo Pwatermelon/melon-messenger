@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type RefOb
 import type { Chat, ChatSharedCategory, ChatSharedItem, User } from "@melon/shared";
 import MediaLightbox, { type MediaLightboxItem } from "./MediaLightbox";
 import CircleLightbox from "./CircleLightbox";
+import { CircleVideoThumb } from "./CircleVideoThumb";
 import { VoiceMessagePlayer } from "./VoiceMessagePlayer";
 import { IconBell, IconBellOff, IconFile, IconUser } from "./Icons";
 import { getChatShared, updateChatNotifications } from "../api";
@@ -443,7 +444,10 @@ export default function ChatInfoModal({
                     }
                     aria-label="Открыть кружок"
                   >
-                    <video src={src} muted preload="metadata" className="chat-info-circle-thumb" playsInline />
+                    <CircleVideoThumb
+                      src={src}
+                      poster={item.attachmentMetadata?.posterUrl ? mediaUrl(item.attachmentMetadata.posterUrl) : null}
+                    />
                     <span className="chat-info-media-play" aria-hidden>
                       ▶
                     </span>

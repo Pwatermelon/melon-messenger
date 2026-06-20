@@ -56,10 +56,12 @@ body {
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 input, button, textarea {
@@ -193,8 +195,13 @@ a {
 
 .layout {
   display: flex;
+  position: fixed;
+  inset: 0;
+  width: 100%;
   height: 100vh;
   height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
 }
 
 .sidebar {
@@ -204,6 +211,8 @@ a {
   display: flex;
   flex-direction: column;
   background: var(--surface);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .sidebar-header {
@@ -402,6 +411,8 @@ a {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .chat-list-empty {
@@ -625,6 +636,8 @@ a {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .chat-body {
@@ -633,6 +646,7 @@ a {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 
 .chat-body-drag .messages,
@@ -668,6 +682,7 @@ a {
   align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .chat-header-back {
@@ -1451,7 +1466,12 @@ a {
 
 .messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   padding: 1rem;
   display: flex;
   flex-direction: column;
@@ -2249,6 +2269,7 @@ a {
   padding: 1rem;
   border-top: 1px solid var(--border);
   background: var(--surface);
+  flex-shrink: 0;
 }
 
 .compose form.compose-form {
@@ -2457,8 +2478,18 @@ a {
   line-height: 1.45;
 }
 
-.settings-card .settings-card-hint + .settings-row-link {
-  margin-top: 0.65rem;
+.settings-card:not(.settings-card-flat) .settings-card-title + .settings-row-link {
+  margin: 0.35rem 0 0;
+  padding: 0.75rem 0 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+
+.settings-card:not(.settings-card-flat) .settings-card-hint + .settings-row-link {
+  margin: 0.65rem -1rem -0.85rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
 }
 
 .settings-name-row {
@@ -2531,13 +2562,6 @@ a {
   text-align: left;
   border-radius: var(--radius);
   transition: background 0.15s;
-}
-
-.settings-card:not(.settings-card-flat) .settings-row-link:last-child {
-  margin: 0.35rem -1rem -0.85rem;
-  padding: 0.75rem 1rem;
-  border-top: 1px solid var(--border);
-  border-radius: 0 0 var(--radius) var(--radius);
 }
 
 .settings-row-link:hover {
@@ -4978,8 +5002,12 @@ a {
   border: none;
   padding: 0;
   margin: 0;
-  background: #000;
+  background: var(--border);
   cursor: pointer;
+}
+
+.circle-player-video-btn.has-preview {
+  background: #000;
 }
 
 .circle-player-video {
@@ -5043,7 +5071,7 @@ video.message-circle {
   height: 200px;
   border-radius: 50%;
   object-fit: cover;
-  background: #000;
+  background: var(--border);
 }
 
 .circle-recorder-overlay {
@@ -6239,14 +6267,16 @@ video.message-circle {
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   }
 
-  .layout.layout-compact { flex-direction: column; height: 100dvh; }
+  .layout.layout-compact { flex-direction: column; height: 100dvh; max-height: 100dvh; }
   .layout.layout-compact:not(.layout-chat-open) .main { display: none; }
   .layout.layout-compact.layout-chat-open .sidebar { display: none; }
   .layout.layout-compact.layout-chat-open .main {
     display: flex;
     flex: 1;
+    flex-direction: column;
     width: 100%;
     min-height: 0;
+    overflow: hidden;
   }
   .layout.layout-compact .sidebar {
     width: 100%;
@@ -6254,8 +6284,10 @@ video.message-circle {
     max-height: none;
     border-right: none;
     border-bottom: none;
+    min-height: 0;
+    overflow: hidden;
   }
-  .layout.layout-compact .main { flex: 1; min-height: 0; }
+  .layout.layout-compact .main { flex: 1; min-height: 0; overflow: hidden; }
   .profile-overlay .profile-modal { width: 100%; border-radius: 12px 12px 0 0; align-self: flex-end; }
   .record-circle-preview { width: 150px; height: 150px; }
   .voice-player { max-width: min(280px, 72vw); }
@@ -6506,11 +6538,39 @@ video.message-circle {
 .sticker-packs-settings .sticker-packs-settings-body {
   max-height: min(60vh, 480px);
   overflow-y: auto;
+  padding: 0 1rem 1rem;
+}
+
+.sticker-packs-settings .sticker-pack-editor {
+  padding: 0 1rem 1rem;
+}
+
+.sticker-packs-settings .sticker-packs-settings-body .search-id-row,
+.sticker-packs-settings .sticker-pack-editor .search-id-row,
+.sticker-packs-settings .sticker-pack-editor .sticker-pack-add-row {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.sticker-packs-settings .sticker-packs-settings-body .search-hint,
+.sticker-packs-settings .sticker-pack-editor .search-hint {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.sticker-packs-settings .search-error {
+  margin-left: 1rem;
+  margin-right: 1rem;
 }
 
 .sticker-packs-section h4 {
   margin: 0.75rem 0 0.5rem;
   font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.sticker-packs-section:first-child h4 {
+  margin-top: 0.25rem;
 }
 
 .sticker-packs-list {
@@ -6588,9 +6648,45 @@ video.message-circle {
   margin-top: 0.5rem;
 }
 
-.sticker-pack-add-row .sticker-emoji-input {
-  width: 4rem;
-  margin-top: 0;
+.sticker-pack-pending-preview {
+  display: flex;
+  justify-content: center;
+  margin: 0.65rem 0 0.35rem;
+}
+
+.sticker-pack-pending-preview img {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: var(--border);
+}
+
+.sticker-pack-emoji-picker {
+  margin-top: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.sticker-pack-emoji-picker .compose-emoji-scroll {
+  max-height: min(240px, 35vh);
+}
+
+.sticker-pack-emoji-btn {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 1.25rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.sticker-pack-emoji-btn:hover {
+  border-color: var(--accent);
+  background: rgba(232, 72, 85, 0.08);
 }
 
 .sticker-pack-editor-remove {

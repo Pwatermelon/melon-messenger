@@ -98,6 +98,8 @@ export interface AttachmentMetadata {
   mimeType?: string;
   size?: number;
   duration?: number;
+  /** First-frame JPEG for video circles */
+  posterUrl?: string;
   lat?: number;
   lng?: number;
   attachments?: MessageAttachment[];

@@ -49,6 +49,7 @@ import {
 } from "../utils/chatUnread";
 import { getMessageReaders, isMessageReadByAnyPeer } from "../utils/messageRead";
 import { formatMessageDateLabel, shouldShowDateDivider } from "../utils/messageDates";
+import { captureCirclePoster } from "../utils/circlePoster";
 import { playMessageSound } from "../utils/messageSounds";
 
 type ChatRoomProps = {
@@ -1175,12 +1176,23 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
       const mime = blob.type || "video/webm";
       const ext = extFromBlobType(mime, "video");
       const file = new File([blob], `circle.${ext}`, { type: mime });
+      const posterBlob = await captureCirclePoster(blob);
+      let posterUrl: string | undefined;
+      if (posterBlob) {
+        const posterFile = new File([posterBlob], "circle-poster.jpg", { type: "image/jpeg" });
+        const uploadedPoster = await uploadFile(posterFile);
+        posterUrl = uploadedPoster.path;
+      }
       const { path } = await uploadFile(file);
       await sendMessage({
         content: "Кружок",
         messageType: "circle",
         attachmentUrl: path,
-        attachmentMetadata: { duration: d, mimeType: mime },
+        attachmentMetadata: {
+          duration: d,
+          mimeType: mime,
+          ...(posterUrl ? { posterUrl } : {}),
+        },
       });
     } catch (err) {
       console.error("Circle send failed:", err);
@@ -1715,6 +1727,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
               {(m.messageType ?? "text") === "circle" && m.attachmentUrl && (
                 <CircleMessagePlayer
                   src={mediaUrl(m.attachmentUrl)}
+                  poster={m.attachmentMetadata?.posterUrl ? mediaUrl(m.attachmentMetadata.posterUrl) : null}
                   duration={m.attachmentMetadata?.duration}
                 />
               )}

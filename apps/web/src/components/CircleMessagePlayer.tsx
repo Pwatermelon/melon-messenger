@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconPlay, IconPause } from "./Icons";
 import { canPlayMediaUrl } from "../utils/mediaMime";
 import { claimMediaPlayback, releaseMediaPlayback } from "../utils/mediaPlayback";
+import { attachVideoPreviewHandlers, primeVideoPreviewFrame } from "../utils/videoPreview";
 
 const DEFAULT_SIZE = 220;
 
@@ -16,6 +17,7 @@ type Props = {
   src: string;
   duration?: number;
   size?: number;
+  poster?: string | null;
 };
 
 function formatTime(sec: number): string {
@@ -31,7 +33,7 @@ function angleFromPointer(clientX: number, clientY: number, rect: DOMRect): numb
   return angle / (Math.PI * 2);
 }
 
-export function CircleMessagePlayer({ src, duration: metaDuration, size = DEFAULT_SIZE }: Props) {
+export function CircleMessagePlayer({ src, duration: metaDuration, size = DEFAULT_SIZE, poster }: Props) {
   const { outer, ring, ringHit, r, circumference } = useMemo(() => circleMetrics(size), [size]);
   const cx = outer / 2;
 
@@ -47,19 +49,34 @@ export function CircleMessagePlayer({ src, duration: metaDuration, size = DEFAUL
   const [duration, setDuration] = useState(metaDuration ?? 0);
   const [error, setError] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
+  const [previewReady, setPreviewReady] = useState(Boolean(poster));
+  const posterClearedRef = useRef(false);
 
-  const stopPlayback = useCallback(() => {
+  const primeInitialPreview = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || !video.paused || video.currentTime >= 0.05) return;
+    primeVideoPreviewFrame(video);
+  }, []);
+
+  /** Pause without moving the playhead — used when user pauses or another player takes over. */
+  const interruptPlayback = useCallback(() => {
+    videoRef.current?.pause();
+    setPlaying(false);
+  }, []);
+
+  /** Full reset when the message/source changes. */
+  const resetPlayback = useCallback(() => {
     const video = videoRef.current;
     if (video) {
       video.pause();
-      video.currentTime = 0;
+      primeInitialPreview();
     }
     setPlaying(false);
     setProgress(0);
     setCurrent(0);
-  }, []);
+  }, [primeInitialPreview]);
 
-  stopRef.current = stopPlayback;
+  stopRef.current = interruptPlayback;
 
   const seekFromPointer = useCallback((clientX: number, clientY: number) => {
     const rect = ringRef.current?.getBoundingClientRect();
@@ -150,7 +167,7 @@ export function CircleMessagePlayer({ src, duration: metaDuration, size = DEFAUL
       setPlaying(false);
       setProgress(0);
       setCurrent(0);
-      video.currentTime = 0;
+      primeInitialPreview();
       releaseMediaPlayback(stopRef.current);
     };
     const onVideoError = () => {
@@ -169,13 +186,21 @@ export function CircleMessagePlayer({ src, duration: metaDuration, size = DEFAUL
       video.removeEventListener("ended", onEnd);
       video.removeEventListener("error", onVideoError);
     };
-  }, [src]);
+  }, [src, primeInitialPreview]);
 
   useEffect(() => {
-    stopPlayback();
+    const video = videoRef.current;
+    if (!video) return;
+    posterClearedRef.current = false;
+    setPreviewReady(Boolean(poster));
+    return attachVideoPreviewHandlers(video, () => setPreviewReady(true));
+  }, [src, poster]);
+
+  useEffect(() => {
+    resetPlayback();
     setError(false);
     return () => releaseMediaPlayback(stopRef.current);
-  }, [src, stopPlayback]);
+  }, [src, resetPlayback]);
 
   function togglePlay() {
     const video = videoRef.current;
@@ -186,6 +211,10 @@ export function CircleMessagePlayer({ src, duration: metaDuration, size = DEFAUL
       releaseMediaPlayback(stopRef.current);
     } else {
       setError(false);
+      if (!posterClearedRef.current) {
+        video.removeAttribute("poster");
+        posterClearedRef.current = true;
+      }
       claimMediaPlayback(stopRef.current);
       video.playsInline = true;
       void video.play()
@@ -221,7 +250,7 @@ export function CircleMessagePlayer({ src, duration: metaDuration, size = DEFAUL
       <div className="circle-player" style={{ width: outer, height: outer }}>
       <button
         type="button"
-        className="circle-player-video-btn"
+        className={`circle-player-video-btn${previewReady ? " has-preview" : ""}`}
         onClick={togglePlay}
         disabled={unsupported}
         aria-label={playing ? "Пауза" : "Воспроизвести"}
@@ -230,8 +259,9 @@ export function CircleMessagePlayer({ src, duration: metaDuration, size = DEFAUL
           ref={videoRef}
           className="circle-player-video"
           src={src}
+          poster={poster ?? undefined}
           playsInline
-          preload="metadata"
+          preload={poster ? "none" : "auto"}
           muted={false}
           disablePictureInPicture
           controls={false}

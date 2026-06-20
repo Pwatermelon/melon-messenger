@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { StickerItem, StickerPackDetail, StickerPackSummary } from "@melon/shared";
 import { getStickerPack, getStickerPacksLibrary } from "../api";
-import { EMOJI_GROUPS } from "../utils/emojiData";
+import { EmojiPickerGrid } from "./EmojiPickerPanel";
 
 type Props = {
   onPickEmoji: (emoji: string) => void;
@@ -69,20 +69,7 @@ export default function ComposeEmojiStickerPanel({ onPickEmoji, onPickSticker, o
         </button>
       </div>
       {tab === "emoji" ? (
-        <div className="compose-emoji-scroll">
-          {EMOJI_GROUPS.map((g) => (
-            <div key={g.label} className="compose-emoji-group">
-              <p className="compose-emoji-group-label">{g.label}</p>
-              <div className="compose-emoji-grid">
-                {g.emojis.map((e) => (
-                  <button key={e} type="button" className="compose-emoji-btn" onClick={() => onPickEmoji(e)}>
-                    {e}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+        <EmojiPickerGrid onPick={onPickEmoji} />
       ) : (
         <>
           {packsLoading ? (

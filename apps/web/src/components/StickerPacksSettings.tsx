@@ -12,11 +12,17 @@ import {
   updateStickerPack,
   uploadFile,
 } from "../api";
-import { normalizeStickerImage, STICKER_CANVAS_PX } from "../utils/imageCompress";
+import { normalizeStickerImage } from "../utils/imageCompress";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
+import EmojiPickerPanel from "./EmojiPickerPanel";
 
 type Props = {
   onClose: () => void;
+};
+
+type PendingStickerUpload = {
+  file: File;
+  previewUrl: string;
 };
 
 export default function StickerPacksSettings({ onClose }: Props) {
@@ -30,8 +36,10 @@ export default function StickerPacksSettings({ onClose }: Props) {
   const [editDetail, setEditDetail] = useState<StickerPackDetail | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [newPackTitle, setNewPackTitle] = useState("");
-  const [newStickerEmoji, setNewStickerEmoji] = useState("😀");
   const [busy, setBusy] = useState(false);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [pendingSticker, setPendingSticker] = useState<PendingStickerUpload | null>(null);
+  const [emojiEditStickerId, setEmojiEditStickerId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const reload = useCallback(() => {
@@ -134,31 +142,72 @@ export default function StickerPacksSettings({ onClose }: Props) {
     }
   }
 
+  function closeEmojiPicker() {
+    if (pendingSticker) URL.revokeObjectURL(pendingSticker.previewUrl);
+    setPendingSticker(null);
+    setEmojiEditStickerId(null);
+    setEmojiPickerOpen(false);
+  }
+
   async function handleStickerUpload(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !editPackId || busy) return;
-    setBusy(true);
     setError("");
     try {
       const prepared = await normalizeStickerImage(file);
-      const uploaded = await uploadFile(prepared, { purpose: "sticker" });
-      const sticker = await addStickerToPack(editPackId, newStickerEmoji.trim() || "😀", uploaded.path);
-      setEditDetail((prev) =>
-        prev
-          ? {
-              ...prev,
-              stickers: [...prev.stickers, sticker],
-              stickerCount: prev.stickerCount + 1,
-            }
-          : prev
-      );
-      reload();
+      const previewUrl = URL.createObjectURL(prepared);
+      setPendingSticker((prev) => {
+        if (prev) URL.revokeObjectURL(prev.previewUrl);
+        return { file: prepared, previewUrl };
+      });
+      setEmojiEditStickerId(null);
+      setEmojiPickerOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка загрузки");
+    }
+  }
+
+  async function handleEmojiPick(emoji: string) {
+    if (!editPackId || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      if (pendingSticker) {
+        const uploaded = await uploadFile(pendingSticker.file, { purpose: "sticker" });
+        const sticker = await addStickerToPack(editPackId, emoji, uploaded.path);
+        setEditDetail((prev) =>
+          prev
+            ? {
+                ...prev,
+                stickers: [...prev.stickers, sticker],
+                stickerCount: prev.stickerCount + 1,
+              }
+            : prev
+        );
+        URL.revokeObjectURL(pendingSticker.previewUrl);
+        setPendingSticker(null);
+      } else if (emojiEditStickerId) {
+        const updated = await updateStickerEmoji(editPackId, emojiEditStickerId, emoji);
+        setEditDetail((prev) =>
+          prev ? { ...prev, stickers: prev.stickers.map((s) => (s.id === emojiEditStickerId ? updated : s)) } : prev
+        );
+        setEmojiEditStickerId(null);
+      }
+      setEmojiPickerOpen(false);
+      reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка");
     } finally {
       setBusy(false);
     }
+  }
+
+  function openEmojiPickerForSticker(stickerId: string) {
+    if (pendingSticker) URL.revokeObjectURL(pendingSticker.previewUrl);
+    setPendingSticker(null);
+    setEmojiEditStickerId(stickerId);
+    setEmojiPickerOpen(true);
   }
 
   async function handleDeleteSticker(sticker: StickerItem) {
@@ -183,17 +232,11 @@ export default function StickerPacksSettings({ onClose }: Props) {
     }
   }
 
-  async function handleStickerEmojiChange(sticker: StickerItem, emoji: string) {
-    if (!editPackId) return;
-    try {
-      const updated = await updateStickerEmoji(editPackId, sticker.id, emoji);
-      setEditDetail((prev) =>
-        prev ? { ...prev, stickers: prev.stickers.map((s) => (s.id === sticker.id ? updated : s)) } : prev
-      );
-    } catch {
-      setError("Не удалось обновить emoji");
-    }
-  }
+  useEffect(() => {
+    return () => {
+      if (pendingSticker) URL.revokeObjectURL(pendingSticker.previewUrl);
+    };
+  }, [pendingSticker]);
 
   return (
     <div className="search-overlay modal-overlay-top" {...overlayDismiss}>
@@ -222,7 +265,7 @@ export default function StickerPacksSettings({ onClose }: Props) {
           </div>
         ) : editPackId && editDetail && editDetail.isOwned ? (
           <div className="sticker-pack-editor">
-            <button type="button" className="contact-info-back" onClick={() => { setEditPackId(null); setEditDetail(null); }}>
+            <button type="button" className="contact-info-back" onClick={() => { closeEmojiPicker(); setEditPackId(null); setEditDetail(null); }}>
               ← Назад
             </button>
             <div className="search-id-row">
@@ -237,33 +280,35 @@ export default function StickerPacksSettings({ onClose }: Props) {
               </button>
             </div>
             <div className="sticker-pack-add-row">
-              <input
-                type="text"
-                className="sticker-emoji-input"
-                value={newStickerEmoji}
-                onChange={(e) => setNewStickerEmoji(e.target.value)}
-                placeholder="Emoji"
-                maxLength={8}
-              />
               <button type="button" className="btn" disabled={busy} onClick={() => fileRef.current?.click()}>
                 Загрузить стикер
               </button>
               <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => void handleStickerUpload(e)} />
             </div>
-            <p className="search-hint">
-              Загрузите PNG/WebP и укажите emoji. Картинка будет приведена к {STICKER_CANVAS_PX}×{STICKER_CANVAS_PX} px, как в Telegram.
-            </p>
+            {pendingSticker && (
+              <div className="sticker-pack-pending-preview">
+                <img src={pendingSticker.previewUrl} alt="" />
+              </div>
+            )}
+            {emojiPickerOpen && (
+              <EmojiPickerPanel
+                title={pendingSticker ? "Выберите emoji" : "Emoji стикера"}
+                onPick={(emoji) => void handleEmojiPick(emoji)}
+                onClose={closeEmojiPicker}
+              />
+            )}
             <div className="sticker-pack-editor-grid">
               {editDetail.stickers.map((s) => (
                 <div key={s.id} className="sticker-pack-editor-item">
                   <img src={s.imageUrl} alt={s.emoji} />
-                  <input
-                    type="text"
-                    className="sticker-emoji-input"
-                    value={s.emoji}
-                    maxLength={8}
-                    onChange={(e) => void handleStickerEmojiChange(s, e.target.value)}
-                  />
+                  <button
+                    type="button"
+                    className="sticker-pack-emoji-btn"
+                    onClick={() => openEmojiPickerForSticker(s.id)}
+                    title="Изменить emoji"
+                  >
+                    {s.emoji}
+                  </button>
                   <button type="button" className="sticker-pack-editor-remove" onClick={() => void handleDeleteSticker(s)}>
                     ×
                   </button>
@@ -294,9 +339,7 @@ export default function StickerPacksSettings({ onClose }: Props) {
                       Создать
                     </button>
                   </div>
-                  {owned.length === 0 ? (
-                    <p className="search-hint">Пока нет своих стикерпаков</p>
-                  ) : (
+                  {owned.length > 0 && (
                     <ul className="sticker-packs-list">
                       {owned.map((p) => (
                         <li key={p.id}>
@@ -311,9 +354,7 @@ export default function StickerPacksSettings({ onClose }: Props) {
                 </section>
                 <section className="sticker-packs-section">
                   <h4>Добавленные</h4>
-                  {installed.length === 0 ? (
-                    <p className="search-hint">Нажмите на стикер в чате, чтобы добавить чужой стикерпак</p>
-                  ) : (
+                  {installed.length > 0 && (
                     <ul className="sticker-packs-list">
                       {installed.map((p) => (
                         <li key={p.id} className="sticker-packs-list-row">
