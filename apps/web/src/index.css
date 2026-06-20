@@ -2462,6 +2462,28 @@ a {
   padding: 0;
 }
 
+.settings-card-stack {
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-card-stack > .settings-card-title {
+  margin: 0;
+  padding: 0.85rem 1rem 0.65rem;
+}
+
+.settings-card-stack > .settings-row-link {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+
+.settings-card-stack > .settings-row-link:hover,
+.settings-card-stack > .settings-row-link:focus-visible {
+  border-radius: 0;
+}
+
 .settings-card-title {
   margin: 0 0 0.65rem;
   font-size: 0.75rem;
@@ -2476,13 +2498,6 @@ a {
   font-size: 0.88rem;
   color: var(--muted);
   line-height: 1.45;
-}
-
-.settings-card:not(.settings-card-flat) .settings-card-title + .settings-row-link {
-  margin: 0.35rem 0 0;
-  padding: 0.75rem 0 0;
-  border-top: 1px solid var(--border);
-  border-radius: 0;
 }
 
 .settings-card:not(.settings-card-flat) .settings-card-hint + .settings-row-link {

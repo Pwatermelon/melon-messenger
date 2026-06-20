@@ -353,7 +353,7 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
               </div>
             </section>
 
-            <section className="settings-card">
+            <section className="settings-card settings-card-stack">
               <h3 className="settings-card-title">Стикеры</h3>
               <button type="button" className="settings-row-link" onClick={() => setStickerPacksOpen(true)}>
                 <span>Стикерпаки</span>
