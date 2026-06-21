@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback, type MouseEvent } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import SettingsModal from "../components/SettingsModal";
 import AdminConsoleModal from "../components/AdminConsoleModal";
@@ -137,7 +138,7 @@ export default function ChatLayout() {
     saveActiveFolderId(folderId);
   }
 
-  function openChatContextMenu(e: MouseEvent, chat: Chat) {
+  function openChatContextMenu(e: ReactMouseEvent, chat: Chat) {
     e.preventDefault();
     e.stopPropagation();
     setChatListMenu({ chat, x: e.clientX, y: e.clientY });
