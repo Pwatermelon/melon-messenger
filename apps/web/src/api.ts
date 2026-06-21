@@ -1,4 +1,4 @@
-import type { AttachmentMetadata, ChatSharedCategory, ChatSharedItem, MessageType, StickerItem, StickerPackDetail, StickerPackSummary, User } from "@melon/shared";
+import type { AttachmentMetadata, ChatFolder, ChatSharedCategory, ChatSharedItem, MessageType, StickerItem, StickerPackDetail, StickerPackSummary, User } from "@melon/shared";
 import { getApiUrl } from "./config";
 
 function getToken(): string | null {
@@ -14,6 +14,7 @@ export async function getChats(): Promise<
     lastMessageAt: string | null;
     lastMessagePreview: string | null;
     unreadCount?: number;
+    folderIds?: string[];
     members: Array<{ id: string; username: string; avatarUrl: string | null; subscriptionTier?: string; role: string }>;
   }>
 > {
@@ -458,6 +459,94 @@ export async function setMessageReaction(
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? "Не удалось поставить реакцию");
   return data.reactions ?? [];
+}
+
+export async function markChatReadAllApi(chatId: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/chats/${encodeURIComponent(chatId)}/read-all`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { error?: string }).error ?? "Failed to mark read");
+  }
+}
+
+export async function getChatFolders(): Promise<ChatFolder[]> {
+  const res = await fetch(`${getApiUrl()}/chat-folders`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error("Failed to load folders");
+  const data = (await res.json()) as { folders?: ChatFolder[] };
+  return data.folders ?? [];
+}
+
+export async function createChatFolder(name: string): Promise<ChatFolder> {
+  const res = await fetch(`${getApiUrl()}/chat-folders`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ name }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Failed to create folder");
+  return data.folder;
+}
+
+export async function renameChatFolder(folderId: string, name: string): Promise<ChatFolder> {
+  const res = await fetch(`${getApiUrl()}/chat-folders/${encodeURIComponent(folderId)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ name }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Failed to rename folder");
+  return data.folder;
+}
+
+export async function deleteChatFolder(folderId: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/chat-folders/${encodeURIComponent(folderId)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Failed to delete folder");
+  }
+}
+
+export async function reorderChatFolders(folderIds: string[]): Promise<ChatFolder[]> {
+  const res = await fetch(`${getApiUrl()}/chat-folders/reorder`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}` },
+    body: JSON.stringify({ folderIds }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Failed to reorder folders");
+  return data.folders ?? [];
+}
+
+export async function addChatToFolderApi(folderId: string, chatId: string): Promise<void> {
+  const res = await fetch(
+    `${getApiUrl()}/chat-folders/${encodeURIComponent(folderId)}/chats/${encodeURIComponent(chatId)}`,
+    { method: "PUT", headers: { Authorization: `Bearer ${getToken()}` } }
+  );
+  if (!res.ok) throw new Error("Failed to add to folder");
+}
+
+export async function removeChatFromFolderApi(folderId: string, chatId: string): Promise<void> {
+  const res = await fetch(
+    `${getApiUrl()}/chat-folders/${encodeURIComponent(folderId)}/chats/${encodeURIComponent(chatId)}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${getToken()}` } }
+  );
+  if (!res.ok) throw new Error("Failed to remove from folder");
 }
 
 export async function deleteChat(chatId: string): Promise<void> {

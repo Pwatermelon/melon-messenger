@@ -4,10 +4,10 @@ import MediaLightbox, { type MediaLightboxItem } from "./MediaLightbox";
 import CircleLightbox from "./CircleLightbox";
 import { CircleVideoThumb } from "./CircleVideoThumb";
 import { VoiceMessagePlayer } from "./VoiceMessagePlayer";
-import { IconBell, IconBellOff, IconFile, IconUser } from "./Icons";
-import { ContactPickItem } from "./ContactPickItem";
+import { IconBell, IconBellOff, IconFile, IconPlus, IconUser } from "./Icons";
 import { getChatShared, getContacts, updateChatNotifications } from "../api";
 import { mediaDownloadUrl, mediaUrl } from "../utils/mediaUrl";
+import { userAvatarLetter, userDisplayName, userLoginTag } from "../utils/userDisplay";
 
 type TabId = "participants" | ChatSharedCategory;
 
@@ -43,7 +43,7 @@ type Props = {
   setGroupAddLogin: (v: string) => void;
   groupAddError: string;
   onAddGroupMember: () => void;
-  onAddGroupMemberById: (userId: string) => void;
+  onAddGroupMemberById: (userId: string) => void | Promise<void>;
   onRemoveGroupMember: (userId: string) => void;
   onRequestDeleteChat: () => void;
   onLeaveGroup: () => void;
@@ -106,6 +106,7 @@ export default function ChatInfoModal({
   const [circleLightbox, setCircleLightbox] = useState<{ src: string; duration?: number } | null>(null);
   const [contacts, setContacts] = useState<User[]>([]);
   const [contactsLoading, setContactsLoading] = useState(false);
+  const [addingContactId, setAddingContactId] = useState<string | null>(null);
 
   const memberIds = useMemo(
     () => new Set(chat.members.map((m) => m.id.toLowerCase())),
@@ -227,6 +228,16 @@ export default function ChatInfoModal({
     setLightbox({ items: mediaItems, index });
   }
 
+  async function handlePickContact(userId: string) {
+    if (addingContactId) return;
+    setAddingContactId(userId);
+    try {
+      await onAddGroupMemberById(userId);
+    } finally {
+      setAddingContactId(null);
+    }
+  }
+
   function renderParticipants() {
     if (!isGroup && otherMember) {
       return null;
@@ -241,9 +252,9 @@ export default function ChatInfoModal({
     }
 
     return (
-      <>
+      <div className="chat-info-participants">
         {isGroupAdmin && (
-          <div className="contact-info-group-avatar-block chat-info-group-avatar-inline">
+          <div className="chat-info-group-avatar-row">
             <input
               type="file"
               ref={groupAvatarInputRef}
@@ -253,56 +264,62 @@ export default function ChatInfoModal({
             />
             <button
               type="button"
-              className="contact-info-group-avatar-change"
+              className="chat-info-group-avatar-btn"
               onClick={() => groupAvatarInputRef.current?.click()}
               disabled={sending}
             >
-              Сменить аватар группы
+              Сменить фото группы
             </button>
           </div>
         )}
-        <ul className="contact-info-members">
-          {chat.members.map((m) => (
-            <li key={m.id} className="contact-info-member">
-              <button
-                type="button"
-                className="contact-info-member-btn"
-                onClick={() => openProfile(m.id)}
-              >
-                <div className="contact-info-member-avatar">
-                  {m.avatarUrl ? (
-                    <img src={mediaUrl(m.avatarUrl)} alt="" />
-                  ) : (
-                    (m.username ?? "?").slice(0, 1).toUpperCase()
-                  )}
-                </div>
-                <div className="contact-info-member-body">
-                  <span className="contact-info-member-name">{m.username}</span>
-                  {m.role === "admin" && <span className="chat-info-member-role">админ</span>}
-                </div>
-              </button>
-              {isGroupAdmin && m.id !== currentUserId && (
+
+        <section className="chat-info-section">
+          <h3 className="chat-info-section-title">
+            Участники · {chat.members.length}
+          </h3>
+          <ul className="chat-info-member-list">
+            {chat.members.map((m) => (
+              <li key={m.id} className="chat-info-member-row">
                 <button
                   type="button"
-                  className="contact-info-member-remove"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRemoveGroupMember(m.id);
-                  }}
-                  title="Удалить из группы"
+                  className="chat-info-member-main"
+                  onClick={() => openProfile(m.id)}
                 >
-                  ×
+                  <div className="chat-info-member-avatar">
+                    {m.avatarUrl ? (
+                      <img src={mediaUrl(m.avatarUrl)} alt="" />
+                    ) : (
+                      (m.username ?? "?").slice(0, 1).toUpperCase()
+                    )}
+                  </div>
+                  <div className="chat-info-member-text">
+                    <span className="chat-info-member-name">{m.username}</span>
+                    {m.role === "admin" && <span className="chat-info-member-role">админ</span>}
+                  </div>
                 </button>
-              )}
-            </li>
-          ))}
-        </ul>
+                {isGroupAdmin && m.id !== currentUserId && (
+                  <button
+                    type="button"
+                    className="chat-info-member-remove"
+                    onClick={() => onRemoveGroupMember(m.id)}
+                    title="Удалить из группы"
+                    aria-label="Удалить из группы"
+                  >
+                    ×
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+
         {isGroupAdmin && (
-          <div className="contact-info-add-members">
-            <p className="contact-info-members-label">Добавить по логину или имени</p>
-            <div className="search-id-row">
+          <section className="chat-info-section chat-info-add-section">
+            <h3 className="chat-info-section-title">Добавить участника</h3>
+            <div className="chat-info-add-search">
               <input
                 type="text"
+                className="chat-info-add-input themed-input"
                 placeholder="Логин или имя"
                 value={groupAddLogin}
                 onChange={(e) => setGroupAddLogin(e.target.value)}
@@ -310,38 +327,65 @@ export default function ChatInfoModal({
                 spellCheck={false}
                 autoComplete="off"
               />
-              <button type="button" className="btn" onClick={onAddGroupMember} disabled={!groupAddLogin.trim()}>
+              <button
+                type="button"
+                className="chat-info-add-submit"
+                onClick={onAddGroupMember}
+                disabled={!groupAddLogin.trim()}
+              >
                 Добавить
               </button>
             </div>
-            {groupAddError && <p className="search-error">{groupAddError}</p>}
-            <p className="dm-contacts-label">Контакты</p>
-            <div className="dm-contacts-list">
+            {groupAddError && <p className="chat-info-add-error">{groupAddError}</p>}
+
+            <div className="chat-info-add-contacts">
               {contactsLoading ? (
-                <p className="search-hint">Загрузка…</p>
+                <p className="chat-info-add-hint">Загрузка контактов…</p>
               ) : addableContacts.length === 0 ? (
-                <p className="search-hint">
+                <p className="chat-info-add-hint">
                   {contacts.length === 0
-                    ? "Нет контактов — добавьте из профиля"
+                    ? "Контактов пока нет — добавьте людей через профиль"
                     : "Все контакты уже в группе"}
                 </p>
               ) : (
-                addableContacts.map((c) => (
-                  <ContactPickItem key={c.id} user={c} onClick={() => onAddGroupMemberById(c.id)} />
-                ))
+                <ul className="chat-info-add-contact-list">
+                  {addableContacts.map((c) => {
+                    const busy = addingContactId === c.id;
+                    const tag = userLoginTag(c);
+                    return (
+                      <li key={c.id} className="chat-info-add-contact-row">
+                        <div className="chat-info-add-contact-user">
+                          <div className="chat-info-member-avatar">
+                            {c.avatarUrl ? (
+                              <img src={mediaUrl(c.avatarUrl)} alt="" />
+                            ) : (
+                              userAvatarLetter(c)
+                            )}
+                          </div>
+                          <div className="chat-info-member-text">
+                            <span className="chat-info-member-name">{userDisplayName(c)}</span>
+                            {tag && <span className="chat-info-member-tag">{tag}</span>}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="chat-info-add-contact-btn"
+                          onClick={() => void handlePickContact(c.id)}
+                          disabled={busy || addingContactId !== null}
+                          aria-label={`Добавить ${userDisplayName(c)}`}
+                          title="Добавить в группу"
+                        >
+                          {busy ? "…" : <IconPlus size={18} />}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
             </div>
-          </div>
+          </section>
         )}
-        <button type="button" className="contact-info-remove-btn" onClick={onLeaveGroup}>
-          Покинуть группу
-        </button>
-        {isGroupAdmin && (
-          <button type="button" className="contact-info-remove-btn" onClick={onRequestDeleteChat}>
-            Удалить группу
-          </button>
-        )}
-      </>
+      </div>
     );
   }
 
@@ -611,6 +655,19 @@ export default function ChatInfoModal({
           {tab === "links" && renderLinksTab()}
           {tab === "voice" && renderVoiceTab()}
         </div>
+
+        {isGroup && (
+          <div className="chat-info-footer chat-info-group-footer">
+            <button type="button" className="contact-info-remove-btn" onClick={onLeaveGroup}>
+              Покинуть группу
+            </button>
+            {isGroupAdmin && (
+              <button type="button" className="contact-info-remove-btn" onClick={onRequestDeleteChat}>
+                Удалить группу
+              </button>
+            )}
+          </div>
+        )}
 
         {!isGroup && (
           <div className="chat-info-footer">

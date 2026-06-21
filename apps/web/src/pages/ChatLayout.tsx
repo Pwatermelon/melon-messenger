@@ -1,12 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, type MouseEvent } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import SettingsModal from "../components/SettingsModal";
 import AdminConsoleModal from "../components/AdminConsoleModal";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import { useActiveChat } from "../context/ActiveChatContext";
-import { getChats, getChat, createDm, createGroup, searchUser, getContacts, addContact, uploadFile } from "../api";
-import type { Chat, User, Message } from "@melon/shared";
+import { getChats, getChat, createDm, createGroup, searchUser, getContacts, addContact, uploadFile, getChatFolders, markChatReadAllApi, addChatToFolderApi, removeChatFromFolderApi, deleteChat } from "../api";
+import type { Chat, ChatFolder, User, Message } from "@melon/shared";
+import { VIRTUAL_FOLDER_ALL } from "@melon/shared";
 import { mediaUrl } from "../utils/mediaUrl";
 import { BrandIcon } from "../components/BrandIcon";
 import { IconPlus, IconSettings } from "../components/Icons";
@@ -21,6 +22,13 @@ import { APP_VERSION } from "../version";
 import { applyMessageToChatList, mergeChatLists, upsertChatInList } from "../utils/chatListUpdate";
 import { playMessageSound } from "../utils/messageSounds";
 import { useCompactLayout } from "../hooks/useCompactLayout";
+import {
+  ChatListContextMenu,
+  filterChatsByFolder,
+  loadActiveFolderId,
+  saveActiveFolderId,
+  type ChatListMenuState,
+} from "../components/ChatListContextMenu";
 
 function EmptyChat() {
   return (
@@ -75,6 +83,9 @@ export default function ChatLayout() {
   const [sidebarTab, setSidebarTab] = useState<"chats" | "contacts">("chats");
   const [contacts, setContacts] = useState<User[]>([]);
   const [contactsLoading, setContactsLoading] = useState(false);
+  const [chatFolders, setChatFolders] = useState<ChatFolder[]>([]);
+  const [activeFolderId, setActiveFolderId] = useState(loadActiveFolderId);
+  const [chatListMenu, setChatListMenu] = useState<ChatListMenuState | null>(null);
   const [profileUserId, setProfileUserId] = useState<string | null | undefined>(undefined);
   const newChatMenuRef = useRef<HTMLDivElement>(null);
   const subscribedChatsRef = useRef<Set<string>>(new Set());
@@ -96,6 +107,96 @@ export default function ChatLayout() {
   async function handleAddContact(userId: string) {
     await addContact(userId);
     if (sidebarTab === "contacts") void loadContacts();
+  }
+
+  function loadChatFolders() {
+    void getChatFolders()
+      .then(setChatFolders)
+      .catch(() => setChatFolders([]));
+  }
+
+  useEffect(() => {
+    loadChatFolders();
+    const onFoldersChanged = () => loadChatFolders();
+    window.addEventListener("wm:folders-changed", onFoldersChanged);
+    return () => window.removeEventListener("wm:folders-changed", onFoldersChanged);
+  }, []);
+
+  useEffect(() => {
+    if (activeFolderId === VIRTUAL_FOLDER_ALL) return;
+    if (!chatFolders.some((f) => f.id === activeFolderId)) {
+      setActiveFolderId(VIRTUAL_FOLDER_ALL);
+      saveActiveFolderId(VIRTUAL_FOLDER_ALL);
+    }
+  }, [activeFolderId, chatFolders]);
+
+  const visibleChats = filterChatsByFolder(chats, activeFolderId);
+
+  function selectFolder(folderId: string) {
+    setActiveFolderId(folderId);
+    saveActiveFolderId(folderId);
+  }
+
+  function openChatContextMenu(e: MouseEvent, chat: Chat) {
+    e.preventDefault();
+    e.stopPropagation();
+    setChatListMenu({ chat, x: e.clientX, y: e.clientY });
+  }
+
+  async function handleMarkChatRead(chatId: string) {
+    try {
+      await markChatReadAllApi(chatId);
+      setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, unreadCount: 0 } : c)));
+      window.dispatchEvent(new CustomEvent("wm:chat-read", { detail: { chatId } }));
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleToggleChatFolder(chatId: string, folderId: string, inFolder: boolean) {
+    try {
+      if (inFolder) {
+        await removeChatFromFolderApi(folderId, chatId);
+      } else {
+        await addChatToFolderApi(folderId, chatId);
+      }
+      setChats((prev) =>
+        prev.map((c) => {
+          if (c.id !== chatId) return c;
+          const ids = new Set(c.folderIds ?? []);
+          if (inFolder) ids.delete(folderId);
+          else ids.add(folderId);
+          return { ...c, folderIds: [...ids] };
+        })
+      );
+      setChatListMenu((menu) =>
+        menu?.chat.id === chatId
+          ? {
+              ...menu,
+              chat: {
+                ...menu.chat,
+                folderIds: inFolder
+                  ? (menu.chat.folderIds ?? []).filter((id) => id !== folderId)
+                  : [...(menu.chat.folderIds ?? []), folderId],
+              },
+            }
+          : menu
+      );
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleDeleteChatFromList(chatId: string) {
+    if (!window.confirm("Удалить этот чат?")) return;
+    try {
+      await deleteChat(chatId);
+      setChats((prev) => prev.filter((c) => c.id !== chatId));
+      if (activeChatId === chatId) closeChat();
+      window.dispatchEvent(new CustomEvent("wm:chat-removed", { detail: { chatId } }));
+    } catch {
+      // ignore
+    }
   }
 
   function loadContacts() {
@@ -551,15 +652,42 @@ export default function ChatLayout() {
           <button type="button" className={sidebarTab === "chats" ? "active" : ""} onClick={() => setSidebarTab("chats")}>Чаты</button>
           <button type="button" className={sidebarTab === "contacts" ? "active" : ""} onClick={() => setSidebarTab("contacts")}>Контакты</button>
         </div>
+        {sidebarTab === "chats" && (
+          <div className="chat-folder-tabs" role="tablist" aria-label="Папки чатов">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeFolderId === VIRTUAL_FOLDER_ALL}
+              className={`chat-folder-tab${activeFolderId === VIRTUAL_FOLDER_ALL ? " active" : ""}`}
+              onClick={() => selectFolder(VIRTUAL_FOLDER_ALL)}
+            >
+              Все
+            </button>
+            {chatFolders.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                role="tab"
+                aria-selected={activeFolderId === f.id}
+                className={`chat-folder-tab${activeFolderId === f.id ? " active" : ""}`}
+                onClick={() => selectFolder(f.id)}
+              >
+                {f.name}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="chat-list">
           {sidebarTab === "chats" ? (
           <>
           {loading ? (
             <p className="chat-list-empty">Загрузка…</p>
-          ) : chats.length === 0 ? (
-            <p className="chat-list-empty">Нет чатов</p>
+          ) : visibleChats.length === 0 ? (
+            <p className="chat-list-empty">
+              {chats.length === 0 ? "Нет чатов" : "В этой папке нет чатов"}
+            </p>
           ) : (
-            chats.map((chat) => (
+            visibleChats.map((chat) => (
               <button
                 key={chat.id}
                 type="button"
@@ -567,6 +695,7 @@ export default function ChatLayout() {
                 onClick={() => {
                   void openChat(chat.id);
                 }}
+                onContextMenu={(e) => openChatContextMenu(e, chat)}
               >
                 <div className="chat-item-avatar">
                   {chatAvatar(chat)}
@@ -655,6 +784,18 @@ export default function ChatLayout() {
         <SettingsModal
           onClose={() => setSettingsOpen(false)}
           onOpenAdmin={() => setAdminConsoleOpen(true)}
+        />
+      )}
+      {chatListMenu && (
+        <ChatListContextMenu
+          chat={chatListMenu.chat}
+          folders={chatFolders}
+          x={chatListMenu.x}
+          y={chatListMenu.y}
+          onClose={() => setChatListMenu(null)}
+          onMarkRead={(id) => void handleMarkChatRead(id)}
+          onToggleFolder={(chatId, folderId, inFolder) => void handleToggleChatFolder(chatId, folderId, inFolder)}
+          onDelete={(id) => void handleDeleteChatFromList(id)}
         />
       )}
       {adminConsoleOpen && <AdminConsoleModal open onClose={() => setAdminConsoleOpen(false)} />}

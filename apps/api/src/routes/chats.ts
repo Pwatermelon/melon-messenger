@@ -21,8 +21,9 @@ import {
   signUserMedia,
   filenameFromPath,
 } from "../services/mediaAccess";
+import { getFolderIdsByChatForUser } from "../services/chatFolders";
 import { getReadCursors, getUserReadCursorsByChat } from "../services/readReceipts";
-import { advanceReadCursor } from "../services/chatRead";
+import { advanceReadCursor, markChatFullyRead } from "../services/chatRead";
 import { resolveUnreadCount, incrementUnreadForChat } from "../services/chatUnread";
 import { getReactionsForMessages, setMessageReaction } from "../services/reactions";
 import { trackMessageCreated } from "../services/prometheus";
@@ -84,6 +85,7 @@ type ChatDto = {
   unreadCount?: number;
   notificationsMuted?: boolean;
   dmBlockStatus?: { blockedByMe: boolean; blockedByPeer: boolean };
+  folderIds?: string[];
   members: Array<ReturnType<typeof toUser> & { role: string }>;
 };
 
@@ -248,6 +250,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
 
     const result: ChatDto[] = [];
     const readCursorsByChat = await getUserReadCursorsByChat(u.id);
+    const folderIdsByChat = await getFolderIdsByChatForUser(u.id);
     for (const row of memberChats) {
       const members = await db
         .select({ user: users, role: chatMembers.role })
@@ -291,6 +294,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         lastMessagePreview,
         unreadCount,
         notificationsMuted: row.muted,
+        folderIds: folderIdsByChat.get(row.chatId) ?? [],
         members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
       });
     }
@@ -666,6 +670,30 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       return { error: "Not a member of this chat" };
     }
     const { messageId: resolvedId, updatedAt } = await advanceReadCursor(chatId, u.id, messageId);
+    if (resolvedId) {
+      await publishChatEvent(chatId, {
+        type: "read_receipt",
+        chatId,
+        userId: u.id,
+        messageId: resolvedId,
+        updatedAt: updatedAt ?? new Date().toISOString(),
+      });
+    }
+    return { ok: true, messageId: resolvedId };
+  })
+  .post("/:id/read-all", async ({ user, params, set }) => {
+    const u = requireAuth(set)(user);
+    const { id: chatId } = params;
+    const [member] = await db
+      .select()
+      .from(chatMembers)
+      .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, u.id)))
+      .limit(1);
+    if (!member) {
+      set.status = 403;
+      return { error: "Not a member of this chat" };
+    }
+    const { messageId: resolvedId, updatedAt } = await markChatFullyRead(chatId, u.id);
     if (resolvedId) {
       await publishChatEvent(chatId, {
         type: "read_receipt",

@@ -46,7 +46,21 @@ export interface Chat {
   notificationsMuted?: boolean;
   /** Present in DM when either side has blocked the other */
   dmBlockStatus?: { blockedByMe: boolean; blockedByPeer: boolean };
+  /** Folder ids this chat belongs to (per-user) */
+  folderIds?: string[];
 }
+
+export type ChatFolderKind = "custom";
+
+export interface ChatFolder {
+  id: string;
+  name: string;
+  sortOrder: number;
+  kind: ChatFolderKind;
+}
+
+/** Virtual folder — all chats; not stored on server */
+export const VIRTUAL_FOLDER_ALL = "__all__" as const;
 
 export type ChatSharedCategory = "media" | "files" | "voice" | "links";
 

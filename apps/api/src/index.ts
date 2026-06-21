@@ -10,6 +10,7 @@ import { authRoutes } from "./routes/auth";
 import { adminRoutes } from "./routes/admin";
 import { adminObservabilityRoutes } from "./routes/adminObservability";
 import { chatRoutes } from "./routes/chats";
+import { chatFolderRoutes } from "./routes/chatFolders";
 import { contactRoutes } from "./routes/contacts";
 import { blockRoutes } from "./routes/blocks";
 import { stickerPackRoutes } from "./routes/stickerPacks";
@@ -162,6 +163,34 @@ async function main() {
         PRIMARY KEY (blocker_id, blocked_id)
       )
     `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS chat_folders (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name varchar(100) NOT NULL,
+        sort_order int NOT NULL DEFAULT 0,
+        kind varchar(20) NOT NULL DEFAULT 'custom',
+        created_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS chat_folder_items (
+        user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        folder_id uuid NOT NULL REFERENCES chat_folders(id) ON DELETE CASCADE,
+        chat_id uuid NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (user_id, folder_id, chat_id)
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS chat_folders_user_idx ON chat_folders (user_id)
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS chat_folder_items_user_chat_idx ON chat_folder_items (user_id, chat_id)
+    `);
+    await db.execute(sql`
+      DELETE FROM chat_folders WHERE kind = 'favorites'
+    `);
   } catch (e) {
     console.warn("Schema migration (optional):", e);
   }
@@ -200,6 +229,7 @@ async function main() {
     .use(pushRoutes)
     .use(isE2eEnabled() ? e2eRoutes : new Elysia())
     .use(chatRoutes)
+    .use(chatFolderRoutes)
     .use(contactRoutes)
     .use(blockRoutes)
     .use(stickerPackRoutes)

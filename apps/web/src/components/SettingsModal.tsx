@@ -13,6 +13,7 @@ import BirthdayInfoBlock from "./BirthdayInfoBlock";
 import ImageCropModal from "./ImageCropModal";
 import StickerPacksSettings from "./StickerPacksSettings";
 import BlockedUsersSettings from "./BlockedUsersSettings";
+import ChatFoldersSettings from "./ChatFoldersSettings";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 
 type Props = {
@@ -64,6 +65,7 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
   const [cropFile, setCropFile] = useState<File | null>(null);
   const [stickerPacksOpen, setStickerPacksOpen] = useState(false);
   const [blockedUsersOpen, setBlockedUsersOpen] = useState(false);
+  const [chatFoldersOpen, setChatFoldersOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const yandexLogin = user?.yandexLogin ?? null;
@@ -294,6 +296,14 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
             </section>
 
             <section className="settings-card settings-card-flat">
+              <h3 className="settings-card-title settings-card-title-inset">Чаты</h3>
+              <button type="button" className="settings-row-link" onClick={() => setChatFoldersOpen(true)}>
+                <span>Папки чатов</span>
+                <span className="settings-row-chevron" aria-hidden>›</span>
+              </button>
+            </section>
+
+            <section className="settings-card settings-card-flat">
               <h3 className="settings-card-title settings-card-title-inset">Стикеры</h3>
               <button type="button" className="settings-row-link" onClick={() => setStickerPacksOpen(true)}>
                 <span>Стикерпаки</span>
@@ -414,6 +424,7 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
         </div>
       </div>
       {stickerPacksOpen && <StickerPacksSettings onClose={() => setStickerPacksOpen(false)} />}
+      {chatFoldersOpen && <ChatFoldersSettings onClose={() => setChatFoldersOpen(false)} />}
       {blockedUsersOpen && <BlockedUsersSettings onClose={() => setBlockedUsersOpen(false)} />}
     </>
   );
