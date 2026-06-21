@@ -253,26 +253,6 @@ export default function ChatInfoModal({
 
     return (
       <div className="chat-info-participants">
-        {isGroupAdmin && (
-          <div className="chat-info-group-avatar-row">
-            <input
-              type="file"
-              ref={groupAvatarInputRef}
-              accept="image/*"
-              onChange={onGroupAvatarPick}
-              style={{ display: "none" }}
-            />
-            <button
-              type="button"
-              className="chat-info-group-avatar-btn"
-              onClick={() => groupAvatarInputRef.current?.click()}
-              disabled={sending}
-            >
-              Сменить фото группы
-            </button>
-          </div>
-        )}
-
         <section className="chat-info-section">
           <h3 className="chat-info-section-title">
             Участники · {chat.members.length}
@@ -293,8 +273,10 @@ export default function ChatInfoModal({
                     )}
                   </div>
                   <div className="chat-info-member-text">
-                    <span className="chat-info-member-name">{m.username}</span>
-                    {m.role === "admin" && <span className="chat-info-member-role">админ</span>}
+                    <div className="chat-info-member-name-row">
+                      <span className="chat-info-member-name">{m.username}</span>
+                      {m.role === "admin" && <span className="chat-info-member-role">админ</span>}
+                    </div>
                   </div>
                 </button>
                 {isGroupAdmin && m.id !== currentUserId && (
@@ -590,7 +572,33 @@ export default function ChatInfoModal({
 
         <div className="chat-info-header">
           <div className="chat-info-header-avatar">
-            {headerAvatar ? (
+            {isGroup && isGroupAdmin && (
+              <input
+                type="file"
+                ref={groupAvatarInputRef}
+                accept="image/*"
+                onChange={onGroupAvatarPick}
+                style={{ display: "none" }}
+              />
+            )}
+            {isGroup && isGroupAdmin ? (
+              <button
+                type="button"
+                className="chat-info-header-avatar-btn"
+                onClick={() => groupAvatarInputRef.current?.click()}
+                disabled={sending}
+                title="Сменить фото группы"
+              >
+                {headerAvatar ? (
+                  <img src={headerAvatar} alt="" className="contact-info-avatar" />
+                ) : (
+                  <div className="contact-info-avatar-placeholder">
+                    {headerTitle.slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <span className="chat-info-header-avatar-edit">Сменить фото</span>
+              </button>
+            ) : headerAvatar ? (
               <img src={headerAvatar} alt="" className="contact-info-avatar" />
             ) : (
               <div className="contact-info-avatar-placeholder">
