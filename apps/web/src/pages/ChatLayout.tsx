@@ -890,7 +890,7 @@ export default function ChatLayout() {
           className="search-overlay"
           onClick={(e) => { if (e.target === e.currentTarget) closeGroupModal(); }}
         >
-          <div className="search-modal search-modal-wide dm-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="search-modal search-modal-wide dm-modal group-create-modal" onClick={(e) => e.stopPropagation()}>
             <button type="button" className="modal-close" aria-label="Закрыть" onClick={closeGroupModal}>
               ×
             </button>

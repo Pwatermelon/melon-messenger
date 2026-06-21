@@ -249,7 +249,7 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
               />
               <button
                 type="button"
-                className="settings-hero-avatar-btn"
+                className="profile-avatar-edit"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={saving}
                 aria-label="Сменить аватар"

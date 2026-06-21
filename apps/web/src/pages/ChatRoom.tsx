@@ -15,7 +15,7 @@ import ChatInfoModal from "../components/ChatInfoModal";
 import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo, IconBack, IconChevronDown, IconSmile } from "../components/Icons";
 import ComposeEmojiStickerPanel from "../components/ComposeEmojiStickerPanel";
 import StickerPackViewModal from "../components/StickerPackViewModal";
-import { getChat, getChats, getMessages, uploadFile, addGroupMembers, removeGroupMember, searchUser, deleteChat, updateGroup, deleteMessage, editMessage, forwardMessage, signMediaPaths, markChatReadApi, getChatReadCursors, setMessageReaction } from "../api";
+import { getChat, getChats, getMessages, uploadFile, removeGroupMember, deleteChat, updateGroup, deleteMessage, editMessage, forwardMessage, signMediaPaths, markChatReadApi, getChatReadCursors, setMessageReaction } from "../api";
 import { extFromBlobType } from "../utils/mediaMime";
 import { compressImage, isGifFileDeep } from "../utils/imageCompress";
 import ImageLightbox from "../components/ImageLightbox";
@@ -88,8 +88,6 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const [contactInfoOpen, setContactInfoOpen] = useState(false);
   const [deleteChatConfirmOpen, setDeleteChatConfirmOpen] = useState(false);
   const [deleteChatBusy, setDeleteChatBusy] = useState(false);
-  const [groupAddLogin, setGroupAddLogin] = useState("");
-  const [groupAddError, setGroupAddError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -1597,35 +1595,6 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     }
   }
 
-  async function handleAddGroupMember(userId?: string) {
-    if (!chatId) return;
-    setGroupAddError("");
-    try {
-      let targetId = userId;
-      if (!targetId) {
-        const q = groupAddLogin.trim();
-        if (!q) return;
-        const u = await searchUser(q);
-        if (!u) {
-          setGroupAddError("Пользователь не найден");
-          return;
-        }
-        targetId = u.id;
-      }
-      if (chat?.members.some((m) => m.id === targetId)) {
-        setGroupAddError("Уже в группе");
-        return;
-      }
-      await addGroupMembers(chatId, [targetId]);
-      const fresh = await getChat(chatId);
-      if (fresh) setChat(fresh as Chat);
-      setGroupAddLogin("");
-      window.dispatchEvent(new Event("wm:refresh-chats"));
-    } catch {
-      setGroupAddError("Не удалось добавить участника");
-    }
-  }
-
   async function handleRemoveGroupMember(memberId: string) {
     if (!chatId) return;
     try {
@@ -1797,7 +1766,8 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
                 </div>
               );
             }
-            const naked = mt === "circle" || mt === "voice" || mt === "image" || mt === "sticker";
+            const naked = mt === "circle" || mt === "voice" || mt === "sticker";
+            const hasMediaBubble = mt === "image" || mt === "video";
             const own = user?.id != null && m.senderId.toLowerCase() === user.id.toLowerCase();
             const sameSenderCluster =
               chat?.type === "group" &&
@@ -1862,7 +1832,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
                   </div>
                 )}
             <div
-              className={`message ${own ? "own" : ""}${naked ? " message-naked" : ""}${mt === "circle" ? " message-circle" : ""}${mt === "voice" ? " message-voice" : ""}`}
+              className={`message ${own ? "own" : ""}${naked ? " message-naked" : ""}${hasMediaBubble ? " message-has-media" : ""}${mt === "circle" ? " message-circle" : ""}${mt === "voice" ? " message-voice" : ""}`}
               onClick={(e) => onMessageBubbleClick(e, m)}
               onContextMenu={(e) => onMessageContextMenu(e, m)}
               onTouchStart={(e) => onMessageTouchStart(e, m)}
@@ -2146,16 +2116,14 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
         />
       )}
 
-      {contactInfoOpen && chat && user && (
+      {contactInfoOpen && chat && user && chatId && (
         <ChatInfoModal
           chat={chat}
+          chatId={chatId}
           currentUserId={user.id}
           otherMember={otherMember}
           open={contactInfoOpen}
-          onClose={() => {
-            setContactInfoOpen(false);
-            setGroupAddError("");
-          }}
+          onClose={() => setContactInfoOpen(false)}
           openProfile={openProfile}
           notificationsMuted={chat.notificationsMuted ?? false}
           onNotificationsMutedChange={(muted) => setChat((c) => (c ? { ...c, notificationsMuted: muted } : c))}
@@ -2163,11 +2131,11 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
           sending={sending}
           groupAvatarInputRef={groupAvatarInputRef}
           onGroupAvatarPick={handleGroupAvatarPick}
-          groupAddLogin={groupAddLogin}
-          setGroupAddLogin={setGroupAddLogin}
-          groupAddError={groupAddError}
-          onAddGroupMember={() => void handleAddGroupMember()}
-          onAddGroupMemberById={(id) => void handleAddGroupMember(id)}
+          onMembersChanged={async () => {
+            const fresh = await getChat(chatId);
+            if (fresh) setChat(fresh as Chat);
+            window.dispatchEvent(new Event("wm:refresh-chats"));
+          }}
           onRemoveGroupMember={handleRemoveGroupMember}
           onRequestDeleteChat={requestDeleteChat}
           onLeaveGroup={() => user && handleRemoveGroupMember(user.id)}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import type { ChatFolder } from "@melon/shared";
 import {
@@ -25,6 +25,8 @@ export default function ChatFoldersSettings({ onClose }: Props) {
   const [editName, setEditName] = useState("");
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const pointerDragIdRef = useRef<string | null>(null);
+  const dragOverIdRef = useRef<string | null>(null);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -106,15 +108,6 @@ export default function ChatFoldersSettings({ onClose }: Props) {
     }
   }
 
-  async function moveFolder(index: number, dir: -1 | 1) {
-    const next = index + dir;
-    if (next < 0 || next >= folders.length || busy) return;
-    const reordered = [...folders];
-    const [item] = reordered.splice(index, 1);
-    reordered.splice(next, 0, item!);
-    await persistOrder(reordered);
-  }
-
   function reorderByIds(fromId: string, toId: string) {
     const fromIndex = folders.findIndex((f) => f.id === fromId);
     const toIndex = folders.findIndex((f) => f.id === toId);
@@ -125,38 +118,67 @@ export default function ChatFoldersSettings({ onClose }: Props) {
     return reordered;
   }
 
-  function handleDragStart(e: DragEvent, folderId: string) {
-    if (busy || editingId) {
-      e.preventDefault();
-      return;
-    }
+  function folderIdAtPoint(clientX: number, clientY: number): string | null {
+    const el = document.elementFromPoint(clientX, clientY);
+    const row = el?.closest("[data-folder-id]") as HTMLElement | null;
+    return row?.dataset.folderId ?? null;
+  }
+
+  function setDragTarget(targetId: string | null) {
+    dragOverIdRef.current = targetId;
+    setDragOverId(targetId);
+  }
+
+  function handleGripPointerDown(e: ReactPointerEvent<HTMLButtonElement>, folderId: string) {
+    if (busy || editingId) return;
+    pointerDragIdRef.current = folderId;
     setDraggingId(folderId);
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", folderId);
-  }
-
-  function handleDragEnd() {
-    setDraggingId(null);
-    setDragOverId(null);
-  }
-
-  function handleDragOver(e: DragEvent, folderId: string) {
-    if (!draggingId || draggingId === folderId) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
     e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    setDragOverId(folderId);
   }
 
-  async function handleDrop(e: DragEvent, targetId: string) {
-    e.preventDefault();
-    const fromId = draggingId ?? e.dataTransfer.getData("text/plain");
+  function handleGripPointerMove(e: ReactPointerEvent<HTMLButtonElement>) {
+    const fromId = pointerDragIdRef.current;
+    if (!fromId) return;
+    const targetId = folderIdAtPoint(e.clientX, e.clientY);
+    if (targetId && targetId !== fromId) {
+      setDragTarget(targetId);
+    }
+  }
+
+  async function finishPointerDrag(clientX: number, clientY: number) {
+    const fromId = pointerDragIdRef.current;
+    pointerDragIdRef.current = null;
     setDraggingId(null);
-    setDragOverId(null);
-    if (!fromId || fromId === targetId || busy) return;
-    const reordered = reorderByIds(fromId, targetId);
+    const toId = folderIdAtPoint(clientX, clientY) ?? dragOverIdRef.current;
+    setDragTarget(null);
+    if (!fromId || !toId || fromId === toId || busy) return;
+    const reordered = reorderByIds(fromId, toId);
     if (!reordered) return;
     setFolders(reordered);
     await persistOrder(reordered);
+  }
+
+  async function handleGripPointerUp(e: ReactPointerEvent<HTMLButtonElement>) {
+    if (!pointerDragIdRef.current) return;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+    await finishPointerDrag(e.clientX, e.clientY);
+  }
+
+  async function handleGripPointerCancel(e: ReactPointerEvent<HTMLButtonElement>) {
+    if (!pointerDragIdRef.current) return;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+    pointerDragIdRef.current = null;
+    setDraggingId(null);
+    setDragTarget(null);
   }
 
   const canDrag = !busy && !editingId;
@@ -177,10 +199,6 @@ export default function ChatFoldersSettings({ onClose }: Props) {
         </button>
         <h3>Папки чатов</h3>
         <div className="sticker-packs-settings-body">
-          <p className="search-hint chat-folders-settings-hint">
-            Папка «Все» всегда показывает все диалоги. Свои папки создавайте здесь — порядок совпадает с вкладками в
-            списке чатов. На компьютере порядок меняется перетаскиванием.
-          </p>
           {error && <p className="search-error">{error}</p>}
           {loading ? (
             <p className="search-hint">Загрузка…</p>
@@ -188,47 +206,26 @@ export default function ChatFoldersSettings({ onClose }: Props) {
             <>
               {folders.length > 0 && (
                 <ul className="chat-folders-settings-list">
-                  {folders.map((f, i) => (
+                  {folders.map((f) => (
                     <li
                       key={f.id}
+                      data-folder-id={f.id}
                       className={`chat-folders-settings-row${draggingId === f.id ? " is-dragging" : ""}${dragOverId === f.id ? " is-drag-over" : ""}`}
-                      onDragOver={(e) => handleDragOver(e, f.id)}
-                      onDragLeave={() => setDragOverId((id) => (id === f.id ? null : id))}
-                      onDrop={(e) => void handleDrop(e, f.id)}
                     >
                       <div className="chat-folders-settings-row-main">
                         <button
                           type="button"
                           className="chat-folders-drag-handle"
-                          draggable={canDrag}
                           disabled={!canDrag}
-                          onDragStart={(e) => handleDragStart(e, f.id)}
-                          onDragEnd={handleDragEnd}
+                          onPointerDown={(e) => handleGripPointerDown(e, f.id)}
+                          onPointerMove={handleGripPointerMove}
+                          onPointerUp={(e) => void handleGripPointerUp(e)}
+                          onPointerCancel={(e) => void handleGripPointerCancel(e)}
                           aria-label={`Перетащить папку «${f.name}»`}
-                          title="Перетащить"
+                          title="Удерживайте и перетащите"
                         >
                           <span aria-hidden>⠿</span>
                         </button>
-                        <div className="chat-folders-settings-order chat-folders-settings-order-fallback">
-                          <button
-                            type="button"
-                            className="chat-folders-order-btn"
-                            disabled={busy || i === 0}
-                            onClick={() => void moveFolder(i, -1)}
-                            aria-label="Выше"
-                          >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            className="chat-folders-order-btn"
-                            disabled={busy || i === folders.length - 1}
-                            onClick={() => void moveFolder(i, 1)}
-                            aria-label="Ниже"
-                          >
-                            ↓
-                          </button>
-                        </div>
                         {editingId === f.id ? (
                           <input
                             type="text"

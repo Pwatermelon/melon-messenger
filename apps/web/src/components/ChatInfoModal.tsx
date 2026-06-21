@@ -4,10 +4,10 @@ import MediaLightbox, { type MediaLightboxItem } from "./MediaLightbox";
 import CircleLightbox from "./CircleLightbox";
 import { CircleVideoThumb } from "./CircleVideoThumb";
 import { VoiceMessagePlayer } from "./VoiceMessagePlayer";
+import AddGroupMemberModal from "./AddGroupMemberModal";
 import { IconBell, IconBellOff, IconFile, IconPlus, IconUser } from "./Icons";
-import { getChatShared, getContacts, updateChatNotifications } from "../api";
+import { getChatShared, updateChatNotifications } from "../api";
 import { mediaDownloadUrl, mediaUrl } from "../utils/mediaUrl";
-import { userAvatarLetter, userDisplayName, userLoginTag } from "../utils/userDisplay";
 
 type TabId = "participants" | ChatSharedCategory;
 
@@ -28,6 +28,7 @@ const DM_TABS: { id: ChatSharedCategory; label: string }[] = [
 
 type Props = {
   chat: Chat;
+  chatId: string;
   currentUserId: string;
   otherMember: User | null | undefined;
   open: boolean;
@@ -39,11 +40,7 @@ type Props = {
   sending: boolean;
   groupAvatarInputRef: RefObject<HTMLInputElement>;
   onGroupAvatarPick: (e: ChangeEvent<HTMLInputElement>) => void;
-  groupAddLogin: string;
-  setGroupAddLogin: (v: string) => void;
-  groupAddError: string;
-  onAddGroupMember: () => void;
-  onAddGroupMemberById: (userId: string) => void | Promise<void>;
+  onMembersChanged: () => void | Promise<void>;
   onRemoveGroupMember: (userId: string) => void;
   onRequestDeleteChat: () => void;
   onLeaveGroup: () => void;
@@ -71,6 +68,7 @@ function sharedItemToMedia(item: ChatSharedItem): MediaLightboxItem | null {
 
 export default function ChatInfoModal({
   chat,
+  chatId,
   currentUserId,
   otherMember,
   open,
@@ -82,11 +80,7 @@ export default function ChatInfoModal({
   sending,
   groupAvatarInputRef,
   onGroupAvatarPick,
-  groupAddLogin,
-  setGroupAddLogin,
-  groupAddError,
-  onAddGroupMember,
-  onAddGroupMemberById,
+  onMembersChanged,
   onRemoveGroupMember,
   onRequestDeleteChat,
   onLeaveGroup,
@@ -104,22 +98,9 @@ export default function ChatInfoModal({
   const [loadingTab, setLoadingTab] = useState<ChatSharedCategory | null>(null);
   const [lightbox, setLightbox] = useState<{ items: MediaLightboxItem[]; index: number } | null>(null);
   const [circleLightbox, setCircleLightbox] = useState<{ src: string; duration?: number } | null>(null);
-  const [contacts, setContacts] = useState<User[]>([]);
-  const [contactsLoading, setContactsLoading] = useState(false);
-  const [addingContactId, setAddingContactId] = useState<string | null>(null);
+  const [addMemberOpen, setAddMemberOpen] = useState(false);
 
-  const memberIds = useMemo(
-    () => new Set(chat.members.map((m) => m.id.toLowerCase())),
-    [chat.members]
-  );
-
-  const addableContacts = useMemo(
-    () =>
-      contacts.filter(
-        (c) => c.id.toLowerCase() !== currentUserId.toLowerCase() && !memberIds.has(c.id.toLowerCase())
-      ),
-    [contacts, currentUserId, memberIds]
-  );
+  const memberIds = useMemo(() => chat.members.map((m) => m.id), [chat.members]);
 
   const resetShared = useCallback(() => {
     setSharedByTab({});
@@ -131,31 +112,12 @@ export default function ChatInfoModal({
     if (!open) {
       setLightbox(null);
       setCircleLightbox(null);
+      setAddMemberOpen(false);
       resetShared();
-      setContacts([]);
       return;
     }
     setTab(defaultTab);
   }, [open, resetShared, defaultTab, chat.id]);
-
-  useEffect(() => {
-    if (!open || !isGroupAdmin) return;
-    let cancelled = false;
-    setContactsLoading(true);
-    getContacts()
-      .then((list) => {
-        if (!cancelled) setContacts(list);
-      })
-      .catch(() => {
-        if (!cancelled) setContacts([]);
-      })
-      .finally(() => {
-        if (!cancelled) setContactsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, isGroupAdmin, chat.id]);
 
   useEffect(() => {
     if (!open) return;
@@ -169,11 +131,15 @@ export default function ChatInfoModal({
         setCircleLightbox(null);
         return;
       }
+      if (addMemberOpen) {
+        setAddMemberOpen(false);
+        return;
+      }
       onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, lightbox, circleLightbox, onClose]);
+  }, [open, lightbox, circleLightbox, addMemberOpen, onClose]);
 
   const loadShared = useCallback(async (category: ChatSharedCategory, before?: string) => {
     setLoadingTab(category);
@@ -226,16 +192,6 @@ export default function ChatInfoModal({
   function openMediaAt(index: number) {
     if (mediaItems.length === 0) return;
     setLightbox({ items: mediaItems, index });
-  }
-
-  async function handlePickContact(userId: string) {
-    if (addingContactId) return;
-    setAddingContactId(userId);
-    try {
-      await onAddGroupMemberById(userId);
-    } finally {
-      setAddingContactId(null);
-    }
   }
 
   function renderParticipants() {
@@ -293,80 +249,17 @@ export default function ChatInfoModal({
               </li>
             ))}
           </ul>
+          {isGroupAdmin && (
+            <button
+              type="button"
+              className="btn btn-secondary chat-info-add-member-btn"
+              onClick={() => setAddMemberOpen(true)}
+            >
+              <IconPlus size={18} />
+              Добавить участника
+            </button>
+          )}
         </section>
-
-        {isGroupAdmin && (
-          <section className="chat-info-section chat-info-add-section">
-            <h3 className="chat-info-section-title">Добавить участника</h3>
-            <div className="chat-info-add-search">
-              <input
-                type="text"
-                className="chat-info-add-input themed-input"
-                placeholder="Логин или имя"
-                value={groupAddLogin}
-                onChange={(e) => setGroupAddLogin(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), onAddGroupMember())}
-                spellCheck={false}
-                autoComplete="off"
-              />
-              <button
-                type="button"
-                className="chat-info-add-submit"
-                onClick={onAddGroupMember}
-                disabled={!groupAddLogin.trim()}
-              >
-                Добавить
-              </button>
-            </div>
-            {groupAddError && <p className="chat-info-add-error">{groupAddError}</p>}
-
-            <div className="chat-info-add-contacts">
-              {contactsLoading ? (
-                <p className="chat-info-add-hint">Загрузка контактов…</p>
-              ) : addableContacts.length === 0 ? (
-                <p className="chat-info-add-hint">
-                  {contacts.length === 0
-                    ? "Контактов пока нет — добавьте людей через профиль"
-                    : "Все контакты уже в группе"}
-                </p>
-              ) : (
-                <ul className="chat-info-add-contact-list">
-                  {addableContacts.map((c) => {
-                    const busy = addingContactId === c.id;
-                    const tag = userLoginTag(c);
-                    return (
-                      <li key={c.id} className="chat-info-add-contact-row">
-                        <div className="chat-info-add-contact-user">
-                          <div className="chat-info-member-avatar">
-                            {c.avatarUrl ? (
-                              <img src={mediaUrl(c.avatarUrl)} alt="" />
-                            ) : (
-                              userAvatarLetter(c)
-                            )}
-                          </div>
-                          <div className="chat-info-member-text">
-                            <span className="chat-info-member-name">{userDisplayName(c)}</span>
-                            {tag && <span className="chat-info-member-tag">{tag}</span>}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          className="chat-info-add-contact-btn"
-                          onClick={() => void handlePickContact(c.id)}
-                          disabled={busy || addingContactId !== null}
-                          aria-label={`Добавить ${userDisplayName(c)}`}
-                          title="Добавить в группу"
-                        >
-                          {busy ? "…" : <IconPlus size={18} />}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          </section>
-        )}
       </div>
     );
   }
@@ -572,39 +465,36 @@ export default function ChatInfoModal({
 
         <div className="chat-info-header">
           <div className="chat-info-header-avatar">
-            {isGroup && isGroupAdmin && (
-              <input
-                type="file"
-                ref={groupAvatarInputRef}
-                accept="image/*"
-                onChange={onGroupAvatarPick}
-                style={{ display: "none" }}
-              />
-            )}
-            {isGroup && isGroupAdmin ? (
-              <button
-                type="button"
-                className="chat-info-header-avatar-btn"
-                onClick={() => groupAvatarInputRef.current?.click()}
-                disabled={sending}
-                title="Сменить фото группы"
-              >
-                {headerAvatar ? (
-                  <img src={headerAvatar} alt="" className="contact-info-avatar" />
-                ) : (
-                  <div className="contact-info-avatar-placeholder">
-                    {headerTitle.slice(0, 1).toUpperCase()}
-                  </div>
-                )}
-                <span className="chat-info-header-avatar-edit">Сменить фото</span>
-              </button>
-            ) : headerAvatar ? (
-              <img src={headerAvatar} alt="" className="contact-info-avatar" />
-            ) : (
-              <div className="contact-info-avatar-placeholder">
-                {headerTitle.slice(0, 1).toUpperCase()}
-              </div>
-            )}
+            <div className="profile-avatar-wrap">
+              {isGroup && isGroupAdmin && (
+                <input
+                  type="file"
+                  ref={groupAvatarInputRef}
+                  accept="image/*"
+                  onChange={onGroupAvatarPick}
+                  style={{ display: "none" }}
+                />
+              )}
+              {headerAvatar ? (
+                <img src={headerAvatar} alt="" className="contact-info-avatar" />
+              ) : (
+                <div className="contact-info-avatar-placeholder">
+                  {headerTitle.slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              {isGroup && isGroupAdmin && (
+                <button
+                  type="button"
+                  className="profile-avatar-edit"
+                  onClick={() => groupAvatarInputRef.current?.click()}
+                  disabled={sending}
+                  aria-label="Сменить фото группы"
+                  title="Сменить фото группы"
+                >
+                  📷
+                </button>
+              )}
+            </div>
           </div>
           <p className="chat-info-header-title">{headerTitle}</p>
           {!isGroup && otherMember?.yandexLogin && (
@@ -697,6 +587,15 @@ export default function ChatInfoModal({
             nested
           />
         )}
+
+        <AddGroupMemberModal
+          open={addMemberOpen}
+          onClose={() => setAddMemberOpen(false)}
+          chatId={chatId}
+          currentUserId={currentUserId}
+          memberIds={memberIds}
+          onMemberAdded={onMembersChanged}
+        />
       </div>
     </div>
   );
