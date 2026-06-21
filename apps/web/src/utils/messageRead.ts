@@ -3,6 +3,23 @@ import { compareMessageId } from "./chatUnread";
 
 const READ_SKEW_MS = 2500;
 
+function cursorCoversMessage(
+  cmp: number,
+  lastReadUpdatedAt: string | null | undefined,
+  messageCreatedAt: string | null | undefined
+): boolean {
+  if (cmp < 0) return false;
+  if (!messageCreatedAt || !lastReadUpdatedAt) {
+    return cmp === 0;
+  }
+  const msgAt = Date.parse(messageCreatedAt);
+  const curAt = Date.parse(lastReadUpdatedAt);
+  if (!Number.isFinite(msgAt) || !Number.isFinite(curAt)) {
+    return cmp === 0;
+  }
+  return curAt + READ_SKEW_MS >= msgAt;
+}
+
 export function isMessageReadByCursor(
   messageId: string,
   lastReadMessageId: string | null | undefined,
@@ -11,32 +28,7 @@ export function isMessageReadByCursor(
 ): boolean {
   if (!lastReadMessageId?.trim()) return false;
   const cmp = compareMessageId(lastReadMessageId, messageId);
-  if (cmp < 0) return false;
-
-  if (!messageCreatedAt) {
-    return cmp === 0;
-  }
-
-  const msgAt = Date.parse(messageCreatedAt);
-  if (!Number.isFinite(msgAt)) {
-    return cmp === 0;
-  }
-
-  if (!lastReadUpdatedAt) {
-    return false;
-  }
-
-  const curAt = Date.parse(lastReadUpdatedAt);
-  if (!Number.isFinite(curAt)) {
-    return false;
-  }
-
-  // Cursor must have been updated after the message existed (guards stale/ahead ids).
-  if (curAt + READ_SKEW_MS < msgAt) {
-    return false;
-  }
-
-  return true;
+  return cursorCoversMessage(cmp, lastReadUpdatedAt, messageCreatedAt);
 }
 
 export type MessageReader = {

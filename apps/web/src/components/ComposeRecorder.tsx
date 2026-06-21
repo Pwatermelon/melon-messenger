@@ -325,16 +325,6 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend, onRecordi
     document.addEventListener("touchcancel", onDocTouchEnd, { passive: false });
 
     void (async () => {
-      const p = acquireRecording();
-      startPromiseRef.current = p;
-      await p;
-    })();
-
-    holdTimerRef.current = setTimeout(() => {
-      holdActivatedRef.current = true;
-    }, HOLD_MS);
-
-    void (async () => {
       const p = (async () => {
         const acquired = await acquireRecording();
         if (!acquired) return false;
@@ -343,6 +333,10 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend, onRecordi
       startPromiseRef.current = p;
       await p;
     })();
+
+    holdTimerRef.current = setTimeout(() => {
+      holdActivatedRef.current = true;
+    }, HOLD_MS);
   }
 
   useEffect(() => () => clearPressListeners(), []);

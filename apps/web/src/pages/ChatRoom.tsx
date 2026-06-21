@@ -175,6 +175,17 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     const list = listRef.current;
     if (!list) return false;
     const normalized = messageId.trim().toLowerCase();
+    const userKey = user?.id?.toLowerCase();
+    const latest = messagesRef.current[messagesRef.current.length - 1];
+    if (
+      userKey &&
+      stickToBottomRef.current &&
+      latest &&
+      latest.id.trim().toLowerCase() === normalized &&
+      latest.senderId.toLowerCase() !== userKey
+    ) {
+      return true;
+    }
     return isMessageVisibleInViewport(list, normalized);
   }
 
@@ -196,22 +207,25 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     if (!listEl) return null;
 
     const userKey = user.id.toLowerCase();
-    const lastRead = readCursorsRef.current[userKey] ?? readCursorsRef.current[user.id] ?? null;
-    const bounds = findUnreadBounds(list, lastRead, user.id, serverUnreadCountRef.current);
-
-    if (bounds.last && isMessageVisibleInViewport(listEl, bounds.last.id)) {
-      return bounds.last.id;
-    }
-
     const latest = list[list.length - 1]!;
-    if (
-      stickToBottomRef.current &&
-      latest.senderId.toLowerCase() !== userKey &&
-      isMessageVisibleInViewport(listEl, latest.id)
-    ) {
+
+    if (stickToBottomRef.current && latest.senderId.toLowerCase() !== userKey) {
       return latest.id;
     }
 
+    for (let i = list.length - 1; i >= 0; i--) {
+      const m = list[i]!;
+      if ((m.messageType ?? "text") === "system") continue;
+      if (m.senderId.toLowerCase() === userKey) continue;
+      if (isMessageVisibleInViewport(listEl, m.id)) return m.id;
+      break;
+    }
+
+    const lastRead = readCursorsRef.current[userKey] ?? readCursorsRef.current[user.id] ?? null;
+    const bounds = findUnreadBounds(list, lastRead, user.id, serverUnreadCountRef.current);
+    if (bounds.last && isMessageVisibleInViewport(listEl, bounds.last.id)) {
+      return bounds.last.id;
+    }
     return null;
   }
 

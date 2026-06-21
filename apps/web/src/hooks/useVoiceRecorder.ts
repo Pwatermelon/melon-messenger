@@ -3,7 +3,7 @@ import { isSafariBrowser, pickVoiceMime } from "../utils/mediaMime";
 
 const BAR_COUNT = 14;
 const LEVEL_UPDATE_MS = 80;
-const SAFARI_STOP_FLUSH_MS = 150;
+const SAFARI_STOP_FLUSH_MS = 300;
 
 const VOICE_CONSTRAINTS: MediaStreamConstraints = {
   audio: {
@@ -140,8 +140,7 @@ export function useVoiceRecorder() {
         if (e.data.size) chunksRef.current.push(e.data);
       };
       mediaRecorderRef.current = recorder;
-      if (isSafariBrowser()) recorder.start();
-      else recorder.start(250);
+      recorder.start(250);
 
       const analysisStream = typeof stream.clone === "function" ? stream.clone() : stream;
       startAnalyser(analysisStream);
@@ -201,10 +200,17 @@ export function useVoiceRecorder() {
         const blob = new Blob(chunksRef.current, { type: mime });
         resolve({ blob, duration: wallDuration });
       };
+      const finishWhenReady = (attempt = 0) => {
+        const size = chunksRef.current.reduce((n, c) => n + c.size, 0);
+        if (size > 0 || attempt >= 6) {
+          finish();
+          return;
+        }
+        setTimeout(() => finishWhenReady(attempt + 1), 50);
+      };
       recorder.onstop = () => {
-        const delay = isSafariBrowser() ? SAFARI_STOP_FLUSH_MS : 0;
-        if (delay) setTimeout(finish, delay);
-        else requestAnimationFrame(() => requestAnimationFrame(finish));
+        const delay = isSafariBrowser() ? SAFARI_STOP_FLUSH_MS : 50;
+        setTimeout(() => finishWhenReady(), delay);
       };
       if (recorder.state === "recording") {
         try {
