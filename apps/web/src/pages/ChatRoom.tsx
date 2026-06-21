@@ -114,7 +114,6 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const selectionMode = selectedIds.size > 0;
   const [readCursors, setReadCursors] = useState<Record<string, string>>({});
-  const [readCursorTimes, setReadCursorTimes] = useState<Record<string, string>>({});
   const readCursorsRef = useRef<Record<string, string>>({});
   const readCursorTimesRef = useRef<Record<string, string>>({});
   const messagesRef = useRef<Message[]>([]);
@@ -157,7 +156,6 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     readCursorsRef.current = map;
     readCursorTimesRef.current = times;
     setReadCursors(map);
-    setReadCursorTimes(times);
   }
 
   function canonicalMessageId(messageId: string): string {
@@ -262,7 +260,6 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     readCursorsRef.current[userKey] = normalized;
     readCursorTimesRef.current[userKey] = markedAt;
     setReadCursors((prev) => ({ ...prev, [userKey]: normalized }));
-    setReadCursorTimes((prev) => ({ ...prev, [userKey]: markedAt }));
     lastMarkedReadRef.current = normalized;
     lastMarkedReadChatIdRef.current = chatId;
     persistMarkRead(messageId);
@@ -300,7 +297,6 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     setSelectedIds(new Set());
     setReadCursors({});
     readCursorsRef.current = {};
-    setReadCursorTimes({});
     readCursorTimesRef.current = {};
     lastMarkedReadRef.current = null;
     lastMarkedReadChatIdRef.current = null;
@@ -564,7 +560,6 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
         readCursorsRef.current = nextCursors;
         readCursorTimesRef.current = nextTimes;
         setReadCursors(nextCursors);
-        setReadCursorTimes(nextTimes);
       }
       if (msg.type === "reaction" && msg.chatId === chatId) {
         setMessages((prev) =>
@@ -711,7 +706,6 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
             const ownCursor = cursors?.find((c) => c.userId.toLowerCase() === userKey);
             if (ownCursor?.updatedAt) {
               readCursorTimesRef.current[userKey] = ownCursor.updatedAt;
-              setReadCursorTimes((prev) => ({ ...prev, [userKey]: ownCursor.updatedAt! }));
             }
           }
           suppressAutoReadRef.current = unread > 0;
