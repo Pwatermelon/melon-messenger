@@ -3,23 +3,6 @@ import { compareMessageId } from "./chatUnread";
 
 const READ_SKEW_MS = 2500;
 
-function cursorCoversMessage(
-  cmp: number,
-  lastReadUpdatedAt: string | null | undefined,
-  messageCreatedAt: string | null | undefined
-): boolean {
-  if (cmp < 0) return false;
-  if (!messageCreatedAt || !lastReadUpdatedAt) {
-    return cmp === 0;
-  }
-  const msgAt = Date.parse(messageCreatedAt);
-  const curAt = Date.parse(lastReadUpdatedAt);
-  if (!Number.isFinite(msgAt) || !Number.isFinite(curAt)) {
-    return cmp === 0;
-  }
-  return curAt + READ_SKEW_MS >= msgAt;
-}
-
 export function isMessageReadByCursor(
   messageId: string,
   lastReadMessageId: string | null | undefined,
@@ -28,7 +11,18 @@ export function isMessageReadByCursor(
 ): boolean {
   if (!lastReadMessageId?.trim()) return false;
   const cmp = compareMessageId(lastReadMessageId, messageId);
-  return cursorCoversMessage(cmp, lastReadUpdatedAt, messageCreatedAt);
+  if (cmp < 0) return false;
+  if (cmp > 0) return true;
+
+  // Cursor points at this exact message — guard stale id backfill (retention clamp).
+  if (messageCreatedAt && lastReadUpdatedAt) {
+    const msgAt = Date.parse(messageCreatedAt);
+    const curAt = Date.parse(lastReadUpdatedAt);
+    if (Number.isFinite(msgAt) && Number.isFinite(curAt) && curAt + READ_SKEW_MS < msgAt) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export type MessageReader = {

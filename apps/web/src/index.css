@@ -270,18 +270,19 @@ a {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   background: var(--border);
   color: var(--text);
   text-decoration: none;
-  font-size: 1.1rem;
   transition: background 0.15s;
   border: none;
   padding: 0;
   cursor: pointer;
   font-family: inherit;
+  line-height: 0;
 }
 
 .sidebar-settings-btn:hover {
@@ -1815,6 +1816,8 @@ a {
   border-bottom-left-radius: 12px;
   --reaction-chip-bg: rgba(0, 0, 0, 0.28);
   --reaction-chip-border: rgba(255, 255, 255, 0.32);
+  --own-meta-color: rgba(255, 255, 255, 0.8);
+  --own-meta-subtle: rgba(255, 255, 255, 0.75);
 }
 
 .message-sender {
@@ -1853,7 +1856,7 @@ a {
 }
 
 .message.own .message-edited {
-  color: rgba(255,255,255,0.75);
+  color: var(--own-meta-subtle);
 }
 
 .message-meta {
@@ -1869,7 +1872,7 @@ a {
 }
 
 .message.own .message-time {
-  color: rgba(255,255,255,0.8);
+  color: var(--own-meta-color);
 }
 
 .message-read-receipt {
@@ -5375,7 +5378,7 @@ a {
 }
 
 .message.own .circle-player-time {
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--own-meta-subtle);
 }
 
 .message.message-naked.message-voice .message-meta {
@@ -6212,6 +6215,29 @@ video.message-circle {
 
 .message.own.message-naked {
   color: inherit;
+  --own-meta-color: var(--muted);
+  --own-meta-subtle: var(--muted);
+}
+
+.message.own.message-naked .message-forwarded {
+  color: var(--accent);
+}
+
+.message.own.message-naked .message-reply-quote {
+  background: rgba(127, 127, 127, 0.12);
+  border-left-color: var(--accent);
+}
+
+.message.own.message-naked .message-reply-author {
+  color: var(--accent);
+}
+
+.message.own.message-naked .message-reply-text {
+  color: var(--muted);
+}
+
+.message.own.message-naked .message-link {
+  color: var(--accent);
 }
 
 .compose-btn-record,
@@ -6637,6 +6663,7 @@ video.message-circle {
   max-height: min(280px, 40vh);
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .compose-emoji-panel-tabs {
@@ -6654,9 +6681,11 @@ video.message-circle {
   color: var(--muted);
   font-size: 0.85rem;
   font-weight: 500;
+  line-height: 1.25;
   padding: 0.35rem 0.65rem;
   border-radius: 8px;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .compose-emoji-panel-tab.is-active {
@@ -6684,6 +6713,8 @@ video.message-circle {
 .compose-emoji-scroll {
   overflow-y: auto;
   padding: 0.35rem 0.5rem 0.5rem;
+  flex: 1;
+  min-height: 0;
 }
 
 .compose-emoji-group-label {
@@ -6694,8 +6725,8 @@ video.message-circle {
 
 .compose-emoji-grid {
   display: grid;
-  grid-template-columns: repeat(9, 1fr);
-  gap: 0;
+  grid-template-columns: repeat(auto-fill, 2.25rem);
+  gap: 2px;
 }
 
 .compose-emoji-btn {
@@ -6705,14 +6736,13 @@ video.message-circle {
   line-height: 1;
   padding: 0;
   margin: 0;
-  width: 100%;
-  aspect-ratio: 1;
+  width: 2.25rem;
+  height: 2.25rem;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 6px;
   cursor: pointer;
-  min-width: 0;
 }
 
 .compose-emoji-btn:hover {
@@ -6728,14 +6758,18 @@ video.message-circle {
   text-align: center;
   color: var(--muted);
   font-size: 0.88rem;
+  flex-shrink: 0;
 }
 
 .compose-sticker-pack-tabs {
   display: flex;
+  align-items: center;
   gap: 0.25rem;
   padding: 0.35rem 0.5rem;
   overflow-x: auto;
+  overflow-y: hidden;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .compose-sticker-pack-tab {
@@ -6746,7 +6780,9 @@ video.message-circle {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 500;
-  padding: 0.3rem 0.55rem;
+  line-height: 1.25;
+  min-height: 1.75rem;
+  padding: 0.35rem 0.6rem;
   border-radius: 8px;
   cursor: pointer;
   overflow: hidden;
@@ -6761,22 +6797,25 @@ video.message-circle {
 
 .compose-sticker-pack-title {
   margin: 0;
-  padding: 0.45rem 0.75rem 0;
+  padding: 0.45rem 0.75rem 0.35rem;
   font-size: 0.8rem;
   font-weight: 600;
+  line-height: 1.3;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .compose-sticker-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(4rem, 4rem));
   gap: 0.15rem;
   padding: 0.5rem;
   overflow-y: auto;
-  max-height: 200px;
+  flex: 1;
+  min-height: 0;
 }
 
 .compose-sticker-btn {
@@ -6785,7 +6824,8 @@ video.message-circle {
   padding: 0.1rem;
   border-radius: 8px;
   cursor: pointer;
-  aspect-ratio: 1;
+  width: 4rem;
+  height: 4rem;
   display: flex;
   align-items: center;
   justify-content: center;

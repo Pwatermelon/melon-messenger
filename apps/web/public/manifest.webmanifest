@@ -2,6 +2,7 @@
   "name": "Watermelon Messenger",
   "short_name": "Watermelon",
   "description": "Мессенджер Watermelon",
+  "lang": "ru",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",

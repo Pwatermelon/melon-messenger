@@ -8,7 +8,12 @@ import { registerServiceWorker } from "./lib/pushNotifications";
 import { unlockMessageSounds } from "./utils/messageSounds";
 
 const savedTheme = typeof window !== "undefined" && (localStorage.getItem("wm_theme") === "light" || localStorage.getItem("melon_theme") === "light") ? "light" : "dark";
-if (typeof document !== "undefined") document.documentElement.setAttribute("data-theme", savedTheme);
+if (typeof document !== "undefined") {
+  const html = document.documentElement;
+  html.lang = "ru";
+  html.setAttribute("translate", "no");
+  html.setAttribute("data-theme", savedTheme);
+}
 
 registerServiceWorker();
 

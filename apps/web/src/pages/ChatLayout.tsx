@@ -9,7 +9,7 @@ import { getChats, getChat, createDm, createGroup, searchUser, getContacts, addC
 import type { Chat, User, Message } from "@melon/shared";
 import { mediaUrl } from "../utils/mediaUrl";
 import { BrandIcon } from "../components/BrandIcon";
-import { IconPlus } from "../components/Icons";
+import { IconPlus, IconSettings } from "../components/Icons";
 import { UserListLabel } from "../components/UserListLabel";
 import { ContactPickItem } from "../components/ContactPickItem";
 import ImageCropModal from "../components/ImageCropModal";
@@ -489,7 +489,7 @@ export default function ChatLayout() {
             data-testid="settings-btn"
             onClick={() => setSettingsOpen(true)}
           >
-            ⚙
+            <IconSettings size={18} />
           </button>
         </div>
         <div className="sidebar-search">

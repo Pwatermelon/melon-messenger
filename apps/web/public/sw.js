@@ -1,4 +1,4 @@
-const CACHE = "wm-static-v1";
+const CACHE = "wm-static-v2";
 const OFFLINE_URLS = ["/", "/index.html"];
 
 self.addEventListener("install", (event) => {
