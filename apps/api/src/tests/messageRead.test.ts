@@ -5,13 +5,11 @@ describe("isMessageReadByCursor", () => {
   const msgId = "00000000-0000-0000-0000-000000000010";
   const laterId = "00000000-0000-0000-0000-000000000020";
   const msgAt = "2026-06-21T10:00:00.000Z";
-
-  test("cursor ahead of message counts as read without timestamps", () => {
-    expect(isMessageReadByCursor(msgId, laterId)).toBe(true);
-  });
+  const readAt = "2026-06-21T10:00:02.000Z";
+  const staleReadAt = "2026-06-21T09:00:00.000Z";
 
   test("cursor behind message is unread", () => {
-    expect(isMessageReadByCursor(laterId, msgId)).toBe(false);
+    expect(isMessageReadByCursor(laterId, msgId, readAt, msgAt)).toBe(false);
   });
 
   test("exact cursor without timestamps counts as read", () => {
@@ -19,20 +17,22 @@ describe("isMessageReadByCursor", () => {
   });
 
   test("exact cursor with stale timestamp is not read", () => {
-    expect(
-      isMessageReadByCursor(msgId, msgId, "2026-06-21T09:00:00.000Z", msgAt)
-    ).toBe(false);
+    expect(isMessageReadByCursor(msgId, msgId, staleReadAt, msgAt)).toBe(false);
   });
 
   test("exact cursor updated after message is read", () => {
-    expect(
-      isMessageReadByCursor(msgId, msgId, "2026-06-21T10:00:01.000Z", msgAt)
-    ).toBe(true);
+    expect(isMessageReadByCursor(msgId, msgId, readAt, msgAt)).toBe(true);
   });
 
-  test("cursor ahead ignores stale timestamp on exact check path", () => {
-    expect(
-      isMessageReadByCursor(msgId, laterId, "2026-06-21T09:00:00.000Z", msgAt)
-    ).toBe(true);
+  test("cursor ahead without timestamps is not read", () => {
+    expect(isMessageReadByCursor(msgId, laterId)).toBe(false);
+  });
+
+  test("cursor ahead with stale timestamp is not read", () => {
+    expect(isMessageReadByCursor(msgId, laterId, staleReadAt, msgAt)).toBe(false);
+  });
+
+  test("cursor ahead with valid read time counts earlier message as read", () => {
+    expect(isMessageReadByCursor(msgId, laterId, readAt, msgAt)).toBe(true);
   });
 });
