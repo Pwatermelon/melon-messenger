@@ -2272,6 +2272,22 @@ a {
   flex-shrink: 0;
 }
 
+.compose.compose-blocked {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3.5rem;
+  padding: 1rem 1.25rem;
+}
+
+.compose.compose-blocked p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.4;
+}
+
 .compose form.compose-form {
   display: flex;
   flex-direction: column;
@@ -2433,6 +2449,8 @@ a {
 }
 
 .settings-modal-body {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 1rem 1rem 1.25rem;
   display: flex;
@@ -2462,9 +2480,18 @@ a {
   padding: 0;
 }
 
+.settings-card-title-inset {
+  margin: 0;
+  padding: 0.85rem 1rem 0.65rem;
+}
+
+.settings-card-flat > .settings-row-link {
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
 .settings-card-stack {
   padding: 0;
-  overflow: hidden;
 }
 
 .settings-card-stack > .settings-card-title {
@@ -2476,12 +2503,12 @@ a {
   margin: 0;
   padding: 0.85rem 1rem;
   border-top: 1px solid var(--border);
-  border-radius: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
 }
 
 .settings-card-stack > .settings-row-link:hover,
 .settings-card-stack > .settings-row-link:focus-visible {
-  border-radius: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
 }
 
 .settings-card-title {
@@ -2994,6 +3021,10 @@ a {
 
 .modal-overlay-top {
   z-index: 1200;
+}
+
+.sticker-packs-settings-overlay {
+  z-index: 1300;
 }
 
 .search-modal {
@@ -5000,10 +5031,6 @@ a {
   pointer-events: none;
 }
 
-.message.own .circle-player-ring-progress {
-  stroke: rgba(255, 255, 255, 0.95);
-}
-
 .circle-player-video-btn {
   position: absolute;
   left: 50%;
@@ -6550,8 +6577,13 @@ video.message-circle {
   font-size: 0.75rem;
 }
 
+.sticker-packs-settings {
+  max-height: min(85vh, 640px);
+}
+
 .sticker-packs-settings .sticker-packs-settings-body {
-  max-height: min(60vh, 480px);
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 0 1rem 1rem;
 }
@@ -6718,3 +6750,43 @@ video.message-circle {
   line-height: 1;
 }
 
+.blocked-user-row {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.blocked-user-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.blocked-user-avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--border);
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.blocked-user-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-header-activity {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--accent);
+  margin-top: 0.1rem;
+}

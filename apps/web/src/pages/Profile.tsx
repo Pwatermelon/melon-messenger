@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useOutletContext } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { getUserById, updateProfile, uploadFile, getContacts, addContact, removeContact } from "../api";
+import { getUserById, updateProfile, uploadFile, getContacts, addContact, removeContact, blockUser, unblockUser, isUserBlocked } from "../api";
 import { mediaUrl as resolveMediaUrl, canonicalStoragePath } from "../utils/mediaUrl";
 import { compressImage } from "../utils/imageCompress";
 import type { User } from "@melon/shared";
@@ -64,7 +64,9 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
   const isOwn = !userId || userId === me?.id;
   const targetId = userId ?? me?.id;
   const [isContact, setIsContact] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
   const [contactBusy, setContactBusy] = useState(false);
+  const [blockBusy, setBlockBusy] = useState(false);
   const [dmBusy, setDmBusy] = useState(false);
   const [cropFile, setCropFile] = useState<{ file: File; kind: "avatar" | "cover" } | null>(null);
 
@@ -103,11 +105,40 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
 
   useEffect(() => {
     setIsContact(false);
+    setIsBlocked(false);
     if (isOwn || !targetId) return;
     getContacts()
       .then((list) => setIsContact(list.some((c) => c.id === targetId)))
       .catch(() => setIsContact(false));
+    void isUserBlocked(targetId).then(setIsBlocked);
   }, [targetId, isOwn]);
+
+  async function handleBlockUser() {
+    if (!profile || isOwn) return;
+    if (!window.confirm(`Заблокировать ${profile.username}? Этот пользователь не сможет писать вам.`)) return;
+    setBlockBusy(true);
+    try {
+      await blockUser(profile.id);
+      setIsBlocked(true);
+      setIsContact(false);
+      onContactChange?.();
+      window.dispatchEvent(new Event("wm:block-changed"));
+    } finally {
+      setBlockBusy(false);
+    }
+  }
+
+  async function handleUnblockUser() {
+    if (!profile || isOwn) return;
+    setBlockBusy(true);
+    try {
+      await unblockUser(profile.id);
+      setIsBlocked(false);
+      window.dispatchEvent(new Event("wm:block-changed"));
+    } finally {
+      setBlockBusy(false);
+    }
+  }
 
   async function handleAddContact() {
     if (!profile) return;
@@ -414,6 +445,27 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
             </button>
           )}
           {!isOwn && profile && (
+            isBlocked ? (
+              <button
+                type="button"
+                className="profile-action-btn profile-action-btn-secondary"
+                onClick={() => void handleUnblockUser()}
+                disabled={blockBusy}
+              >
+                {blockBusy ? "…" : "Разблокировать"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="profile-action-btn profile-action-btn-secondary profile-action-btn-danger"
+                onClick={() => void handleBlockUser()}
+                disabled={blockBusy || contactBusy}
+              >
+                {blockBusy ? "…" : "Заблокировать"}
+              </button>
+            )
+          )}
+          {!isOwn && profile && !isBlocked && (
             isContact ? (
               <button
                 type="button"

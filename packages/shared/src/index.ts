@@ -40,6 +40,8 @@ export interface Chat {
   unreadCount?: number;
   /** Push notifications muted for the current viewer */
   notificationsMuted?: boolean;
+  /** Present in DM when either side has blocked the other */
+  dmBlockStatus?: { blockedByMe: boolean; blockedByPeer: boolean };
 }
 
 export type ChatSharedCategory = "media" | "files" | "voice" | "links";
@@ -152,6 +154,7 @@ export type WSClientMessage =
       attachmentMetadata?: AttachmentMetadata | null;
     }
   | { type: "typing"; chatId: string; isTyping: boolean }
+  | { type: "recording"; chatId: string; kind: "voice" | "circle"; active: boolean }
   | { type: "mark_read"; chatId: string; messageId?: string }
   | { type: "reaction"; chatId: string; messageId: string; emoji: string | null };
 
@@ -166,5 +169,6 @@ export type WSServerMessage =
   | { type: "read_receipt"; chatId: string; userId: string; messageId: string; updatedAt?: string }
   | { type: "reaction"; chatId: string; messageId: string; reactions: MessageReaction[] }
   | { type: "typing"; chatId: string; userId: string; isTyping: boolean }
+  | { type: "recording"; chatId: string; userId: string; kind: "voice" | "circle"; active: boolean }
   | { type: "presence"; userId: string; online: boolean }
   | { type: "error"; error: string };

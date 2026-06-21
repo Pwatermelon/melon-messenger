@@ -12,6 +12,7 @@ import { formatBirthdayLabel, getBirthdayAge } from "@melon/shared";
 import BirthdayInfoBlock from "./BirthdayInfoBlock";
 import ImageCropModal from "./ImageCropModal";
 import StickerPacksSettings from "./StickerPacksSettings";
+import BlockedUsersSettings from "./BlockedUsersSettings";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 
 type Props = {
@@ -62,6 +63,7 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
   const [privacyLoading, setPrivacyLoading] = useState(false);
   const [cropFile, setCropFile] = useState<File | null>(null);
   const [stickerPacksOpen, setStickerPacksOpen] = useState(false);
+  const [blockedUsersOpen, setBlockedUsersOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const yandexLogin = user?.yandexLogin ?? null;
@@ -291,6 +293,22 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
               </Link>
             </section>
 
+            <section className="settings-card settings-card-flat">
+              <h3 className="settings-card-title settings-card-title-inset">Стикеры</h3>
+              <button type="button" className="settings-row-link" onClick={() => setStickerPacksOpen(true)}>
+                <span>Стикерпаки</span>
+                <span className="settings-row-chevron" aria-hidden>›</span>
+              </button>
+            </section>
+
+            <section className="settings-card settings-card-flat">
+              <h3 className="settings-card-title settings-card-title-inset">Приватность</h3>
+              <button type="button" className="settings-row-link" onClick={() => setBlockedUsersOpen(true)}>
+                <span>Заблокированные пользователи</span>
+                <span className="settings-row-chevron" aria-hidden>›</span>
+              </button>
+            </section>
+
             <section className="settings-card">
               <h3 className="settings-card-title">Конфиденциальность</h3>
               {birthday ? (
@@ -353,14 +371,6 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
               </div>
             </section>
 
-            <section className="settings-card settings-card-stack">
-              <h3 className="settings-card-title">Стикеры</h3>
-              <button type="button" className="settings-row-link" onClick={() => setStickerPacksOpen(true)}>
-                <span>Стикерпаки</span>
-                <span className="settings-row-chevron" aria-hidden>›</span>
-              </button>
-            </section>
-
             <section className="settings-card">
               <h3 className="settings-card-title">Оформление</h3>
               <div className="settings-theme-segment">
@@ -404,6 +414,7 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
         </div>
       </div>
       {stickerPacksOpen && <StickerPacksSettings onClose={() => setStickerPacksOpen(false)} />}
+      {blockedUsersOpen && <BlockedUsersSettings onClose={() => setBlockedUsersOpen(false)} />}
     </>
   );
 }

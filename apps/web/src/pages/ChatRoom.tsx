@@ -28,6 +28,7 @@ import {
 } from "../utils/messageAttachments";
 import type { Chat, Message, AttachmentMetadata, User, MessageType, StickerItem, StickerPackSummary, MessageAttachment } from "@melon/shared";
 import { buildSystemMessageNodes } from "../utils/systemMessageContent";
+import { formatPeerActivity, type PeerActivityKind } from "../utils/chatActivity";
 import type { MessageItem } from "../api";
 import { getWsUrl } from "../config";
 import { mediaUrl, mediaDownloadUrl } from "../utils/mediaUrl";
@@ -115,6 +116,10 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const readCursorTimesRef = useRef<Record<string, string>>({});
   const messagesRef = useRef<Message[]>([]);
   const hasMoreOlderRef = useRef(true);
+  const [peerActivities, setPeerActivities] = useState<Map<string, PeerActivityKind>>(() => new Map());
+  const peerActivityTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const typingActiveRef = useRef(false);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadingOlderRef = useRef(false);
   const loadOlderLockRef = useRef(false);
   const lastOlderLoadAtRef = useRef(0);
@@ -367,6 +372,12 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
 
   const otherMember = chat?.type === "dm" ? chat.members.find((m) => m.id !== user?.id) : null;
 
+  const peerActivityLabel = useMemo(() => {
+    if (!chat || peerActivities.size === 0) return null;
+    const names = new Map(chat.members.map((m) => [m.id, m.username]));
+    return formatPeerActivity(peerActivities, names, chat.type === "group");
+  }, [chat, peerActivities]);
+
   const myLastReadId = user?.id
     ? (readCursors[user.id.toLowerCase()] ?? readCursors[user.id] ?? readCursorsRef.current[user.id.toLowerCase()] ?? null)
     : null;
@@ -405,6 +416,84 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     if (!chatId || !ready) return;
     send({ type: "subscribe", chatId });
   }, [chatId, ready, send]);
+
+  const clearPeerActivity = useCallback((userId: string) => {
+    const timer = peerActivityTimersRef.current.get(userId);
+    if (timer) clearTimeout(timer);
+    peerActivityTimersRef.current.delete(userId);
+    setPeerActivities((prev) => {
+      if (!prev.has(userId)) return prev;
+      const next = new Map(prev);
+      next.delete(userId);
+      return next;
+    });
+  }, []);
+
+  const setPeerActivity = useCallback(
+    (userId: string, kind: PeerActivityKind, active: boolean) => {
+      if (!userId || userId.toLowerCase() === user?.id?.toLowerCase()) return;
+      const existingTimer = peerActivityTimersRef.current.get(userId);
+      if (existingTimer) clearTimeout(existingTimer);
+      if (!active) {
+        clearPeerActivity(userId);
+        return;
+      }
+      setPeerActivities((prev) => {
+        const next = new Map(prev);
+        next.set(userId, kind);
+        return next;
+      });
+      peerActivityTimersRef.current.set(
+        userId,
+        setTimeout(() => clearPeerActivity(userId), kind === "typing" ? 4500 : 8000)
+      );
+    },
+    [clearPeerActivity, user?.id]
+  );
+
+  useEffect(() => {
+    setPeerActivities(new Map());
+    peerActivityTimersRef.current.forEach((t) => clearTimeout(t));
+    peerActivityTimersRef.current.clear();
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    if (typingActiveRef.current && chatId && ready) {
+      send({ type: "typing", chatId, isTyping: false });
+    }
+    typingActiveRef.current = false;
+  }, [chatId, ready, send]);
+
+  const notifyTyping = useCallback(
+    (active: boolean) => {
+      if (!chatId || !ready) return;
+      send({ type: "typing", chatId, isTyping: active });
+    },
+    [chatId, ready, send]
+  );
+
+  const notifyRecording = useCallback(
+    (kind: "voice" | "circle", active: boolean) => {
+      if (!chatId || !ready) return;
+      send({ type: "recording", chatId, kind, active });
+    },
+    [chatId, ready, send]
+  );
+
+  const handleInputChange = useCallback(
+    (value: string) => {
+      setInput(value);
+      if (!chatId || editDraft) return;
+      if (!typingActiveRef.current) {
+        typingActiveRef.current = true;
+        notifyTyping(true);
+      }
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = setTimeout(() => {
+        typingActiveRef.current = false;
+        notifyTyping(false);
+      }, 3000);
+    },
+    [chatId, editDraft, notifyTyping]
+  );
 
   useEffect(() => {
     return subscribe((msg) => {
@@ -473,8 +562,14 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
         });
         window.dispatchEvent(new Event("wm:refresh-chats"));
       }
+      if (msg.type === "typing" && msg.chatId === chatId) {
+        setPeerActivity(msg.userId, "typing", msg.isTyping);
+      }
+      if (msg.type === "recording" && msg.chatId === chatId) {
+        setPeerActivity(msg.userId, msg.kind, msg.active);
+      }
     });
-  }, [subscribe, chatId, user?.id]);
+  }, [subscribe, chatId, user?.id, setPeerActivity]);
 
   const loadOlderMessages = useCallback(async () => {
     if (!chatId || loadOlderLockRef.current || !hasMoreOlderRef.current || loadingRef.current) return;
@@ -526,6 +621,17 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
         setLoadingOlder(false);
       }
     }
+  }, [chatId]);
+
+  useEffect(() => {
+    if (!chatId) return;
+    const refreshChat = () => {
+      void getChat(chatId).then((c) => {
+        if (c) setChat(c as Chat);
+      });
+    };
+    window.addEventListener("wm:block-changed", refreshChat);
+    return () => window.removeEventListener("wm:block-changed", refreshChat);
   }, [chatId]);
 
   useEffect(() => {
@@ -895,6 +1001,9 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
       await saveEdit(text);
       return;
     }
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    typingActiveRef.current = false;
+    notifyTyping(false);
     setInput("");
     await sendMessage({ content: text });
   }
@@ -1222,6 +1331,14 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
 
   const isGroupAdmin = Boolean(chat?.type === "group" && chat.members.find((m) => m.id === user?.id)?.role === "admin");
 
+  const dmBlockMessage = useMemo(() => {
+    const status = chat?.dmBlockStatus;
+    if (chat?.type !== "dm" || !status) return null;
+    if (status.blockedByPeer) return "Пользователь вас заблокировал";
+    if (status.blockedByMe) return "Вы заблокировали данного пользователя";
+    return null;
+  }, [chat]);
+
   function canDeleteMessage(m: Message): boolean {
     if ((m.messageType ?? "text") === "system") return false;
     return Boolean(user && chatId);
@@ -1500,11 +1617,17 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
           </div>
           <div className="chat-header-name-wrap">
             <h3 className="chat-header-name">{displayName}</h3>
-            {chat?.type === "dm" && otherMember?.isBirthdayToday && (
-              <span className="chat-header-birthday">🎂 Сегодня день рождения</span>
-            )}
-            {chat?.type === "group" && (
-              <span className="chat-header-meta">{chat.members.length} участников</span>
+            {peerActivityLabel ? (
+              <span className="chat-header-activity">{peerActivityLabel}</span>
+            ) : (
+              <>
+                {chat?.type === "dm" && otherMember?.isBirthdayToday && (
+                  <span className="chat-header-birthday">🎂 Сегодня день рождения</span>
+                )}
+                {chat?.type === "group" && (
+                  <span className="chat-header-meta">{chat.members.length} участников</span>
+                )}
+              </>
             )}
           </div>
         </button>
@@ -1796,6 +1919,11 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
           <span>{unreadJumpCount > 99 ? "99+" : unreadJumpCount}</span>
         </button>
       )}
+      {dmBlockMessage ? (
+        <div className="compose compose-blocked">
+          <p>{dmBlockMessage}</p>
+        </div>
+      ) : (
       <div className="compose">
         {replyDraft && (
           <div className="compose-reply">
@@ -1887,7 +2015,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
             data-testid="compose-input"
             placeholder={editDraft ? "Изменить сообщение…" : "Сообщение…"}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => handleInputChange(e.target.value)}
             onPaste={handleComposePaste}
             disabled={!ready}
           />
@@ -1896,10 +2024,16 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
               <IconSend size={20} />
             </button>
           ) : (
-            <ComposeRecorder disabled={!ready || sending} onVoiceSend={handleVoiceSend} onCircleSend={handleCircleSend} />
+            <ComposeRecorder
+              disabled={!ready || sending}
+              onVoiceSend={handleVoiceSend}
+              onCircleSend={handleCircleSend}
+              onRecordingChange={notifyRecording}
+            />
           )}
         </form>
       </div>
+      )}
       </div>
       {stickerPackViewId && (
         <StickerPackViewModal packId={stickerPackViewId} onClose={() => setStickerPackViewId(null)} />

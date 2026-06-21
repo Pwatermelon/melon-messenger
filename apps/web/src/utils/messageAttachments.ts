@@ -44,6 +44,8 @@ export function collectMessageMediaPaths(m: Pick<Message, "attachmentUrl" | "att
   for (const a of getMessageAttachments(m)) {
     if (a.url && !paths.includes(a.url)) paths.push(a.url);
   }
+  const poster = m.attachmentMetadata?.posterUrl;
+  if (poster && !paths.includes(poster)) paths.push(poster);
   return paths;
 }
 
@@ -59,13 +61,20 @@ export function applySignedPathsToMessage(m: Message, signed: Record<string, str
   let attachmentUrl = resolve(m.attachmentUrl) ?? m.attachmentUrl;
 
   let attachmentMetadata = m.attachmentMetadata;
-  if (attachmentMetadata?.attachments?.length) {
+  if (attachmentMetadata) {
     attachmentMetadata = {
       ...attachmentMetadata,
-      attachments: attachmentMetadata.attachments.map((a) => ({
-        ...a,
-        url: resolve(a.url) ?? a.url,
-      })),
+      ...(attachmentMetadata.posterUrl
+        ? { posterUrl: resolve(attachmentMetadata.posterUrl) ?? attachmentMetadata.posterUrl }
+        : {}),
+      ...(attachmentMetadata.attachments?.length
+        ? {
+            attachments: attachmentMetadata.attachments.map((a) => ({
+              ...a,
+              url: resolve(a.url) ?? a.url,
+            })),
+          }
+        : {}),
     };
   }
 

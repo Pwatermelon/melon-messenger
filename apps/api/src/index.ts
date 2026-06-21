@@ -11,6 +11,7 @@ import { adminRoutes } from "./routes/admin";
 import { adminObservabilityRoutes } from "./routes/adminObservability";
 import { chatRoutes } from "./routes/chats";
 import { contactRoutes } from "./routes/contacts";
+import { blockRoutes } from "./routes/blocks";
 import { stickerPackRoutes } from "./routes/stickerPacks";
 import { uploadRoutes } from "./routes/upload";
 import { mediaRoutes } from "./routes/media";
@@ -153,6 +154,14 @@ async function main() {
     await db.execute(sql`
       CREATE INDEX IF NOT EXISTS stickers_pack_idx ON stickers (pack_id)
     `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS user_blocks (
+        blocker_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        blocked_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (blocker_id, blocked_id)
+      )
+    `);
   } catch (e) {
     console.warn("Schema migration (optional):", e);
   }
@@ -192,6 +201,7 @@ async function main() {
     .use(isE2eEnabled() ? e2eRoutes : new Elysia())
     .use(chatRoutes)
     .use(contactRoutes)
+    .use(blockRoutes)
     .use(stickerPackRoutes)
     .use(uploadRoutes)
     .use(mediaRoutes)

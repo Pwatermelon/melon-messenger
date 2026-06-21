@@ -78,6 +78,16 @@ export const userContacts = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.contactUserId] })]
 );
 
+export const userBlocks = pgTable(
+  "user_blocks",
+  {
+    blockerId: uuid("blocker_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    blockedId: uuid("blocked_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.blockerId, t.blockedId] })]
+);
+
 /** Uploaded media registry for access control */
 export const mediaFiles = pgTable("media_files", {
   filename: varchar("filename", { length: 255 }).primaryKey(),

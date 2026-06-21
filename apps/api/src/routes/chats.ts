@@ -8,7 +8,7 @@ import { notifyChatMembersExcept } from "../services/chatNotifications";
 import { getChatSharedItems } from "../services/chatSharedMedia";
 import type { AttachmentMetadata, Message as MessageDto, MessageType, Message, ChatSharedCategory } from "@melon/shared";
 import { toPublicProfile } from "../lib/userDto";
-import { usersShareChat } from "../lib/chatAccess";
+import { areUsersBlocked, getDmBlockStatus } from "../services/userBlocks";
 import {
   ensureChatAvatarRegistered,
   ensureProfileMediaRegistered,
@@ -83,6 +83,7 @@ type ChatDto = {
   lastMessagePreview?: string | null;
   unreadCount?: number;
   notificationsMuted?: boolean;
+  dmBlockStatus?: { blockedByMe: boolean; blockedByPeer: boolean };
   members: Array<ReturnType<typeof toUser> & { role: string }>;
 };
 
@@ -176,6 +177,10 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       set.status = 404;
       return { error: "User not found" };
     }
+    if (target.id === viewer.id) {
+      set.status = 404;
+      return { error: "User not found" };
+    }
     const includeBirthday = await usersShareChat(viewer.id, target.id);
     return signUserMedia(toPublicProfile(target, includeBirthday), viewer.id);
   })
@@ -192,6 +197,10 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       .where(sql`lower(${users.yandexLogin}) = ${q}`)
       .limit(1);
     if (!target) {
+      set.status = 404;
+      return { error: "User not found" };
+    }
+    if (target.id === viewer.id) {
       set.status = 404;
       return { error: "User not found" };
     }
@@ -306,6 +315,10 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
     if (!other) {
       set.status = 404;
       return { error: "User not found" };
+    }
+    if (await areUsersBlocked(u.id, otherUserId)) {
+      set.status = 403;
+      return { error: "Нельзя написать этому пользователю" };
     }
     const bothMembers = await db
       .select({ chatId: chatMembers.chatId })
@@ -438,6 +451,11 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         lastMessageAt = first.created_at?.toISOString?.() ?? null;
       }
     } catch {}
+    const otherMember = chatRow.type === "dm" ? members.find((m) => m.user.id !== u.id) : null;
+    const dmBlockStatus =
+      chatRow.type === "dm" && otherMember
+        ? await getDmBlockStatus(u.id, otherMember.user.id)
+        : undefined;
     return signChatDto(
       {
         id: chatRow.id,
@@ -448,6 +466,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         lastMessageAt,
         lastMessagePreview,
         notificationsMuted: myMember.muted,
+        dmBlockStatus,
         members: members.map((m) => ({ ...toUser(m.user), role: m.role })),
       },
       u.id
@@ -791,6 +810,18 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
     if (!targetMember) {
       set.status = 403;
       return { error: "Not a member of target chat" };
+    }
+    const [targetChat] = await db.select({ type: chats.type }).from(chats).where(eq(chats.id, targetChatId)).limit(1);
+    if (targetChat?.type === "dm") {
+      const peers = await db
+        .select({ userId: chatMembers.userId })
+        .from(chatMembers)
+        .where(eq(chatMembers.chatId, targetChatId));
+      const peerIds = peers.map((p) => p.userId).filter((id) => id !== u.id);
+      if (peerIds.length === 1 && (await areUsersBlocked(u.id, peerIds[0]!))) {
+        set.status = 403;
+        return { error: "Сообщение не отправлено: пользователь заблокирован" };
+      }
     }
     const [sourceMember] = await db
       .select()

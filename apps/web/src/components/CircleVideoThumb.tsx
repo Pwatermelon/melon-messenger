@@ -23,7 +23,7 @@ export function CircleVideoThumb({ src, poster, className = "chat-info-circle-th
       poster={poster ?? undefined}
       muted
       playsInline
-      preload={poster ? "none" : "auto"}
+      preload={poster ? "metadata" : "auto"}
       className={className}
     />
   );

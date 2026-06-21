@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { createPortal } from "react-dom";
 import type { StickerItem, StickerPackDetail, StickerPackSummary } from "@melon/shared";
 import {
   addStickerToPack,
@@ -238,9 +239,17 @@ export default function StickerPacksSettings({ onClose }: Props) {
     };
   }, [pendingSticker]);
 
-  return (
-    <div className="search-overlay modal-overlay-top" {...overlayDismiss}>
-      <div className="search-modal search-modal-wide sticker-packs-settings" onClick={(e) => e.stopPropagation()}>
+  return createPortal(
+    <div
+      className="search-overlay modal-overlay-top sticker-packs-settings-overlay"
+      onPointerDown={overlayDismiss.onOverlayPointerDown}
+      onClick={overlayDismiss.onOverlayClick}
+    >
+      <div
+        className="search-modal search-modal-wide sticker-packs-settings"
+        onPointerDown={overlayDismiss.onModalPointerDown}
+        onClick={(e) => e.stopPropagation()}
+      >
         <button type="button" className="modal-close" aria-label="Закрыть" onClick={onClose}>
           ×
         </button>
@@ -375,6 +384,7 @@ export default function StickerPacksSettings({ onClose }: Props) {
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

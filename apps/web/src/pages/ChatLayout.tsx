@@ -276,6 +276,11 @@ export default function ChatLayout() {
   async function lookupSidebarUser() {
     const q = sidebarQuery.trim();
     if (!q) return;
+    if (user?.yandexLogin && q.toLowerCase() === user.yandexLogin.toLowerCase()) {
+      setSidebarError("Нельзя искать себя");
+      setSidebarUser(null);
+      return;
+    }
     setSidebarError("");
     setSidebarUser(null);
     setSidebarLoading(true);
@@ -293,6 +298,11 @@ export default function ChatLayout() {
   async function lookupDmUser() {
     const q = dmLogin.trim();
     if (!q) return;
+    if (user?.yandexLogin && q.toLowerCase() === user.yandexLogin.toLowerCase()) {
+      setDmError("Нельзя искать себя");
+      setDmUser(null);
+      return;
+    }
     setDmError("");
     setDmUser(null);
     setDmLoading(true);

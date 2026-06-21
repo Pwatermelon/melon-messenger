@@ -13,6 +13,7 @@ import { grantMediaFromAttachment } from "./services/mediaAccess";
 import { trackMessageCreated } from "./services/prometheus";
 import { advanceReadCursor } from "./services/chatRead";
 import { incrementUnreadForChat } from "./services/chatUnread";
+import { isSenderBlockedByRecipient } from "./services/userBlocks";
 import { trackSocket, untrackSocket } from "./wsRegistry";
 import type { WSClientMessage, WSServerMessage, Message } from "@melon/shared";
 
@@ -51,6 +52,14 @@ async function isChatMember(chatId: string, userId: string): Promise<boolean> {
     .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, userId)))
     .limit(1);
   return Boolean(member);
+}
+
+async function getChatPeerIds(chatId: string, senderId: string): Promise<string[]> {
+  const rows = await db
+    .select({ userId: chatMembers.userId })
+    .from(chatMembers)
+    .where(eq(chatMembers.chatId, chatId));
+  return rows.map((r) => r.userId).filter((id) => id !== senderId);
 }
 
 function decodeJwtSubUnsafe(token: string): string | null {
@@ -199,6 +208,11 @@ export const wsHandlers = {
           send(ws, { type: "error", error: "Not a member of this chat" });
           return;
         }
+        const peerIds = await getChatPeerIds(chatId, ws.data.userId);
+        if (peerIds.length === 1 && (await isSenderBlockedByRecipient(ws.data.userId, peerIds))) {
+          send(ws, { type: "error", error: "Сообщение не отправлено: пользователь заблокирован" });
+          return;
+        }
         try {
           const { messageId, createdAt } = await scylla.insertMessage(
             chatId,
@@ -265,7 +279,22 @@ export const wsHandlers = {
           userId: ws.data.userId,
           isTyping: !!isTyping,
         };
-        wsServerRef?.publish(chatTopic(chatId), JSON.stringify(payload));
+        await publishChatEvent(chatId, payload);
+        return;
+      }
+
+      if (msg.type === "recording") {
+        const { chatId, kind, active } = msg;
+        if (!chatId || (kind !== "voice" && kind !== "circle")) return;
+        if (!(await isChatMember(chatId, ws.data.userId))) return;
+        const payload: WSServerMessage = {
+          type: "recording",
+          chatId,
+          userId: ws.data.userId,
+          kind,
+          active: !!active,
+        };
+        await publishChatEvent(chatId, payload);
         return;
       }
 

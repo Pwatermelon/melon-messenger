@@ -16,9 +16,10 @@ interface ComposeRecorderProps {
   disabled?: boolean;
   onVoiceSend: (blob: Blob, duration: number) => void | Promise<void>;
   onCircleSend: (blob: Blob, duration: number) => void | Promise<void>;
+  onRecordingChange?: (kind: "voice" | "circle", active: boolean) => void;
 }
 
-export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: ComposeRecorderProps) {
+export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend, onRecordingChange }: ComposeRecorderProps) {
   const voice = useVoiceRecorder();
   const circle = useCircleRecorder();
   const [mode, setMode] = useState<RecordMode>(() => {
@@ -74,6 +75,11 @@ export function ComposeRecorder({ disabled, onVoiceSend, onCircleSend }: Compose
   useEffect(() => {
     recordingRef.current = voice.recording || circle.recording;
   }, [voice.recording, circle.recording]);
+
+  useEffect(() => {
+    if (!onRecordingChange) return;
+    onRecordingChange(activeMode === "voice" ? "voice" : "circle", active);
+  }, [active, activeMode, onRecordingChange]);
 
   const attachPreview = useCallback((el: HTMLVideoElement | null) => {
     if (el && circle.previewStream) {

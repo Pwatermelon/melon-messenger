@@ -86,6 +86,8 @@ export async function grantMediaFromAttachment(
     const canonical = canonicalUploadsPath(item.url);
     if (canonical) paths.add(canonical);
   }
+  const poster = attachmentMetadata?.posterUrl ? canonicalUploadsPath(attachmentMetadata.posterUrl) : null;
+  if (poster) paths.add(poster);
   for (const path of paths) {
     const filename = filenameFromPath(path);
     if (filename) await grantMediaToChat(filename, chatId);
@@ -166,6 +168,9 @@ export function normalizeAttachmentMetadataForStorage(
       }))
       .filter((a): a is typeof a & { url: string } => Boolean(a.url));
   }
+  if (next.posterUrl) {
+    next.posterUrl = canonicalUploadsPath(next.posterUrl) ?? next.posterUrl;
+  }
   return next;
 }
 
@@ -216,16 +221,25 @@ export async function signAttachmentMetadata(
   metadata: AttachmentMetadata | null | undefined,
   viewerId: string
 ): Promise<AttachmentMetadata | null | undefined> {
-  if (!metadata?.attachments?.length) return metadata;
-  const paths = metadata.attachments.map((a) => a.url).filter(Boolean);
+  if (!metadata) return metadata;
+  const paths: string[] = [];
+  for (const a of metadata.attachments ?? []) {
+    if (a.url) paths.push(a.url);
+  }
+  if (metadata.posterUrl) paths.push(metadata.posterUrl);
+  if (!paths.length) return metadata;
   const signed = await signMediaPaths(paths, viewerId);
-  return {
-    ...metadata,
-    attachments: metadata.attachments.map((a) => ({
+  const next: AttachmentMetadata = { ...metadata };
+  if (next.attachments?.length) {
+    next.attachments = next.attachments.map((a) => ({
       ...a,
       url: resolveSignedMediaPath(a.url, signed) ?? a.url,
-    })),
-  };
+    }));
+  }
+  if (next.posterUrl) {
+    next.posterUrl = resolveSignedMediaPath(next.posterUrl, signed) ?? next.posterUrl;
+  }
+  return next;
 }
 
 function resolveSignedMediaPath(path: string | null | undefined, signed: Record<string, string>): string | null {

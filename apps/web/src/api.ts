@@ -244,6 +244,42 @@ export async function removeContact(userId: string): Promise<void> {
   if (!res.ok) throw new Error("Failed to remove contact");
 }
 
+export async function getBlockedUsers(): Promise<User[]> {
+  const res = await fetch(`${getApiUrl()}/blocks`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error("Failed to load blocked users");
+  return res.json();
+}
+
+export async function isUserBlocked(userId: string): Promise<boolean> {
+  const res = await fetch(`${getApiUrl()}/blocks/check/${encodeURIComponent(userId)}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) return false;
+  const data = (await res.json()) as { blocked?: boolean };
+  return Boolean(data.blocked);
+}
+
+export async function blockUser(userId: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/blocks/${encodeURIComponent(userId)}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Failed to block user");
+  }
+}
+
+export async function unblockUser(userId: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/blocks/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error("Failed to unblock user");
+}
+
 export async function updateProfile(updates: {
   username?: string;
   avatarUrl?: string | null;
