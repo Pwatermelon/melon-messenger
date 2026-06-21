@@ -465,7 +465,7 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
               </button>
             )
           )}
-          {!isOwn && profile && !isBlocked && (
+          {!isOwn && profile && (
             isContact ? (
               <button
                 type="button"

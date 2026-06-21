@@ -16,8 +16,8 @@ export async function advanceReadCursor(
     return { advanced: false, messageId: null, updatedAt: null };
   }
   const canonicalId = String(row.message_id).trim().toLowerCase();
-  const { advanced, updatedAt } = await upsertReadCursor(chatId, userId, canonicalId);
+  const { advanced, messageId: cursorId, updatedAt } = await upsertReadCursor(chatId, userId, canonicalId);
   // Always reset counter — cursor may already be advanced but postgres counter can be stale.
   await resetUnreadCount(chatId, userId);
-  return { advanced, messageId: canonicalId, updatedAt };
+  return { advanced, messageId: cursorId, updatedAt };
 }

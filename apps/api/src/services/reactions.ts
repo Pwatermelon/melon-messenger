@@ -73,3 +73,12 @@ export async function getReactionsForMessages(
   );
   return out;
 }
+
+/** Remove reactions on messages pruned from chat history. */
+export async function deleteReactionsBeforeMessage(chatId: string, keepFromMessageId: string): Promise<void> {
+  const keep = keepFromMessageId.trim().toLowerCase();
+  await db.execute(sql`
+    DELETE FROM message_reactions
+    WHERE chat_id = ${chatId}::uuid AND message_id < ${keep}
+  `);
+}

@@ -5,6 +5,9 @@ export type SubscriptionTier = "free" | "platinum";
 
 export * from "./birthday";
 
+/** Max messages kept per chat; older ones are removed silently on new sends. */
+export const MAX_CHAT_MESSAGES = 1000;
+
 export interface User {
   id: string;
   email?: string;

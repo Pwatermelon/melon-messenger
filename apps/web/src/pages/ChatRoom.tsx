@@ -7,6 +7,7 @@ import { CircleMessagePlayer } from "../components/CircleMessagePlayer";
 import { MessageContextMenu } from "../components/MessageContextMenu";
 import { MessageReactions } from "../components/MessageReactions";
 import { ForwardMessageModal } from "../components/ForwardMessageModal";
+import { SendMediaModal, buildMediaSendItems, revokeMediaSendItems, type MediaSendItem } from "../components/SendMediaModal";
 import { LocationPickerModal } from "../components/LocationPickerModal";
 import { LocationPreview } from "../components/LocationPreview";
 import ImageCropModal from "../components/ImageCropModal";
@@ -28,6 +29,7 @@ import {
 } from "../utils/messageAttachments";
 import type { Chat, Message, AttachmentMetadata, User, MessageType, StickerItem, StickerPackSummary, MessageAttachment } from "@melon/shared";
 import { buildSystemMessageNodes } from "../utils/systemMessageContent";
+import { mediaMessageCaption, resolveMediaCaption } from "../utils/mediaCaption";
 import { formatPeerActivity, type PeerActivityKind } from "../utils/chatActivity";
 import type { MessageItem } from "../api";
 import { getWsUrl } from "../config";
@@ -107,6 +109,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
   const [editDraft, setEditDraft] = useState<Message | null>(null);
+  const [mediaSendDraft, setMediaSendDraft] = useState<{ items: MediaSendItem[]; caption: string } | null>(null);
   const composeInputRef = useRef<HTMLInputElement>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const selectionMode = selectedIds.size > 0;
@@ -171,7 +174,16 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   function isMessageSeenForRead(messageId: string): boolean {
     const list = listRef.current;
     if (!list) return false;
-    return isMessageVisibleInViewport(list, messageId);
+    const normalized = messageId.trim().toLowerCase();
+    const latest = messagesRef.current[messagesRef.current.length - 1];
+    if (
+      stickToBottomRef.current &&
+      latest &&
+      latest.id.trim().toLowerCase() === normalized
+    ) {
+      return true;
+    }
+    return isMessageVisibleInViewport(list, normalized);
   }
 
   function membersForReadReceipts(): User[] {
@@ -336,6 +348,10 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     }
     setReplyDraft(null);
     setEditDraft(null);
+    setMediaSendDraft((draft) => {
+      if (draft) revokeMediaSendItems(draft.items);
+      return null;
+    });
     stickToBottomRef.current = true;
     pendingInitialScrollRef.current = true;
     setMessagesReady(false);
@@ -679,9 +695,15 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
           if (cursors?.length) applyReadCursors(cursors);
           if (user?.id && myLastReadMessageId) {
             const mine = myLastReadMessageId.trim().toLowerCase();
-            readCursorsRef.current[user.id.toLowerCase()] = mine;
-            setReadCursors((prev) => ({ ...prev, [user.id.toLowerCase()]: mine }));
+            const userKey = user.id.toLowerCase();
+            readCursorsRef.current[userKey] = mine;
+            setReadCursors((prev) => ({ ...prev, [userKey]: mine }));
             lastPersistedReadRef.current = mine;
+            const ownCursor = cursors?.find((c) => c.userId.toLowerCase() === userKey);
+            if (ownCursor?.updatedAt) {
+              readCursorTimesRef.current[userKey] = ownCursor.updatedAt;
+              setReadCursorTimes((prev) => ({ ...prev, [userKey]: ownCursor.updatedAt! }));
+            }
           }
           suppressAutoReadRef.current = unread > 0;
           setMessages(list as Message[]);
@@ -1098,15 +1120,16 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     inputEl.click();
   }
 
-  async function uploadSingleFile(file: File, withReply: boolean) {
+  async function uploadSingleFile(file: File, withReply: boolean, caption?: string) {
     const isGif = await isGifFileDeep(file);
     const isImage = file.type.startsWith("image/") && !isGif;
     const toUpload = isImage ? await compressImage(file) : file;
     const { path, fileName, mimeType, size } = await uploadFile(toUpload);
     const type = isGif || isImage ? "image" : file.type.startsWith("video/") ? "video" : "file";
+    const fallback = isGif ? "GIF" : type === "image" ? "Фотография" : type === "video" ? "Видео" : file.name;
     dispatchMessage(
       {
-        content: isGif ? "GIF" : type === "image" ? "Фотография" : file.name,
+        content: withReply ? resolveMediaCaption(caption, fallback) : fallback,
         messageType: type,
         attachmentUrl: path,
         attachmentMetadata:
@@ -1120,7 +1143,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     );
   }
 
-  async function uploadAlbumFiles(files: File[], withReply: boolean) {
+  async function uploadAlbumFiles(files: File[], withReply: boolean, caption?: string) {
     const attachments: MessageAttachment[] = [];
     for (const file of files) {
       const isGif = await isGifFileDeep(file);
@@ -1135,9 +1158,10 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     }
     const count = attachments.length;
     const hasGif = attachments.some((a) => a.mimeType === "image/gif");
+    const fallback = count === 1 ? (hasGif ? "GIF" : "Фотография") : `${count} фото`;
     dispatchMessage(
       {
-        content: count === 1 ? (hasGif ? "GIF" : "Фотография") : `${count} фото`,
+        content: withReply ? resolveMediaCaption(caption, fallback) : fallback,
         messageType: "image",
         attachmentUrl: attachments[0]!.url,
         attachmentMetadata: {
@@ -1150,7 +1174,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     );
   }
 
-  async function uploadFiles(files: File[]) {
+  async function uploadFiles(files: File[], caption?: string) {
     if (!files.length || !chatId || sending || !ready) return;
     setSending(true);
     try {
@@ -1164,12 +1188,12 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
       let first = true;
       for (const chunk of albumChunks) {
         if (chunk.length > 0) {
-          await uploadAlbumFiles(chunk, first);
+          await uploadAlbumFiles(chunk, first, first ? caption : undefined);
           first = false;
         }
       }
       for (const file of other) {
-        await uploadSingleFile(file, first);
+        await uploadSingleFile(file, first, first ? caption : undefined);
         first = false;
       }
       setReplyDraft(null);
@@ -1180,13 +1204,57 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     }
   }
 
+  async function openMediaSendModal(files: File[]) {
+    if (!files.length || !chatId || !ready || editDraft) return;
+    const items = await buildMediaSendItems(files);
+    if (mediaSendDraft) {
+      setMediaSendDraft({ ...mediaSendDraft, items: [...mediaSendDraft.items, ...items] });
+      return;
+    }
+    const caption = input.trim();
+    setInput("");
+    setAttachMenuOpen(false);
+    setEmojiPanelOpen(false);
+    setMediaSendDraft({ items, caption });
+  }
+
+  function closeMediaSendModal() {
+    if (!mediaSendDraft) return;
+    const { items, caption } = mediaSendDraft;
+    revokeMediaSendItems(items);
+    if (caption) setInput(caption);
+    setMediaSendDraft(null);
+  }
+
+  function removeMediaSendItem(id: string) {
+    if (!mediaSendDraft) return;
+    const removed = mediaSendDraft.items.find((item) => item.id === id);
+    if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+    const items = mediaSendDraft.items.filter((item) => item.id !== id);
+    if (items.length === 0) {
+      if (mediaSendDraft.caption) setInput(mediaSendDraft.caption);
+      setMediaSendDraft(null);
+      return;
+    }
+    setMediaSendDraft({ ...mediaSendDraft, items });
+  }
+
+  async function confirmMediaSend() {
+    if (!mediaSendDraft || !chatId || sending || !ready) return;
+    const files = mediaSendDraft.items.map((item) => item.file);
+    const caption = mediaSendDraft.caption;
+    revokeMediaSendItems(mediaSendDraft.items);
+    setMediaSendDraft(null);
+    await uploadFiles(files, caption);
+  }
+
   function handleComposePaste(e: React.ClipboardEvent) {
     if (!chatId || sending || !ready || editDraft) return;
     const fromFiles = Array.from(e.clipboardData.files ?? []);
     if (fromFiles.length > 0) {
       e.preventDefault();
       e.stopPropagation();
-      void uploadFiles(fromFiles);
+      void openMediaSendModal(fromFiles);
       return;
     }
     const items = Array.from(e.clipboardData.items ?? []);
@@ -1199,14 +1267,14 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     if (pasted.length > 0) {
       e.preventDefault();
       e.stopPropagation();
-      void uploadFiles(pasted);
+      void openMediaSendModal(pasted);
     }
   }
 
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    await uploadFiles(files);
+    await openMediaSendModal(files);
   }
 
   function hasDraggedFiles(e: React.DragEvent) {
@@ -1238,7 +1306,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     e.preventDefault();
     fileDragDepthRef.current = 0;
     setFileDragActive(false);
-    void uploadFiles(Array.from(e.dataTransfer.files ?? []));
+    void openMediaSendModal(Array.from(e.dataTransfer.files ?? []));
   }
 
   function handleLocation() {
@@ -1704,7 +1772,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
                       <span>Непрочитанные сообщения</span>
                     </div>
                   )}
-                  <div className="message-system" data-message-id={m.id}>
+                  <div className="message-system" data-message-id={m.id.toLowerCase()}>
                     <span>
                       {buildSystemMessageNodes(m.content, (userId) => openProfile(userId), {
                         mentions: m.attachmentMetadata?.systemMentions,
@@ -1739,7 +1807,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
                 </div>
               )}
             <div
-              data-message-id={m.id}
+              data-message-id={m.id.toLowerCase()}
               className={`message-row ${own ? "own" : "incoming"}${showRowSender ? " message-row-naked-incoming" : ""}${selectionMode ? " selection-mode" : ""}${highlightMessageId === m.id ? " message-row-target-highlight" : ""}`}
               onClick={(e) => onMessageRowClick(e, m)}
             >
@@ -1866,6 +1934,12 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
                   <img src={mediaUrl(m.attachmentUrl)} alt={m.attachmentMetadata?.emoji ?? "Стикер"} className="message-sticker-img" />
                 </button>
               )}
+              {(() => {
+                const mt = m.messageType ?? "text";
+                if (mt !== "image" && mt !== "video" && mt !== "file") return null;
+                const cap = mediaMessageCaption(m);
+                return cap ? <p className="message-content message-media-caption">{linkifyText(cap)}</p> : null;
+              })()}
               {(m.reactions?.length ?? 0) > 0 && (
                 <MessageReactions
                   reactions={m.reactions ?? []}
@@ -2035,6 +2109,17 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
       </div>
       )}
       </div>
+      {mediaSendDraft && (
+        <SendMediaModal
+          items={mediaSendDraft.items}
+          caption={mediaSendDraft.caption}
+          onCaptionChange={(caption) => setMediaSendDraft((draft) => (draft ? { ...draft, caption } : draft))}
+          onRemoveItem={removeMediaSendItem}
+          onClose={closeMediaSendModal}
+          onSend={() => void confirmMediaSend()}
+          sending={sending}
+        />
+      )}
       {stickerPackViewId && (
         <StickerPackViewModal packId={stickerPackViewId} onClose={() => setStickerPackViewId(null)} />
       )}

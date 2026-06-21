@@ -1,11 +1,14 @@
 import type { AttachmentMetadata, Message, MessageType } from "@melon/shared";
+import { isDefaultMediaContent } from "./mediaCaption";
 
 export function messagePreviewText(
   m: Pick<Message, "content" | "messageType" | "attachmentMetadata" | "attachmentUrl">
 ): string {
   const mt = m.messageType ?? "text";
+  const c = m.content.trim();
   switch (mt) {
     case "image": {
+      if (c && !isDefaultMediaContent(c, "image")) return c.slice(0, 160);
       const album = m.attachmentMetadata?.attachments;
       if (album && album.length > 1) {
         return `${album.length} фото`;
@@ -13,7 +16,7 @@ export function messagePreviewText(
       if (
         m.attachmentMetadata?.mimeType === "image/gif" ||
         /\.gif$/i.test(m.attachmentUrl?.split("?")[0] ?? "") ||
-        m.content === "GIF"
+        c === "GIF"
       ) {
         return "GIF";
       }
@@ -24,8 +27,10 @@ export function messagePreviewText(
     case "circle":
       return "Кружок";
     case "video":
+      if (c && !isDefaultMediaContent(c, "video")) return c.slice(0, 160);
       return "Видео";
     case "file":
+      if (c && !isDefaultMediaContent(c, "file", m.attachmentMetadata?.fileName)) return c.slice(0, 160);
       return "Файл";
     case "location":
       return "Геопозиция";

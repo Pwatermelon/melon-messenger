@@ -55,33 +55,22 @@ export async function incrementUnreadForChat(chatId: string, senderId: string): 
   `);
 }
 
-/** Postgres counter; one-time Scylla backfill when row is missing (migration). */
+/** Postgres counter; one-time Scylla backfill only when row is missing (migration). */
 export async function resolveUnreadCount(
   chatId: string,
   userId: string,
   lastReadMessageId: string | null
 ): Promise<number> {
   const existing = await getUnreadCount(chatId, userId);
-  let count = existing;
-  if (count === null) {
-    try {
-      count = await scyllaCountUnreadMessages(chatId, lastReadMessageId, userId);
-    } catch {
-      count = 0;
-    }
-    await setUnreadCount(chatId, userId, count);
-    return count;
+  if (existing !== null) {
+    return existing;
   }
-  if (count > 0) {
-    try {
-      const actual = await scyllaCountUnreadMessages(chatId, lastReadMessageId, userId);
-      if (actual !== count) {
-        await setUnreadCount(chatId, userId, actual);
-        return actual;
-      }
-    } catch {
-      // keep postgres value
-    }
+  let count = 0;
+  try {
+    count = await scyllaCountUnreadMessages(chatId, lastReadMessageId, userId);
+  } catch {
+    count = 0;
   }
+  await setUnreadCount(chatId, userId, count);
   return count;
 }

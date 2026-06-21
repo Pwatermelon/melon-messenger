@@ -11,7 +11,12 @@ export function isMessageReadByCursor(
 ): boolean {
   if (!lastReadMessageId?.trim()) return false;
   if (compareMessageId(lastReadMessageId, messageId) < 0) return false;
-  if (messageCreatedAt && lastReadUpdatedAt) {
+  // Timestamp guard only when cursor points at this exact message (stale id backfill).
+  if (
+    messageCreatedAt &&
+    lastReadUpdatedAt &&
+    compareMessageId(lastReadMessageId, messageId) === 0
+  ) {
     const msgAt = Date.parse(messageCreatedAt);
     const curAt = Date.parse(lastReadUpdatedAt);
     if (Number.isFinite(msgAt) && Number.isFinite(curAt) && curAt + READ_SKEW_MS < msgAt) {

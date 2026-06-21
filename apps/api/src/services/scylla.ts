@@ -4,7 +4,10 @@
  */
 import { Client, types } from "cassandra-driver";
 import type { MessageType, AttachmentMetadata } from "@melon/shared";
+import { MAX_CHAT_MESSAGES } from "@melon/shared";
 import { decryptAtRest, encryptAtRest } from "../crypto/atRest";
+import { clampReadCursorsAfterPrune } from "./readReceipts";
+import { deleteReactionsBeforeMessage } from "./reactions";
 
 const contactPoints = (process.env.SCYLLA_CONTACT_POINTS ?? "127.0.0.1").split(",");
 const keyspace = process.env.SCYLLA_KEYSPACE ?? "melon";
@@ -81,6 +84,8 @@ const selectFromQuery = `SELECT chat_id, message_id, sender_id, content, created
 const selectOneQuery = `SELECT chat_id, message_id, sender_id, content, created_at, message_type, attachment_url, attachment_metadata, encrypted, edited_at
   FROM ${MESSAGES_TABLE} WHERE chat_id = ? AND message_id = ?`;
 const deleteOneQuery = `DELETE FROM ${MESSAGES_TABLE} WHERE chat_id = ? AND message_id = ?`;
+const deleteOlderQuery = `DELETE FROM ${MESSAGES_TABLE} WHERE chat_id = ? AND message_id < ?`;
+const selectIdsQuery = `SELECT message_id FROM ${MESSAGES_TABLE} WHERE chat_id = ? LIMIT ?`;
 const deleteByChatQuery = `DELETE FROM ${MESSAGES_TABLE} WHERE chat_id = ?`;
 const updateContentQuery = `UPDATE ${MESSAGES_TABLE} SET content = ?, edited_at = ? WHERE chat_id = ? AND message_id = ?`;
 
@@ -106,6 +111,36 @@ export interface InsertMessageOpts {
   encrypted?: boolean;
 }
 
+/** Drops oldest messages when chat exceeds the limit. Returns cutoff id if anything was removed. */
+export async function pruneOldMessages(
+  chatId: string,
+  maxMessages = MAX_CHAT_MESSAGES
+): Promise<string | null> {
+  try {
+    const result = await scyllaClient.execute(selectIdsQuery, [chatId, maxMessages + 1], { prepare: true });
+    const rows = result.rows;
+    if (rows.length <= maxMessages) return null;
+
+    const keepFromUuid = rows[maxMessages - 1]!.message_id as types.TimeUuid;
+    await scyllaClient.execute(deleteOlderQuery, [chatId, keepFromUuid], { prepare: true });
+    return keepFromUuid.toString();
+  } catch (err) {
+    console.warn("[Scylla] pruneOldMessages failed:", err);
+    return null;
+  }
+}
+
+async function pruneRelatedData(chatId: string, keepFromMessageId: string): Promise<void> {
+  try {
+    await Promise.all([
+      clampReadCursorsAfterPrune(chatId, keepFromMessageId),
+      deleteReactionsBeforeMessage(chatId, keepFromMessageId),
+    ]);
+  } catch (err) {
+    console.warn("[Scylla] pruneRelatedData failed:", err);
+  }
+}
+
 export async function insertMessage(
   chatId: string,
   senderId: string,
@@ -125,6 +160,8 @@ export async function insertMessage(
     [chatId, id, senderId, storedContent, createdAt, messageType, attachmentUrl, attachmentMetadata, encrypted],
     { prepare: true }
   );
+  const keepFrom = await pruneOldMessages(chatId);
+  if (keepFrom) await pruneRelatedData(chatId, keepFrom);
   return { messageId: id.toString(), createdAt };
 }
 

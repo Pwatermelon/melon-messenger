@@ -36,22 +36,28 @@ export async function getReadCursors(chatId: string): Promise<ReadCursorRow[]> {
   }));
 }
 
-/** Returns whether cursor was advanced and its timestamp (caller should broadcast). */
+/** Returns whether cursor was advanced and its current state (caller should broadcast). */
 export async function upsertReadCursor(
   chatId: string,
   userId: string,
   messageId: string
-): Promise<{ advanced: boolean; updatedAt: string | null }> {
+): Promise<{ advanced: boolean; messageId: string; updatedAt: string }> {
   const normalized = normalizeMessageId(messageId);
-  const existing = await db.execute<{ last_read_message_id: string }>(sql`
-    SELECT last_read_message_id FROM chat_read_cursors
+  const existing = await db.execute<{ last_read_message_id: string; updated_at: Date | string }>(sql`
+    SELECT last_read_message_id, updated_at FROM chat_read_cursors
     WHERE chat_id = ${chatId}::uuid AND user_id = ${userId}::uuid
     LIMIT 1
   `);
   const rows = rowsFromExecute(existing);
   const prev = rows[0] ? String(rows[0].last_read_message_id) : null;
+  const prevUpdatedAt = rows[0]?.updated_at
+    ? rows[0].updated_at instanceof Date
+      ? rows[0].updated_at.toISOString()
+      : new Date(String(rows[0].updated_at)).toISOString()
+    : new Date().toISOString();
+
   if (prev && !isNewerMessageId(normalized, prev)) {
-    return { advanced: false, updatedAt: null };
+    return { advanced: false, messageId: normalizeMessageId(prev), updatedAt: prevUpdatedAt };
   }
 
   const updatedAt = new Date().toISOString();
@@ -62,7 +68,7 @@ export async function upsertReadCursor(
       last_read_message_id = EXCLUDED.last_read_message_id,
       updated_at = EXCLUDED.updated_at
   `);
-  return { advanced: !prev || isNewerMessageId(normalized, prev), updatedAt };
+  return { advanced: !prev || isNewerMessageId(normalized, prev), messageId: normalized, updatedAt };
 }
 
 export async function getUserReadCursorsByChat(userId: string): Promise<Map<string, string>> {
@@ -75,4 +81,15 @@ export async function getUserReadCursorsByChat(userId: string): Promise<Map<stri
     map.set(String(r.chat_id), String(r.last_read_message_id).trim().toLowerCase());
   }
   return map;
+}
+
+/** After message retention prune: bump cursors that pointed at deleted messages. */
+export async function clampReadCursorsAfterPrune(chatId: string, keepFromMessageId: string): Promise<void> {
+  const keep = normalizeMessageId(keepFromMessageId);
+  await db.execute(sql`
+    UPDATE chat_read_cursors
+    SET last_read_message_id = ${keep}, updated_at = now()
+    WHERE chat_id = ${chatId}::uuid
+      AND last_read_message_id < ${keep}
+  `);
 }

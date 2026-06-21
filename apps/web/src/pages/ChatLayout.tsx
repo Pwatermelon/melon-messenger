@@ -5,7 +5,7 @@ import AdminConsoleModal from "../components/AdminConsoleModal";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import { useActiveChat } from "../context/ActiveChatContext";
-import { getChats, getChat, createDm, createGroup, searchUser, getContacts, addContact, getChatUnreadCount, uploadFile } from "../api";
+import { getChats, getChat, createDm, createGroup, searchUser, getContacts, addContact, uploadFile } from "../api";
 import type { Chat, User, Message } from "@melon/shared";
 import { mediaUrl } from "../utils/mediaUrl";
 import { BrandIcon } from "../components/BrandIcon";
@@ -84,22 +84,6 @@ export default function ChatLayout() {
   userIdRef.current = user?.id;
   const chatsRef = useRef(chats);
   chatsRef.current = chats;
-  const unreadRefreshTimersRef = useRef<Map<string, number>>(new Map());
-
-  const refreshChatUnreadCount = useCallback((chatId: string) => {
-    const timers = unreadRefreshTimersRef.current;
-    const existing = timers.get(chatId);
-    if (existing) window.clearTimeout(existing);
-    timers.set(
-      chatId,
-      window.setTimeout(() => {
-        timers.delete(chatId);
-        void getChatUnreadCount(chatId).then((count) => {
-          setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, unreadCount: count } : c)));
-        });
-      }, 600)
-    );
-  }, []);
 
   const bumpChatPreview = useCallback((message: Pick<Message, "chatId" | "createdAt" | "content" | "messageType">) => {
     setChats((prev) => applyMessageToChatList(prev, message));
@@ -183,7 +167,10 @@ export default function ChatLayout() {
             next = next.map((c) =>
               c.id === chatId ? { ...c, unreadCount: (c.unreadCount ?? 0) + 1 } : c
             );
-            refreshChatUnreadCount(chatId);
+          } else if (!isSystem && fromOther && isActive) {
+            next = next.map((c) =>
+              c.id === chatId ? { ...c, unreadCount: 0 } : c
+            );
           }
           return next;
         });
@@ -207,7 +194,7 @@ export default function ChatLayout() {
         }
       }
     });
-  }, [subscribe, closeChat, refreshChatUnreadCount]);
+  }, [subscribe, closeChat]);
 
   const refreshChats = useCallback(() => {
     void getChats().then((list) => {

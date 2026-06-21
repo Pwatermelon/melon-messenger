@@ -1,3 +1,5 @@
+import { findMessageElement } from "./chatUnread";
+
 /** Scroll to the true bottom; optional sentinel avoids flex/subpixel gaps. */
 export function scrollListToBottom(listEl: HTMLElement, endEl?: HTMLElement | null): void {
   if (endEl) {
@@ -29,7 +31,7 @@ function findFirstVisibleMessageId(listEl: HTMLElement): string | null {
 }
 
 function getMessageContentTop(listEl: HTMLElement, messageId: string): number | null {
-  const el = listEl.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
+  const el = findMessageElement(listEl, messageId);
   if (!el) return null;
   const listRect = listEl.getBoundingClientRect();
   const elRect = el.getBoundingClientRect();

@@ -15,6 +15,17 @@ export function compareMessageId(a: string, b: string): number {
   return 0;
 }
 
+/** Case-insensitive lookup — message ids may differ in hex casing. */
+export function findMessageElement(listEl: HTMLElement, messageId: string): HTMLElement | null {
+  const needle = messageId.trim().toLowerCase();
+  if (!needle) return null;
+  for (const el of listEl.querySelectorAll("[data-message-id]")) {
+    const id = el.getAttribute("data-message-id")?.trim().toLowerCase();
+    if (id === needle) return el as HTMLElement;
+  }
+  return null;
+}
+
 export function isCountableMessage(m: Message): boolean {
   return (m.messageType ?? "text") !== "system";
 }
@@ -68,7 +79,7 @@ export function countUnreadBelowViewport(
   const listBottom = listEl.getBoundingClientRect().bottom - 12;
   let count = 0;
   for (const m of listUnreadMessages(messages, lastReadMessageId, userId, serverUnreadCount)) {
-    const el = listEl.querySelector(`[data-message-id="${m.id}"]`);
+    const el = findMessageElement(listEl, m.id);
     if (!el) continue;
     const rect = el.getBoundingClientRect();
     if (rect.top >= listBottom) count += 1;
@@ -77,7 +88,7 @@ export function countUnreadBelowViewport(
 }
 
 export function isMessageBelowViewport(listEl: HTMLElement, messageId: string, margin = 12): boolean {
-  const el = listEl.querySelector(`[data-message-id="${messageId}"]`);
+  const el = findMessageElement(listEl, messageId);
   if (!el) return false;
   const listBottom = listEl.getBoundingClientRect().bottom - margin;
   return el.getBoundingClientRect().bottom > listBottom;
@@ -85,7 +96,7 @@ export function isMessageBelowViewport(listEl: HTMLElement, messageId: string, m
 
 /** True when any part of the message row intersects the scrollable list viewport. */
 export function isMessageVisibleInViewport(listEl: HTMLElement, messageId: string, margin = 12): boolean {
-  const el = listEl.querySelector(`[data-message-id="${messageId}"]`);
+  const el = findMessageElement(listEl, messageId);
   if (!el) return false;
   const listRect = listEl.getBoundingClientRect();
   const elRect = el.getBoundingClientRect();
@@ -100,7 +111,7 @@ export function scrollListToMessage(
   block: "start" | "center" | "end" | "nearest" = "center",
   margin = 12
 ): boolean {
-  const el = listEl.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
+  const el = findMessageElement(listEl, messageId);
   if (!el) return false;
 
   const listRect = listEl.getBoundingClientRect();
