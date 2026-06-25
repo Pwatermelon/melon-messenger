@@ -1,5 +1,5 @@
 import * as jose from "jose";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { db, users } from "../db";
 import { toPrivateProfile } from "../lib/userDto";
 import { signUserMedia } from "./mediaAccess";
@@ -74,6 +74,30 @@ export function parseYandexAccountId(raw: unknown): string {
   const id = String(raw).trim();
   if (!id || id === "undefined" || id === "null") throw new Error("Yandex account id invalid");
   return id;
+}
+
+/** Old OAuth stored fake `{login|id}@yandex.ru` or `yandex-{id}@oauth.internal` when mail was missing. */
+export function isDefinitelyLegacySyntheticEmail(
+  email: string,
+  yandexId: string | null | undefined
+): boolean {
+  const normalized = email.trim().toLowerCase();
+  if (normalized.endsWith("@oauth.internal")) return true;
+  if (!normalized.endsWith("@yandex.ru")) return false;
+  const local = normalized.slice(0, -"@yandex.ru".length);
+  return Boolean(yandexId && local === yandexId.toLowerCase());
+}
+
+export function isLikelyLegacySyntheticEmail(
+  email: string,
+  yandexId: string | null | undefined,
+  yandexLogin: string | null | undefined
+): boolean {
+  if (isDefinitelyLegacySyntheticEmail(email, yandexId)) return true;
+  const normalized = email.trim().toLowerCase();
+  if (!normalized.endsWith("@yandex.ru")) return false;
+  const local = normalized.slice(0, -"@yandex.ru".length);
+  return Boolean(yandexLogin && local === yandexLogin.toLowerCase());
 }
 
 function isAdminYandex(info: YandexUserInfo): boolean {
@@ -243,6 +267,24 @@ export async function exchangeYandexCode(
     if (makeAdmin && !user.isAdmin) {
       updates.isAdmin = true;
       updates.betaApproved = true;
+    }
+    if (
+      verifiedEmail &&
+      verifiedEmail !== user.email.toLowerCase() &&
+      isLikelyLegacySyntheticEmail(user.email, user.yandexId, user.yandexLogin)
+    ) {
+      const [emailTaken] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.email, verifiedEmail), ne(users.id, user.id)))
+        .limit(1);
+      if (!emailTaken) {
+        updates.email = verifiedEmail;
+      } else {
+        console.warn(
+          `[Yandex OAuth] legacy email for user ${user.id} not healed: ${verifiedEmail} already taken`
+        );
+      }
     }
     if (Object.keys(updates).length > 0) {
       [user] = await db.update(users).set(updates).where(eq(users.id, user.id)).returning();

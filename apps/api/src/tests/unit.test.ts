@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { parseProfilePhotos } from "../lib/userDto";
 import {
+  isDefinitelyLegacySyntheticEmail,
+  isLikelyLegacySyntheticEmail,
   parseYandexAccountId,
   resolveRedirectUri,
   resolveVerifiedYandexEmail,
@@ -59,6 +61,14 @@ describe("yandex registration identity", () => {
     const err = new YandexOAuthError("no_email", "Нужна почта");
     expect(err.code).toBe("no_email");
     expect(err.message).toBe("Нужна почта");
+  });
+
+  test("detects legacy synthetic emails", () => {
+    expect(isLikelyLegacySyntheticEmail("ivan@yandex.ru", "123", "ivan")).toBe(true);
+    expect(isDefinitelyLegacySyntheticEmail("123@yandex.ru", "123")).toBe(true);
+    expect(isDefinitelyLegacySyntheticEmail("yandex-123@oauth.internal", "123")).toBe(true);
+    expect(isLikelyLegacySyntheticEmail("real@gmail.com", "123", "ivan")).toBe(false);
+    expect(isLikelyLegacySyntheticEmail("ivan@yandex.ru", "999", "petrov")).toBe(false);
   });
 });
 
