@@ -5323,25 +5323,19 @@ a {
   color: var(--accent);
 }
 
-.settings-legal-contact {
-  margin: 0.75rem 1rem 0.25rem;
+.settings-card-flat > .settings-card-hint {
+  padding: 0.65rem 1rem 0.85rem;
   font-size: 0.78rem;
-  color: var(--muted);
-  line-height: 1.45;
+  border-top: 1px solid var(--border);
 }
 
-.settings-legal-contact a {
+.settings-card-flat > .settings-card-hint a {
   color: var(--accent);
 }
 
-.settings-legal-ok {
-  margin: 0.5rem 1rem 0.25rem;
-  font-size: 0.76rem;
-  color: var(--green);
-}
-
-.settings-legal-warn {
-  margin: 0.5rem 1rem 0.25rem;
+.settings-card-flat > .settings-legal-warn {
+  margin: 0;
+  padding: 0 1rem 0.85rem;
   font-size: 0.76rem;
   color: var(--danger);
 }
@@ -8357,24 +8351,32 @@ video.message-circle {
 /* ── Report FAB ── */
 .app-report-fab {
   position: fixed;
-  right: calc(1rem + env(safe-area-inset-right));
-  bottom: calc(1rem + env(safe-area-inset-bottom));
-  z-index: 11000;
-  width: 2.5rem;
-  height: 2.5rem;
+  top: calc(0.5rem + env(safe-area-inset-top));
+  right: calc(0.5rem + env(safe-area-inset-right));
+  z-index: 900;
+  width: 1.625rem;
+  height: 1.625rem;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: var(--accent);
-  color: #fff;
-  font-weight: 800;
-  font-size: 1.1rem;
+  border: 1px solid var(--border);
+  background: var(--surface-elevated);
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 0.7rem;
   line-height: 1;
   cursor: pointer;
-  box-shadow: 0 4px 18px rgba(232, 72, 85, 0.45);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  opacity: 0.88;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s;
 }
 
 .app-report-fab:hover {
-  background: var(--accent-hover);
+  opacity: 1;
+  color: var(--accent);
+  border-color: rgba(232, 72, 85, 0.45);
+}
+
+.layout.layout-compact:not(.layout-chat-open) .app-report-fab {
+  display: none;
 }
 
 .report-modal-overlay {

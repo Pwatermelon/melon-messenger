@@ -100,8 +100,8 @@ export default function DeleteAccountModal({ open, onClose, onDeleted }: Props) 
                 <li>история платежей и согласий в сервисе.</li>
               </ul>
               <p className="delete-account-note">
-                После удаления для входа потребуется снова авторизоваться через Яндекс ID — это будет
-                новая регистрация.
+                После удаления восстановить данные нельзя. При следующей авторизации через Яндекс ID создастся
+                новый профиль.
               </p>
               <label className="delete-account-check">
                 <input

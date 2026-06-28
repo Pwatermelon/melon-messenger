@@ -436,7 +436,7 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
             )}
 
             <section className="settings-card settings-card-flat">
-              <h3 className="settings-card-title">Документы</h3>
+              <h3 className="settings-card-title settings-card-title-inset">Документы</h3>
               <Link to="/legal/privacy" className="settings-row-link" onClick={onClose}>
                 <span>Политика конфиденциальности</span>
                 <span className="settings-row-chevron" aria-hidden>›</span>
@@ -453,7 +453,7 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
                 <span>FAQ</span>
                 <span className="settings-row-chevron" aria-hidden>›</span>
               </Link>
-              <p className="settings-legal-contact">
+              <p className="settings-card-hint">
                 Запросы по персональным данным:{" "}
                 <a href={`mailto:${LEGAL.operator.email}`}>{LEGAL.operator.email}</a>
               </p>
@@ -461,9 +461,6 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
                 <p className="settings-legal-warn">
                   Доступна новая версия документов — перелогиньтесь и примите их снова.
                 </p>
-              )}
-              {legalUpToDate === true && (
-                <p className="settings-legal-ok">Актуальные согласия приняты и сохранены на сервере.</p>
               )}
             </section>
 
@@ -474,8 +471,7 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
             <section className="settings-card settings-danger-zone">
               <h3 className="settings-card-title">Удаление аккаунта</h3>
               <p className="settings-danger-hint">
-                Безвозвратно удалит профиль, переписки и все связанные данные. Для возврата потребуется новый
-                вход через Яндекс ID.
+                Безвозвратно удалит профиль, переписки и все связанные данные. Восстановить аккаунт нельзя.
               </p>
               <button
                 type="button"

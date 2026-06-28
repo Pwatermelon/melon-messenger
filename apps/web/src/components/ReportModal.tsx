@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { submitReport, uploadFile } from "../api";
 import { compressImage } from "../utils/imageCompress";
@@ -19,7 +18,6 @@ type Props = {
 
 export default function ReportModal({ open, onClose }: Props) {
   const { token } = useAuth();
-  const location = useLocation();
   const [category, setCategory] = useState("service");
   const [message, setMessage] = useState("");
   const [screenshot, setScreenshot] = useState<File | null>(null);
@@ -90,10 +88,7 @@ export default function ReportModal({ open, onClose }: Props) {
           </div>
         ) : (
           <form className="report-modal-body" onSubmit={(e) => void handleSubmit(e)}>
-            <p className="report-hint">
-              Опишите, что пошло не так. Можно приложить скриншот. Страница:{" "}
-              <code>{location.pathname}</code>
-            </p>
+            <p className="report-hint">Опишите, что пошло не так. Можно приложить скриншот.</p>
 
             <label className="report-field">
               <span>Категория</span>
