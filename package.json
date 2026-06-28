@@ -1,9 +1,13 @@
 {
   "name": "watermelon-messenger",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "concurrently \"bun run dev:api\" \"bun run dev:web\"",
+    "generate:icons": "node scripts/generate-icons.mjs",
+    "indexnow:ping": "node scripts/indexnow-ping.mjs",
     "dev:api": "bun run --cwd apps/api dev",
     "dev:web": "bun run --cwd apps/web dev",
     "build": "bun run --cwd apps/api build && bun run --cwd apps/web build",
@@ -15,7 +19,8 @@
     "db:studio": "bun run --cwd apps/api db:studio"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.1",
     "concurrently": "^9.1.0",
-    "@playwright/test": "^1.49.1"
+    "pngjs": "^7.0.0"
   }
 }

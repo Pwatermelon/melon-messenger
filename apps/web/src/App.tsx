@@ -16,6 +16,7 @@ import TermsOfService from "./pages/TermsOfService";
 import Faq from "./pages/Faq";
 import NotFound from "./pages/NotFound";
 import CookieBanner from "./components/CookieBanner";
+import YandexMetrika from "./components/YandexMetrika";
 import AppReportButton from "./components/AppReportButton";
 import LegalGate from "./components/LegalGate";
 import RouteMeta from "./components/RouteMeta";
@@ -49,6 +50,7 @@ export default function App() {
 
   return (
     <LegalGate>
+      <YandexMetrika />
       <RouteMeta />
       <CookieBanner />
       <Routes>

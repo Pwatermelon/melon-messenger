@@ -82,9 +82,7 @@ export default function LegalUpdateModal({ status, onAccepted }: Props) {
         <ul className="legal-update-docs">
           {docs.map((doc) => (
             <li key={doc.key}>
-              <Link to={doc.href} target="_blank" rel="noopener noreferrer">
-                {doc.label}
-              </Link>
+              <Link to={doc.href}>{doc.label}</Link>
               <span className="legal-update-doc-meta">
                 {doc.isNew
                   ? `версия ${doc.version}`

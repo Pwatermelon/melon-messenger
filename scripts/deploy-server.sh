@@ -155,10 +155,30 @@ fi
 
 ensure_tls
 
+ping_indexnow() {
+  local key="wm8f3a2c1b9e4d7f6a"
+  local base="https://${DOMAIN}"
+  local payload
+  payload=$(cat <<EOF
+{"host":"${DOMAIN}","key":"${key}","keyLocation":"${base}/${key}.txt","urlList":["${base}/login","${base}/legal/privacy","${base}/legal/personal-data-consent","${base}/legal/terms","${base}/faq","${base}/platinum"]}
+EOF
+)
+  echo "==> IndexNow ping (${DOMAIN})"
+  curl -sf -X POST "https://yandex.com/indexnow" \
+    -H "Content-Type: application/json; charset=utf-8" \
+    -d "${payload}" >/dev/null && echo "    Yandex IndexNow: OK" \
+    || echo "    WARN: Yandex IndexNow failed"
+  curl -sf -X POST "https://api.indexnow.org/indexnow" \
+    -H "Content-Type: application/json; charset=utf-8" \
+    -d "${payload}" >/dev/null && echo "    api.indexnow.org: OK" \
+    || echo "    WARN: api.indexnow.org failed"
+}
+
 echo "==> Waiting for https://${DOMAIN}/api/health ..."
 for i in $(seq 1 40); do
   if curl -sfk "https://${DOMAIN}/api/health" >/dev/null 2>&1; then
     echo "==> Deploy OK (ver ${VERSION}, HTTPS)"
+    ping_indexnow || true
     exit 0
   fi
   sleep 3

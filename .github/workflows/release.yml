@@ -152,6 +152,7 @@ jobs:
             VITE_LEGAL_OPERATOR_NAME=${{ secrets.VITE_LEGAL_OPERATOR_NAME }}
             VITE_LEGAL_OPERATOR_EMAIL=${{ secrets.VITE_LEGAL_OPERATOR_EMAIL }}
             VITE_LEGAL_OPERATOR_INN=${{ secrets.VITE_LEGAL_OPERATOR_INN }}
+            VITE_YANDEX_METRIKA_ID=${{ secrets.VITE_YANDEX_METRIKA_ID }}
           tags: |
             ${{ steps.meta.outputs.web }}:${{ steps.meta.outputs.version }}
 
@@ -233,3 +234,10 @@ jobs:
             cd ${{ secrets.DEPLOY_PATH }}
             export WM_VERSION=${{ needs.gate.outputs.version }}
             ./scripts/deploy-server.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Notify search engines (IndexNow)
+        run: node scripts/indexnow-ping.mjs
