@@ -183,6 +183,7 @@ export type WSServerMessage =
   | { type: "message_edited"; chatId: string; message: Message }
   | { type: "message_deleted"; chatId: string; messageId: string }
   | { type: "chat_removed"; chatId: string }
+  | { type: "chat_created"; chat: Chat }
   | { type: "chat_members_changed"; chatId: string }
   | { type: "read_receipt"; chatId: string; userId: string; messageId: string; updatedAt?: string }
   | { type: "reaction"; chatId: string; messageId: string; reactions: MessageReaction[] }

@@ -2,8 +2,10 @@ import { useState } from "react";
 import { BrandIcon } from "./BrandIcon";
 import AdminPanel from "../pages/AdminPanel";
 import { AdminMonitoringPanel } from "./AdminMonitoringPanel";
+import AdminReportsPanel from "./AdminReportsPanel";
+import AdminLegalPanel from "./AdminLegalPanel";
 
-type TabId = "beta" | "monitoring";
+type TabId = "beta" | "reports" | "legal" | "monitoring";
 
 type Props = {
   open: boolean;
@@ -31,7 +33,7 @@ export default function AdminConsoleModal({ open, onClose }: Props) {
             <BrandIcon size={28} className="admin-brand-icon" />
             <div>
               <h2 className="admin-console-title">Администрирование</h2>
-              <p className="admin-console-subtitle">Beta-доступ и мониторинг</p>
+              <p className="admin-console-subtitle">Beta-доступ, жалобы, согласия и мониторинг</p>
             </div>
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Закрыть">
@@ -52,6 +54,24 @@ export default function AdminConsoleModal({ open, onClose }: Props) {
           <button
             type="button"
             role="tab"
+            aria-selected={tab === "reports"}
+            className={`admin-console-tab${tab === "reports" ? " admin-console-tab-active" : ""}`}
+            onClick={() => setTab("reports")}
+          >
+            Жалобы
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "legal"}
+            className={`admin-console-tab${tab === "legal" ? " admin-console-tab-active" : ""}`}
+            onClick={() => setTab("legal")}
+          >
+            Согласия
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={tab === "monitoring"}
             className={`admin-console-tab${tab === "monitoring" ? " admin-console-tab-active" : ""}`}
             onClick={() => setTab("monitoring")}
@@ -61,7 +81,15 @@ export default function AdminConsoleModal({ open, onClose }: Props) {
         </div>
 
         <div className="admin-console-body" role="tabpanel">
-          {tab === "beta" ? <AdminPanel embedded /> : <AdminMonitoringPanel active={tab === "monitoring"} />}
+          {tab === "beta" ? (
+            <AdminPanel embedded />
+          ) : tab === "reports" ? (
+            <AdminReportsPanel active={tab === "reports"} />
+          ) : tab === "legal" ? (
+            <AdminLegalPanel active={tab === "legal"} />
+          ) : (
+            <AdminMonitoringPanel active={tab === "monitoring"} />
+          )}
         </div>
       </div>
     </div>

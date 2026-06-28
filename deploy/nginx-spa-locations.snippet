@@ -1,0 +1,25 @@
+# Фрагмент для server { } — корректный HTTP 404 для несуществующих URL (Яндекс Вебмастер).
+# Требует map $wm_spa_route из nginx-spa-routes.map.conf в conf.d.
+
+    error_page 404 /404.html;
+
+    location = /404.html {
+        add_header Content-Language ru always;
+        root /usr/share/nginx/html;
+    }
+
+    location /assets/ {
+        try_files $uri =404;
+    }
+
+    location / {
+        try_files $uri $uri/ @wm_spa;
+    }
+
+    location @wm_spa {
+        if ($wm_spa_route = 0) {
+            return 404;
+        }
+        rewrite ^ /index.html break;
+        root /usr/share/nginx/html;
+    }

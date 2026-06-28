@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import { extname, join } from "path";
 import { authPlugin, requireAuth } from "../auth";
+import { legalRequiredPlugin } from "../plugins/legalRequired";
 import { checkRateLimit, clientKey } from "../middleware/rateLimit";
 import { getMediaStorage, uploadsPathFromKey } from "../services/mediaStorage";
 import { registerMediaFile, registerProfileMedia } from "../services/mediaAccess";
@@ -36,6 +37,7 @@ function extFromMime(mime: string): string {
 
 export const uploadRoutes = new Elysia({ prefix: "/upload" })
   .use(authPlugin)
+  .use(legalRequiredPlugin)
   .post("/", async ({ user, request, set }) => {
     const ip = clientKey(request);
     const ok = await checkRateLimit(`upload:${ip}`, 60, 20);
@@ -62,7 +64,7 @@ export const uploadRoutes = new Elysia({ prefix: "/upload" })
     const bytes = new Uint8Array(await file.arrayBuffer());
     await storage.put(filename, bytes, contentType);
 
-    if (purpose === "profile" || purpose === "sticker") {
+    if (purpose === "profile" || purpose === "sticker" || purpose === "report") {
       await registerProfileMedia(filename, u.id, file.name);
     } else {
       await registerMediaFile(filename, u.id, "chat", file.name);

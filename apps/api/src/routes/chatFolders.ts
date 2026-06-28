@@ -1,5 +1,6 @@
 import { Elysia } from "elysia";
 import { authPlugin, requireAuth } from "../auth";
+import { legalRequiredPlugin } from "../plugins/legalRequired";
 import {
   addChatToFolder,
   createFolder,
@@ -12,6 +13,7 @@ import {
 
 export const chatFolderRoutes = new Elysia({ prefix: "/chat-folders" })
   .use(authPlugin)
+  .use(legalRequiredPlugin)
   .get("/", async ({ user, set }) => {
     const u = requireAuth(set)(user);
     const folders = await listFolders(u.id);

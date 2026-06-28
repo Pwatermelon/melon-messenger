@@ -22,6 +22,8 @@ import { startMetricsRefresh, trackHttpRequest } from "./services/prometheus";
 import { db } from "./db";
 import { validateProductionEnv } from "./lib/envCheck";
 import { e2eRoutes, isE2eEnabled } from "./routes/e2e";
+import { reportsRoutes, adminReportsRoutes } from "./routes/reports";
+import { legalRoutes, authLegalRoutes, adminLegalRoutes } from "./routes/legal";
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -191,6 +193,42 @@ async function main() {
     await db.execute(sql`
       DELETE FROM chat_folders WHERE kind = 'favorites'
     `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS reports (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        category varchar(32) NOT NULL DEFAULT 'other',
+        message text NOT NULL,
+        page_url text,
+        screenshot_url text,
+        status varchar(16) NOT NULL DEFAULT 'open',
+        admin_note text,
+        resolved_at timestamptz,
+        resolved_by uuid REFERENCES users(id) ON DELETE SET NULL,
+        created_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS reports_status_created_idx ON reports (status, created_at DESC)
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS user_legal_acceptances (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        batch_id uuid NOT NULL,
+        document_type varchar(32) NOT NULL,
+        document_version varchar(16) NOT NULL,
+        ip_address varchar(64),
+        user_agent varchar(512),
+        accepted_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS user_legal_acceptances_user_idx ON user_legal_acceptances (user_id, accepted_at DESC)
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS user_legal_acceptances_batch_idx ON user_legal_acceptances (batch_id)
+    `);
   } catch (e) {
     console.warn("Schema migration (optional):", e);
   }
@@ -222,8 +260,12 @@ async function main() {
     .use(metricsRoutes)
     .use(rateLimitPlugin({ prefix: "global", windowSec: 60, max: 300 }))
     .use(rateLimitPlugin({ prefix: "auth", windowSec: 60, max: 30 }))
+    .use(legalRoutes)
     .use(authRoutes)
+    .use(authLegalRoutes)
     .use(adminRoutes)
+    .use(adminReportsRoutes)
+    .use(adminLegalRoutes)
     .use(adminObservabilityRoutes)
     .use(paymentRoutes)
     .use(pushRoutes)
@@ -234,6 +276,7 @@ async function main() {
     .use(blockRoutes)
     .use(stickerPackRoutes)
     .use(uploadRoutes)
+    .use(reportsRoutes)
     .use(mediaRoutes)
     .ws("/ws", wsHandlers);
 

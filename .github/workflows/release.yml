@@ -147,6 +147,11 @@ jobs:
           build-args: |
             WM_VERSION=${{ steps.meta.outputs.version }}
             VITE_YANDEX_MAPS_API_KEY=${{ secrets.VITE_YANDEX_MAPS_API_KEY }}
+            VITE_WEB_URL=https://watermelon-messenger.ru
+            VITE_LEGAL_OPERATOR_TYPE=individual
+            VITE_LEGAL_OPERATOR_NAME=${{ secrets.VITE_LEGAL_OPERATOR_NAME }}
+            VITE_LEGAL_OPERATOR_EMAIL=${{ secrets.VITE_LEGAL_OPERATOR_EMAIL }}
+            VITE_LEGAL_OPERATOR_INN=${{ secrets.VITE_LEGAL_OPERATOR_INN }}
           tags: |
             ${{ steps.meta.outputs.web }}:${{ steps.meta.outputs.version }}
 
@@ -193,6 +198,8 @@ jobs:
             deploy/nginx.prod.conf \
             deploy/nginx.http.conf \
             deploy/nginx.bootstrap.conf \
+            deploy/nginx-spa-routes.map.conf \
+            deploy/nginx-spa-locations.snippet \
             deploy/.env.example \
             "${REMOTE}/deploy/"
 

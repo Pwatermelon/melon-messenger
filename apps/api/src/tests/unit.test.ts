@@ -81,3 +81,35 @@ describe("rate limit key", () => {
     expect(clientKey(req)).toBe("1.2.3.4");
   });
 });
+
+describe("at-rest encryption key ring", () => {
+  test("reads data encrypted with previous key after rotation", async () => {
+    const { encryptAtRest, decryptAtRest, resetAtRestKeyCache } = await import("../crypto/atRest");
+
+    process.env.MESSAGE_AT_REST_KEY = "old-key-material-for-tests-abc";
+    process.env.MESSAGE_AT_REST_ACTIVE_KEY_ID = "1";
+    delete process.env.MESSAGE_AT_REST_KEY_1;
+    delete process.env.MESSAGE_AT_REST_KEY_2;
+    resetAtRestKeyCache();
+
+    const legacy = encryptAtRest("secret message");
+    expect(legacy).toContain("enc:v2:1:");
+
+    process.env.MESSAGE_AT_REST_KEY = "new-key-material-for-tests-xyz";
+    process.env.MESSAGE_AT_REST_KEY_1 = "old-key-material-for-tests-abc";
+    process.env.MESSAGE_AT_REST_KEY_2 = "new-key-material-for-tests-xyz";
+    process.env.MESSAGE_AT_REST_ACTIVE_KEY_ID = "2";
+    resetAtRestKeyCache();
+
+    expect(decryptAtRest(legacy)).toBe("secret message");
+
+    const fresh = encryptAtRest("another");
+    expect(fresh).toContain("enc:v2:2:");
+    expect(decryptAtRest(fresh)).toBe("another");
+
+    delete process.env.MESSAGE_AT_REST_KEY_1;
+    delete process.env.MESSAGE_AT_REST_KEY_2;
+    process.env.MESSAGE_AT_REST_ACTIVE_KEY_ID = "1";
+    resetAtRestKeyCache();
+  });
+});

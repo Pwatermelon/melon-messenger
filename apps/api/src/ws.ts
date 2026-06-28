@@ -15,6 +15,7 @@ import { advanceReadCursor } from "./services/chatRead";
 import { incrementUnreadForChat } from "./services/chatUnread";
 import { isSenderBlockedByRecipient } from "./services/userBlocks";
 import { trackSocket, untrackSocket } from "./wsRegistry";
+import { getUserLegalStatus } from "./services/legalAcceptance";
 import type { WSClientMessage, WSServerMessage, Message } from "@melon/shared";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "watermelon-dev-secret-change-in-prod";
@@ -41,8 +42,38 @@ export async function publishChatEvent(chatId: string, payload: WSServerMessage)
   wsServerRef?.publish(chatTopic(chatId), data);
 }
 
+/** Deliver a chat message to all members even if they have not subscribed to the chat topic yet. */
+export async function publishMessageEvent(
+  chatId: string,
+  payload: Extract<WSServerMessage, { type: "message" }>
+): Promise<void> {
+  const data = JSON.stringify(payload);
+  await redis.publishToChat(chatId, data);
+  wsServerRef?.publish(chatTopic(chatId), data);
+  const rows = await db
+    .select({ userId: chatMembers.userId })
+    .from(chatMembers)
+    .where(eq(chatMembers.chatId, chatId));
+  await Promise.all(
+    rows.map(async ({ userId }) => {
+      await redis.publishToUser(userId, data);
+      wsServerRef?.publish(userTopic(userId), data);
+    })
+  );
+}
+
 function chatTopic(chatId: string) {
   return `chat:${chatId}`;
+}
+
+function userTopic(userId: string) {
+  return `user:${userId}`;
+}
+
+export async function publishUserEvent(userId: string, payload: WSServerMessage): Promise<void> {
+  const data = JSON.stringify(payload);
+  await redis.publishToUser(userId, data);
+  wsServerRef?.publish(userTopic(userId), data);
 }
 
 async function isChatMember(chatId: string, userId: string): Promise<boolean> {
@@ -146,6 +177,11 @@ export const wsHandlers = {
         try {
           const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
           if (!u) throw new Error("User not found");
+          const { upToDate } = await getUserLegalStatus(u.id);
+          if (!upToDate) {
+            send(ws, { type: "auth_error", error: "legal_acceptance_required" });
+            return;
+          }
           ws.data.userId = u.id;
           const authOk = {
             type: "auth_ok" as const,
@@ -161,6 +197,7 @@ export const wsHandlers = {
             },
           };
           send(ws, authOk);
+          ws.subscribe(userTopic(u.id));
           trackSocket(u.id, ws);
           redis.setPresence(u.id).catch((err) => console.warn("[WS] setPresence failed:", err));
         } catch (e) {
@@ -258,7 +295,7 @@ export const wsHandlers = {
             attachmentMetadata: attachmentMetadata ?? null,
           };
           const payload: WSServerMessage = { type: "message", message };
-          await publishChatEvent(chatId, payload);
+          await publishMessageEvent(chatId, payload);
 
           const preview = content.slice(0, 120) || "Новое сообщение";
           const title = u?.username ?? "Watermelon";
@@ -348,11 +385,16 @@ export const wsHandlers = {
   },
 };
 
-export { kickUserFromChat } from "./wsRegistry";
+export { kickUserFromChat, notifyUserWs } from "./wsRegistry";
 
 export function setupRedisSubscriber(server: { publish: (topic: string, data: string) => number }) {
-  redis.redisSub.psubscribe(`${redis.WS_CHANNEL_PREFIX}*`);
+  redis.redisSub.psubscribe(`${redis.WS_CHANNEL_PREFIX}*`, `${redis.WS_USER_CHANNEL_PREFIX}*`);
   redis.redisSub.on("pmessage", (_pattern, channel, payload) => {
+    if (channel.startsWith(redis.WS_USER_CHANNEL_PREFIX)) {
+      const userId = channel.slice(redis.WS_USER_CHANNEL_PREFIX.length);
+      server.publish(userTopic(userId), payload);
+      return;
+    }
     const chatId = channel.replace(redis.WS_CHANNEL_PREFIX, "");
     server.publish(chatTopic(chatId), payload);
   });

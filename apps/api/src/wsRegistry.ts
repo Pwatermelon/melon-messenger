@@ -26,6 +26,18 @@ export function untrackSocket(userId: string, ws: ServerWebSocket<TrackedWSData>
   if (byUser.get(userId)?.size === 0) byUser.delete(userId);
 }
 
+/** Push an event to all open WebSocket connections for a user. */
+export function notifyUserWs(userId: string, payload: WSServerMessage) {
+  const data = JSON.stringify(payload);
+  for (const ws of byUser.get(userId) ?? []) {
+    try {
+      ws.send(data);
+    } catch {
+      // ignore closed sockets
+    }
+  }
+}
+
 /** Force-unsubscribe a user from a chat topic and notify their clients. */
 export function kickUserFromChat(userId: string, chatId: string, payload: WSServerMessage) {
   const topic = chatTopic(chatId);
@@ -38,6 +50,18 @@ export function kickUserFromChat(userId: string, chatId: string, payload: WSServ
       // ignore closed sockets
     }
   }
+}
+
+export function disconnectUser(userId: string, payload?: WSServerMessage) {
+  for (const ws of byUser.get(userId) ?? []) {
+    try {
+      if (payload) ws.send(JSON.stringify(payload));
+      ws.close(4000, "account_deleted");
+    } catch {
+      // ignore closed sockets
+    }
+  }
+  byUser.delete(userId);
 }
 
 export function getWsStats(): { connections: number; users: number } {

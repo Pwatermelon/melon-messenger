@@ -32,11 +32,20 @@ export async function isOnline(userId: string): Promise<boolean> {
 }
 
 export const WS_CHANNEL_PREFIX = "ws:chat:";
+export const WS_USER_CHANNEL_PREFIX = "ws:user:";
 
 export function chatChannel(chatId: string): string {
   return `${WS_CHANNEL_PREFIX}${chatId}`;
 }
 
+export function userChannel(userId: string): string {
+  return `${WS_USER_CHANNEL_PREFIX}${userId}`;
+}
+
 export async function publishToChat(chatId: string, payload: string): Promise<void> {
   await redis.publish(chatChannel(chatId), payload);
+}
+
+export async function publishToUser(userId: string, payload: string): Promise<void> {
+  await redis.publish(userChannel(userId), payload);
 }

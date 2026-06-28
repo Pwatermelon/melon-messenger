@@ -26,7 +26,7 @@ Production: [watermelon-messenger.ru](https://watermelon-messenger.ru)
 
 Watermelon Messenger — self-hosted мессенджер в духе Telegram: мгновенная доставка через WebSocket, история в ScyllaDB, пользователи и чаты в PostgreSQL. Вход только через [Yandex ID](https://oauth.yandex.ru/). Есть веб-клиент (React), API на Bun и заготовки native-приложений (SwiftUI).
 
-Монорепозиторий: `apps/api`, `apps/web`, `apps/native`, общие типы в `packages/shared`.
+Монорепозиторий: `apps/api`, `apps/web`, общие типы в `packages/shared`. Native-клиенты — в отдельных репозиториях: [watermelon-ios](https://github.com/Pwatermelon/watermelon-ios), [watermelon-android](https://github.com/Pwatermelon/watermelon-android).
 
 ---
 
@@ -237,7 +237,7 @@ WM_VERSION=1.0.12 ./scripts/deploy-server.sh
 
 3. Иконка для Yandex OAuth: `apps/web/public/yandex-oauth-icon.png` (200×200, квадрат PNG).
 
-4. Native: см. [apps/native/YANDEX_OAUTH.md](apps/native/YANDEX_OAUTH.md).
+4. Native (iOS / macOS): см. [YANDEX_OAUTH.md](https://github.com/Pwatermelon/watermelon-ios/blob/main/YANDEX_OAUTH.md) в репозитории watermelon-ios.
 
 **API (основное):**
 
@@ -256,14 +256,22 @@ WM_VERSION=1.0.12 ./scripts/deploy-server.sh
 watermelon-messenger/
 ├── apps/
 │   ├── api/              # Bun + Elysia, REST, WebSocket, Drizzle
-│   ├── web/              # React + Vite, PWA
-│   └── native/           # SwiftUI (iOS / macOS)
+│   └── web/              # React + Vite, PWA
 ├── packages/
 │   └── shared/           # Общие TypeScript-типы
 ├── deploy/               # docker-compose prod, nginx, .env.example
 ├── scripts/              # deploy-server.sh, backup, certbot
 └── .github/workflows/    # release.yml
 ```
+
+### Другие репозитории проекта
+
+| Репозиторий | Назначение |
+|-------------|------------|
+| [watermelon-messenger](https://github.com/Pwatermelon/watermelon-messenger) | API, web, deploy (этот) |
+| [watermelon-ios](https://github.com/Pwatermelon/watermelon-ios) | SwiftUI (iOS / macOS) |
+| [watermelon-android](https://github.com/Pwatermelon/watermelon-android) | Android (заготовка) |
+| [watermelon-infra](https://github.com/Pwatermelon/watermelon-infra) | Инфраструктура (будущий переезд в Yandex Cloud) |
 
 ---
 
@@ -303,4 +311,4 @@ bun run db:studio    # Drizzle Studio
 
 - Production: [watermelon-messenger.ru](https://watermelon-messenger.ru)
 - Деплой: [deploy/DEPLOY.md](deploy/DEPLOY.md)
-- Native OAuth: [apps/native/YANDEX_OAUTH.md](apps/native/YANDEX_OAUTH.md)
+- Native OAuth: [watermelon-ios/YANDEX_OAUTH.md](https://github.com/Pwatermelon/watermelon-ios/blob/main/YANDEX_OAUTH.md)

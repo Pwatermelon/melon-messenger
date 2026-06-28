@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { LEGAL } from "../config/legal";
 import { useTheme } from "../context/ThemeContext";
-import { updateProfile, uploadFile } from "../api";
+import { updateProfile, uploadFile, getLegalStatus } from "../api";
 import { mediaUrl } from "../utils/mediaUrl";
 import { compressImage } from "../utils/imageCompress";
 import { subscribeToPush, unsubscribeFromPush, isPushServerConfigured } from "../lib/pushNotifications";
@@ -14,6 +15,7 @@ import ImageCropModal from "./ImageCropModal";
 import StickerPacksSettings from "./StickerPacksSettings";
 import BlockedUsersSettings from "./BlockedUsersSettings";
 import ChatFoldersSettings from "./ChatFoldersSettings";
+import DeleteAccountModal from "./DeleteAccountModal";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 
 type Props = {
@@ -66,11 +68,19 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
   const [stickerPacksOpen, setStickerPacksOpen] = useState(false);
   const [blockedUsersOpen, setBlockedUsersOpen] = useState(false);
   const [chatFoldersOpen, setChatFoldersOpen] = useState(false);
+  const [legalUpToDate, setLegalUpToDate] = useState<boolean | null>(null);
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const yandexLogin = user?.yandexLogin ?? null;
   const birthday = user?.birthday ?? null;
   const birthdayLabel = birthday ? formatBirthdayLabel(birthday) : null;
+
+  useEffect(() => {
+    void getLegalStatus()
+      .then((s) => setLegalUpToDate(s.upToDate))
+      .catch(() => setLegalUpToDate(null));
+  }, []);
 
   useEffect(() => {
     setUsername(user?.username ?? "");
@@ -154,6 +164,14 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
 
   function handleLogout() {
     logoutViaYandex(logout);
+  }
+
+  function handleAccountDeleted() {
+    setDeleteAccountOpen(false);
+    onClose();
+    logout();
+    localStorage.removeItem("wm_pd_consent_v1");
+    window.location.href = "/login?deleted=1";
   }
 
   async function toggleBirthdayVisible() {
@@ -417,12 +435,66 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
               </section>
             )}
 
+            <section className="settings-card settings-card-flat">
+              <h3 className="settings-card-title">Документы</h3>
+              <Link to="/legal/privacy" className="settings-row-link" onClick={onClose}>
+                <span>Политика конфиденциальности</span>
+                <span className="settings-row-chevron" aria-hidden>›</span>
+              </Link>
+              <Link to="/legal/personal-data-consent" className="settings-row-link" onClick={onClose}>
+                <span>Согласие на обработку ПДн</span>
+                <span className="settings-row-chevron" aria-hidden>›</span>
+              </Link>
+              <Link to="/legal/terms" className="settings-row-link" onClick={onClose}>
+                <span>Пользовательское соглашение</span>
+                <span className="settings-row-chevron" aria-hidden>›</span>
+              </Link>
+              <Link to="/faq" className="settings-row-link" onClick={onClose}>
+                <span>FAQ</span>
+                <span className="settings-row-chevron" aria-hidden>›</span>
+              </Link>
+              <p className="settings-legal-contact">
+                Запросы по персональным данным:{" "}
+                <a href={`mailto:${LEGAL.operator.email}`}>{LEGAL.operator.email}</a>
+              </p>
+              {legalUpToDate === false && (
+                <p className="settings-legal-warn">
+                  Доступна новая версия документов — перелогиньтесь и примите их снова.
+                </p>
+              )}
+              {legalUpToDate === true && (
+                <p className="settings-legal-ok">Актуальные согласия приняты и сохранены на сервере.</p>
+              )}
+            </section>
+
             <button type="button" className="settings-logout-btn" onClick={handleLogout}>
               Выйти из аккаунта
             </button>
+
+            <section className="settings-card settings-danger-zone">
+              <h3 className="settings-card-title">Удаление аккаунта</h3>
+              <p className="settings-danger-hint">
+                Безвозвратно удалит профиль, переписки и все связанные данные. Для возврата потребуется новый
+                вход через Яндекс ID.
+              </p>
+              <button
+                type="button"
+                className="settings-delete-account-btn"
+                onClick={() => setDeleteAccountOpen(true)}
+              >
+                Удалить аккаунт
+              </button>
+            </section>
           </div>
         </div>
       </div>
+      {deleteAccountOpen && (
+        <DeleteAccountModal
+          open={deleteAccountOpen}
+          onClose={() => setDeleteAccountOpen(false)}
+          onDeleted={handleAccountDeleted}
+        />
+      )}
       {stickerPacksOpen && <StickerPacksSettings onClose={() => setStickerPacksOpen(false)} />}
       {chatFoldersOpen && <ChatFoldersSettings onClose={() => setChatFoldersOpen(false)} />}
       {blockedUsersOpen && <BlockedUsersSettings onClose={() => setBlockedUsersOpen(false)} />}

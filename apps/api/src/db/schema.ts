@@ -48,6 +48,32 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const reports = pgTable("reports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  category: varchar("category", { length: 32 }).notNull().default("other"),
+  message: text("message").notNull(),
+  pageUrl: text("page_url"),
+  screenshotUrl: text("screenshot_url"),
+  status: varchar("status", { length: 16 }).notNull().default("open"),
+  adminNote: text("admin_note"),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  resolvedBy: uuid("resolved_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** Аудит принятия юридических документов (152-ФЗ). */
+export const userLegalAcceptances = pgTable("user_legal_acceptances", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  batchId: uuid("batch_id").notNull(),
+  documentType: varchar("document_type", { length: 32 }).notNull(),
+  documentVersion: varchar("document_version", { length: 16 }).notNull(),
+  ipAddress: varchar("ip_address", { length: 64 }),
+  userAgent: varchar("user_agent", { length: 512 }),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const chats = pgTable("chats", {
   id: uuid("id").primaryKey().defaultRandom(),
   type: chatTypeEnum("type").notNull().default("dm"),
@@ -165,5 +191,7 @@ export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Payment = typeof payments.$inferSelect;
 export type PushSubscription = typeof pushSubscriptions.$inferSelect;
+export type Report = typeof reports.$inferSelect;
+export type UserLegalAcceptance = typeof userLegalAcceptances.$inferSelect;
 export type Chat = typeof chats.$inferSelect;
 export type ChatMember = typeof chatMembers.$inferInsert;

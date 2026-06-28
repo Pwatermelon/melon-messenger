@@ -88,6 +88,7 @@ const deleteOlderQuery = `DELETE FROM ${MESSAGES_TABLE} WHERE chat_id = ? AND me
 const selectIdsQuery = `SELECT message_id FROM ${MESSAGES_TABLE} WHERE chat_id = ? LIMIT ?`;
 const deleteByChatQuery = `DELETE FROM ${MESSAGES_TABLE} WHERE chat_id = ?`;
 const updateContentQuery = `UPDATE ${MESSAGES_TABLE} SET content = ?, edited_at = ? WHERE chat_id = ? AND message_id = ?`;
+const updateAtRestQuery = `UPDATE ${MESSAGES_TABLE} SET content = ?, attachment_metadata = ? WHERE chat_id = ? AND message_id = ?`;
 
 const UNREAD_PAGE_SIZE = 250;
 
@@ -294,6 +295,39 @@ export async function countUnreadMessages(
   }
 }
 
+export async function getMessageRowsRaw(
+  chatId: string,
+  limit: number,
+  beforeMessageId?: string
+): Promise<Array<{ message_id: string; content: string; attachment_metadata: string | null }>> {
+  const params = beforeMessageId ? [chatId, beforeMessageId, limit] : [chatId, limit];
+  const query = beforeMessageId ? selectFromQuery : selectQuery;
+  try {
+    const result = await scyllaClient.execute(query, params, { prepare: true });
+    return result.rows.map((row) => ({
+      message_id: row.message_id?.toString() ?? "",
+      content: String(row.content ?? ""),
+      attachment_metadata: row.attachment_metadata != null ? String(row.attachment_metadata) : null,
+    }));
+  } catch (err) {
+    console.warn("[Scylla] getMessageRowsRaw failed:", err);
+    return [];
+  }
+}
+
+export async function updateMessageAtRest(
+  chatId: string,
+  messageId: string,
+  content: string,
+  attachmentMetadata: string | null
+): Promise<void> {
+  await scyllaClient.execute(
+    updateAtRestQuery,
+    [content, attachmentMetadata, chatId, messageId],
+    { prepare: true }
+  );
+}
+
 export async function updateMessageContent(
   chatId: string,
   messageId: string,
@@ -329,4 +363,30 @@ export async function deleteChatMessages(chatId: string): Promise<void> {
   } catch (err) {
     console.warn("[Scylla] deleteChatMessages failed:", err);
   }
+}
+
+/** Deletes all messages from a sender in a chat. Returns deleted message ids. */
+export async function deleteMessagesBySender(chatId: string, senderId: string): Promise<string[]> {
+  const normalizedSender = senderId.toLowerCase();
+  const deleted: string[] = [];
+  let before: string | undefined;
+  const pageSize = 200;
+
+  for (;;) {
+    const batch = await getMessages(chatId, pageSize, before);
+    if (batch.length === 0) break;
+
+    for (const row of batch) {
+      const rowSender = String(row.sender_id?.toString?.() ?? row.sender_id).toLowerCase();
+      if (rowSender === normalizedSender) {
+        await deleteMessage(chatId, row.message_id);
+        deleted.push(row.message_id);
+      }
+    }
+
+    if (batch.length < pageSize) break;
+    before = batch[batch.length - 1]!.message_id;
+  }
+
+  return deleted;
 }

@@ -10,6 +10,15 @@ import Platinum from "./pages/Platinum";
 import ChatLayout from "./pages/ChatLayout";
 import ChatLegacyRedirect from "./pages/ChatLegacyRedirect";
 import IconPreview from "./pages/IconPreview";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import PersonalDataConsent from "./pages/PersonalDataConsent";
+import TermsOfService from "./pages/TermsOfService";
+import Faq from "./pages/Faq";
+import NotFound from "./pages/NotFound";
+import CookieBanner from "./components/CookieBanner";
+import AppReportButton from "./components/AppReportButton";
+import LegalGate from "./components/LegalGate";
+import RouteMeta from "./components/RouteMeta";
 
 function AuthRequired({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -36,12 +45,21 @@ function ProfileRedirect() {
 }
 
 export default function App() {
+  const { user, isLoading } = useAuth();
+
   return (
-    <Routes>
+    <LegalGate>
+      <RouteMeta />
+      <CookieBanner />
+      <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/platinum" element={<Platinum />} />
       <Route path="/icon" element={<IconPreview />} />
+      <Route path="/legal/privacy" element={<PrivacyPolicy />} />
+      <Route path="/legal/personal-data-consent" element={<PersonalDataConsent />} />
+      <Route path="/legal/terms" element={<TermsOfService />} />
+      <Route path="/faq" element={<Faq />} />
 
       <Route path="/beta/pending" element={<AuthRequired><BetaPending /></AuthRequired>} />
       <Route path="/beta/welcome" element={<AuthRequired><BetaWelcome /></AuthRequired>} />
@@ -55,7 +73,9 @@ export default function App() {
         <Route path="profile/:userId" element={<ProfileRedirect />} />
       </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<NotFound />} />
     </Routes>
+      {user && !isLoading && <AppReportButton />}
+    </LegalGate>
   );
 }

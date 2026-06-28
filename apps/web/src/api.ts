@@ -25,15 +25,25 @@ export async function getChats(): Promise<
   return res.json();
 }
 
-export async function createDm(userId: string): Promise<{
-  id: string;
-  type: string;
-  name: string | null;
-  createdAt: string;
-  lastMessageAt: string | null;
-  lastMessagePreview: string | null;
-  members: Array<{ id: string; username: string; avatarUrl: string | null; subscriptionTier?: string; role: string }>;
-}> {
+export type DmResolveResult =
+  | {
+      draft: false;
+      chat: {
+        id: string;
+        type: string;
+        name: string | null;
+        createdAt: string;
+        lastMessageAt: string | null;
+        lastMessagePreview: string | null;
+        members: Array<{ id: string; username: string; avatarUrl: string | null; subscriptionTier?: string; role: string }>;
+      };
+    }
+  | {
+      draft: true;
+      peer: User;
+    };
+
+export async function resolveDm(userId: string): Promise<DmResolveResult> {
   const res = await fetch(`${getApiUrl()}/chats/dm`, {
     method: "POST",
     headers: {
@@ -56,7 +66,7 @@ export async function createDm(userId: string): Promise<{
       (res.status === 404 && "Пользователь не найден") ||
       (res.status === 400 && (data.error || "Неверный запрос")) ||
       (res.status >= 500 && "Ошибка сервера. Попробуйте позже.") ||
-      "Не удалось создать чат. Попробуйте войти снова.";
+      "Не удалось открыть диалог. Попробуйте войти снова.";
     throw new Error(msg);
   }
   return res.json();
@@ -75,6 +85,30 @@ const chatResponseType = {
 };
 
 export type ChatResponse = typeof chatResponseType;
+
+export async function sendDmMessage(
+  userId: string,
+  opts: {
+    content: string;
+    messageType?: MessageType;
+    attachmentUrl?: string | null;
+    attachmentMetadata?: AttachmentMetadata | null;
+  }
+): Promise<{ chat: ChatResponse; message: { id: string; chatId: string; content: string; createdAt: string } }> {
+  const res = await fetch(`${getApiUrl()}/chats/dm/send`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ userId, ...opts }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Не удалось отправить сообщение");
+  }
+  return res.json();
+}
 
 export async function createGroup(
   name: string,
@@ -601,6 +635,119 @@ export async function revokeUser(userId: string): Promise<void> {
   }
 }
 
+export type AdminReport = {
+  id: string;
+  category: string;
+  message: string;
+  pageUrl: string | null;
+  screenshotUrl: string | null;
+  status: "open" | "resolved";
+  adminNote: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+  user: { id: string; yandexLogin: string | null; username: string };
+};
+
+export async function submitReport(body: {
+  message: string;
+  category?: string;
+  pageUrl?: string;
+  screenshotUrl?: string;
+}): Promise<{ id: string }> {
+  const res = await fetch(`${getApiUrl()}/reports`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Не удалось отправить обращение");
+  }
+  return res.json();
+}
+
+export async function getAdminReports(status?: "open" | "resolved"): Promise<AdminReport[]> {
+  const q = status ? `?status=${status}` : "";
+  const res = await fetch(`${getApiUrl()}/admin/reports${q}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Forbidden");
+  }
+  return res.json();
+}
+
+export async function resolveAdminReport(id: string, note?: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/admin/reports/${encodeURIComponent(id)}/resolve`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify(note ? { note } : {}),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Не удалось закрыть жалобу");
+  }
+}
+
+export type AdminLegalAcceptance = {
+  id: string;
+  batchId: string;
+  documentType: string;
+  documentVersion: string;
+  ipAddress: string | null;
+  acceptedAt: string;
+  user: { id: string; yandexLogin: string | null; username: string };
+};
+
+export async function getAdminLegalAcceptances(): Promise<AdminLegalAcceptance[]> {
+  const res = await fetch(`${getApiUrl()}/admin/legal/acceptances`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "Forbidden");
+  }
+  return res.json();
+}
+
+export type LegalStatus = {
+  current: { personal_data: string; terms: string; privacy: string };
+  accepted: Partial<
+    Record<string, { version: string; acceptedAt: string }>
+  >;
+  upToDate: boolean;
+};
+
+export async function getLegalStatus(): Promise<LegalStatus> {
+  const res = await fetch(`${getApiUrl()}/auth/legal/status`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error("Failed to load legal status");
+  return res.json();
+}
+
+export async function acceptLegalDocuments(bundle: LegalStatus["current"]): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/auth/legal/accept`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify(bundle),
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error || "Не удалось сохранить согласие");
+  }
+}
+
 export type GrafanaDashboard = {
   uid: string;
   title: string;
@@ -650,7 +797,7 @@ export async function signMediaPaths(paths: string[]): Promise<Record<string, st
 
 export async function uploadFile(
   file: File,
-  opts?: { purpose?: "chat" | "profile" | "sticker" }
+  opts?: { purpose?: "chat" | "profile" | "sticker" | "report" }
 ): Promise<{ url: string; path: string; fileName: string; mimeType: string; size: number }> {
   const form = new FormData();
   form.append("file", file);
@@ -779,4 +926,19 @@ export async function uninstallStickerPack(id: string): Promise<void> {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
   if (!res.ok) throw new Error("Failed to remove sticker pack");
+}
+
+export async function deleteAccount(confirmPhrase: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/auth/me/delete`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ confirmPhrase }),
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error || "Не удалось удалить аккаунт");
+  }
 }

@@ -6,7 +6,7 @@ import AdminConsoleModal from "../components/AdminConsoleModal";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocketContext } from "../context/WebSocketContext";
 import { useActiveChat } from "../context/ActiveChatContext";
-import { getChats, getChat, createDm, createGroup, searchUser, getContacts, addContact, uploadFile, getChatFolders, markChatReadAllApi, addChatToFolderApi, removeChatFromFolderApi, deleteChat } from "../api";
+import { getChats, getChat, resolveDm, sendDmMessage, createGroup, searchUser, getContacts, addContact, uploadFile, getChatFolders, markChatReadAllApi, addChatToFolderApi, removeChatFromFolderApi, deleteChat } from "../api";
 import type { Chat, ChatFolder, User, Message } from "@melon/shared";
 import { VIRTUAL_FOLDER_ALL } from "@melon/shared";
 import { mediaUrl } from "../utils/mediaUrl";
@@ -88,8 +88,10 @@ export default function ChatLayout() {
   const [activeFolderId, setActiveFolderId] = useState(loadActiveFolderId);
   const [chatListMenu, setChatListMenu] = useState<ChatListMenuState | null>(null);
   const [profileUserId, setProfileUserId] = useState<string | null | undefined>(undefined);
+  const [draftDmPeer, setDraftDmPeer] = useState<User | null>(null);
   const newChatMenuRef = useRef<HTMLDivElement>(null);
   const subscribedChatsRef = useRef<Set<string>>(new Set());
+  const seenWsMessagesRef = useRef(new Set<string>());
   const activeChatIdRef = useRef(activeChatId);
   activeChatIdRef.current = activeChatId;
   const userIdRef = useRef(user?.id);
@@ -100,6 +102,15 @@ export default function ChatLayout() {
   const bumpChatPreview = useCallback((message: Pick<Message, "chatId" | "createdAt" | "content" | "messageType">) => {
     setChats((prev) => applyMessageToChatList(prev, message));
   }, []);
+
+  const ensureChatSubscribed = useCallback(
+    (chatId: string) => {
+      if (!ready || subscribedChatsRef.current.has(chatId)) return;
+      send({ type: "subscribe", chatId });
+      subscribedChatsRef.current.add(chatId);
+    },
+    [ready, send]
+  );
 
   function openProfile(userId?: string) {
     setProfileUserId(userId ?? null);
@@ -247,8 +258,26 @@ export default function ChatLayout() {
 
   useEffect(() => {
     return subscribe((msg) => {
+      if (msg.type === "chat_created") {
+        ensureChatSubscribed(msg.chat.id);
+        setChats((prev) => {
+          if (prev.some((c) => c.id === msg.chat.id)) return prev;
+          return upsertChatInList(prev, {
+            ...msg.chat,
+            unreadCount: msg.chat.unreadCount ?? 0,
+          });
+        });
+        return;
+      }
       if (msg.type === "message") {
         const incoming = msg.message;
+        const dedupeKey = `${incoming.chatId}:${incoming.id}`;
+        if (seenWsMessagesRef.current.has(dedupeKey)) return;
+        seenWsMessagesRef.current.add(dedupeKey);
+        if (seenWsMessagesRef.current.size > 500) {
+          seenWsMessagesRef.current = new Set([...seenWsMessagesRef.current].slice(-250));
+        }
+        ensureChatSubscribed(incoming.chatId);
         const isSystem = (incoming.messageType ?? "text") === "system";
         const fromOther = incoming.senderId !== userIdRef.current;
         const isActive = incoming.chatId === activeChatIdRef.current;
@@ -262,7 +291,7 @@ export default function ChatLayout() {
           }
         }
 
-        setChats((prev) => {
+        const applyMessageUpdate = (prev: Chat[]) => {
           const chatId = incoming.chatId;
           let next = applyMessageToChatList(prev, incoming);
           if (!isSystem && fromOther && !isActive) {
@@ -275,7 +304,22 @@ export default function ChatLayout() {
             );
           }
           return next;
-        });
+        };
+
+        if (!chatsRef.current.some((c) => c.id === incoming.chatId)) {
+          void getChat(incoming.chatId).then((c) => {
+            if (!c) return;
+            setChats((prev) => {
+              const withChat = prev.some((x) => x.id === incoming.chatId)
+                ? prev
+                : upsertChatInList(prev, { ...(c as Chat), unreadCount: (c as Chat).unreadCount ?? 0 });
+              return applyMessageUpdate(withChat);
+            });
+          });
+          return;
+        }
+
+        setChats(applyMessageUpdate);
       }
       if (msg.type === "message_edited") {
         setChats((prev) => applyMessageToChatList(prev, msg.message));
@@ -296,7 +340,7 @@ export default function ChatLayout() {
         }
       }
     });
-  }, [subscribe, closeChat]);
+  }, [subscribe, closeChat, ensureChatSubscribed]);
 
   const refreshChats = useCallback(() => {
     void getChats().then((list) => {
@@ -417,33 +461,42 @@ export default function ChatLayout() {
     }
   }
 
+  function closeActiveChat() {
+    closeChat();
+    setDraftDmPeer(null);
+  }
+
   async function startDm(otherUserId: string): Promise<boolean> {
     setDmError("");
     try {
-      const chat = await createDm(otherUserId);
+      const result = await resolveDm(otherUserId);
       setDmOpen(false);
       setDmLogin("");
       setDmUser(null);
       setSidebarUser(null);
       setSidebarQuery("");
       setSidebarTab("chats");
-      setChats((prev) => upsertChatInList(prev, { ...(chat as Chat), unreadCount: 0 }));
-      await openChat(chat.id);
-      return true;
-    } catch (e) {
-      if (e instanceof Error && e.message.includes("already")) {
-        const existing = chatsRef.current.find((c) => c.members.some((m) => m.id === otherUserId));
-        if (existing) {
-          setSidebarTab("chats");
-          setChats((prev) => upsertChatInList(prev, existing));
-          await openChat(existing.id);
-        }
-        setDmOpen(false);
+      if (!result.draft) {
+        setDraftDmPeer(null);
+        setChats((prev) => upsertChatInList(prev, { ...(result.chat as Chat), unreadCount: result.chat.unreadCount ?? 0 }));
+        ensureChatSubscribed(result.chat.id);
+        await openChat(result.chat.id);
         return true;
       }
-      setDmError(e instanceof Error ? e.message : "Не удалось создать чат");
+      closeChat();
+      setDraftDmPeer(result.peer);
+      return true;
+    } catch (e) {
+      setDmError(e instanceof Error ? e.message : "Не удалось открыть диалог");
       return false;
     }
+  }
+
+  function onDraftChatCreated(chat: Chat) {
+    setDraftDmPeer(null);
+    setChats((prev) => upsertChatInList(prev, { ...chat, unreadCount: 0 }));
+    ensureChatSubscribed(chat.id);
+    void openChat(chat.id);
   }
 
   function resetGroupForm() {
@@ -570,7 +623,7 @@ export default function ChatLayout() {
 
   return (
     <div
-      className={`layout${activeChatId ? " layout-chat-open" : ""}${compact ? " layout-compact" : ""}`}
+      className={`layout${activeChatId || draftDmPeer ? " layout-chat-open" : ""}${compact ? " layout-compact" : ""}`}
       data-testid="messenger-shell"
     >
       <aside className="sidebar">
@@ -768,10 +821,12 @@ export default function ChatLayout() {
         </div>
       </aside>
       <main className="main">
-        {activeChatId ? (
+        {activeChatId || draftDmPeer ? (
           <ChatRoom
-            chatId={activeChatId}
-            onClose={closeChat}
+            chatId={activeChatId ?? undefined}
+            draftPeer={draftDmPeer ?? undefined}
+            onDraftChatCreated={onDraftChatCreated}
+            onClose={closeActiveChat}
             openProfile={openProfile}
             onSyncPreview={bumpChatPreview}
             showBack={compact}

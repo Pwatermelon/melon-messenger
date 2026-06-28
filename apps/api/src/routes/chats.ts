@@ -1,14 +1,15 @@
 import { Elysia } from "elysia";
 import { eq, and, inArray, or, sql } from "drizzle-orm";
 import { authPlugin, requireAuth } from "../auth";
+import { legalRequiredPlugin } from "../plugins/legalRequired";
 import { db, users, chats, chatMembers } from "../db";
 import { getMessages as scyllaGetMessages, getMessage as scyllaGetMessage, deleteMessage as scyllaDeleteMessage, insertMessage as scyllaInsertMessage, deleteChatMessages, updateMessageContent as scyllaUpdateMessageContent } from "../services/scylla";
-import { publishChatEvent, kickUserFromChat } from "../ws";
+import { publishChatEvent, publishMessageEvent, kickUserFromChat, publishUserEvent } from "../ws";
 import { notifyChatMembersExcept } from "../services/chatNotifications";
 import { getChatSharedItems } from "../services/chatSharedMedia";
 import type { AttachmentMetadata, Message as MessageDto, MessageType, Message, ChatSharedCategory } from "@melon/shared";
 import { toPublicProfile } from "../lib/userDto";
-import { areUsersBlocked, getDmBlockStatus } from "../services/userBlocks";
+import { areUsersBlocked, getDmBlockStatus, isSenderBlockedByRecipient } from "../services/userBlocks";
 import {
   ensureChatAvatarRegistered,
   ensureProfileMediaRegistered,
@@ -27,6 +28,7 @@ import { advanceReadCursor, markChatFullyRead } from "../services/chatRead";
 import { resolveUnreadCount, incrementUnreadForChat } from "../services/chatUnread";
 import { getReactionsForMessages, setMessageReaction } from "../services/reactions";
 import { trackMessageCreated } from "../services/prometheus";
+import { findDmChatId, chatHasMessages, getOrCreateDmChat } from "../services/chatDm";
 
 function toUser(u: typeof users.$inferSelect) {
   return toPublicProfile(u);
@@ -97,6 +99,39 @@ async function signChatDto<T extends ChatDto>(chat: T, viewerId: string): Promis
   return { ...chat, avatarUrl, members };
 }
 
+async function notifyMembersChatCreated(
+  chat: typeof chats.$inferSelect,
+  members: Array<{ user: typeof users.$inferSelect; role: string }>,
+  exceptUserId: string
+): Promise<void> {
+  for (const m of members) {
+    if (m.user.id === exceptUserId) continue;
+    const folderIdsByChat = await getFolderIdsByChatForUser(m.user.id);
+    const [memberRow] = await db
+      .select({ muted: chatMembers.muted })
+      .from(chatMembers)
+      .where(and(eq(chatMembers.chatId, chat.id), eq(chatMembers.userId, m.user.id)))
+      .limit(1);
+    const readMap = await getUserReadCursorsByChat(m.user.id);
+    const lastRead = readMap.get(chat.id) ?? null;
+    const dto = await buildChatDto(chat, members, m.user.id, lastRead, memberRow?.muted ?? false);
+    const otherMember = chat.type === "dm" ? members.find((x) => x.user.id !== m.user.id) : null;
+    const dmBlockStatus =
+      chat.type === "dm" && otherMember
+        ? await getDmBlockStatus(m.user.id, otherMember.user.id)
+        : undefined;
+    const signed = await signChatDto(
+      {
+        ...dto,
+        folderIds: folderIdsByChat.get(chat.id) ?? [],
+        dmBlockStatus,
+      },
+      m.user.id
+    );
+    await publishUserEvent(m.user.id, { type: "chat_created", chat: signed });
+  }
+}
+
 async function buildChatDto(
   chat: typeof chats.$inferSelect,
   members: Array<{ user: typeof users.$inferSelect; role: string }>,
@@ -158,7 +193,7 @@ async function publishGroupSystemEvent(
     attachmentMetadata,
     sender: actor ? toUser(actor) : undefined,
   };
-  await publishChatEvent(chatId, { type: "message", message });
+  await publishMessageEvent(chatId, { type: "message", message });
 }
 
 async function findUserByLoginOrUsername(query: string) {
@@ -176,6 +211,7 @@ async function findUserByLoginOrUsername(query: string) {
 
 export const chatRoutes = new Elysia({ prefix: "/chats" })
   .use(authPlugin)
+  .use(legalRequiredPlugin)
   .get("/users/by-login/:login", async ({ user, params, set }) => {
     const viewer = requireAuth(set)(user);
     const login = (params as { login?: string }).login?.trim();
@@ -277,6 +313,9 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       } catch {
         // Scylla might be unavailable
       }
+      if (row.chat.type === "dm" && !lastMessageAt) {
+        continue;
+      }
       const lastRead = readCursorsByChat.get(row.chatId) ?? null;
       let unreadCount = 0;
       try {
@@ -329,17 +368,8 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       set.status = 403;
       return { error: "Нельзя написать этому пользователю" };
     }
-    const bothMembers = await db
-      .select({ chatId: chatMembers.chatId })
-      .from(chatMembers)
-      .innerJoin(chats, eq(chats.id, chatMembers.chatId))
-      .where(and(eq(chats.type, "dm"), inArray(chatMembers.userId, [u.id, otherUserId])));
-    const chatIdCount = new Map<string, number>();
-    for (const row of bothMembers) {
-      chatIdCount.set(row.chatId, (chatIdCount.get(row.chatId) ?? 0) + 1);
-    }
-    const existingDmId = [...chatIdCount.entries()].find(([, c]) => c === 2)?.[0];
-    if (existingDmId) {
+    const existingDmId = await findDmChatId(u.id, otherUserId);
+    if (existingDmId && (await chatHasMessages(existingDmId))) {
       const [chat] = await db.select().from(chats).where(eq(chats.id, existingDmId)).limit(1);
       const members = await db
         .select({ user: users, role: chatMembers.role })
@@ -353,19 +383,98 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
         .from(chatMembers)
         .where(and(eq(chatMembers.chatId, chat.id), eq(chatMembers.userId, u.id)))
         .limit(1);
-      return signChatDto(await buildChatDto(chat, members, u.id, lastRead, myRow?.muted ?? false), u.id);
+      return {
+        draft: false,
+        chat: await signChatDto(await buildChatDto(chat, members, u.id, lastRead, myRow?.muted ?? false), u.id),
+      };
     }
-    const [chat] = await db.insert(chats).values({ type: "dm" }).returning();
-    await db.insert(chatMembers).values([
-      { chatId: chat.id, userId: u.id, role: "member" },
-      { chatId: chat.id, userId: otherUserId, role: "member" },
-    ]);
-    const members = await db
-      .select({ user: users, role: chatMembers.role })
+    return {
+      draft: true,
+      peer: await signUserMedia(toUser(other), u.id),
+    };
+  })
+  .post("/dm/send", async ({ user, body, set }) => {
+    const u = requireAuth(set)(user);
+    const b = (typeof body === "object" && body !== null ? body : {}) as {
+      userId?: string;
+      content?: string;
+      messageType?: MessageType;
+      attachmentUrl?: string | null;
+      attachmentMetadata?: AttachmentMetadata | null;
+    };
+    const otherUserId = b.userId;
+    const content = b.content;
+    if (!otherUserId) {
+      set.status = 400;
+      return { error: "userId is required" };
+    }
+    if (content == null || content === "") {
+      set.status = 400;
+      return { error: "content is required" };
+    }
+    if (otherUserId === u.id) {
+      set.status = 400;
+      return { error: "Cannot create DM with yourself" };
+    }
+    const [other] = await db.select().from(users).where(eq(users.id, otherUserId)).limit(1);
+    if (!other) {
+      set.status = 404;
+      return { error: "User not found" };
+    }
+    if (await areUsersBlocked(u.id, otherUserId)) {
+      set.status = 403;
+      return { error: "Нельзя написать этому пользователю" };
+    }
+    const peerIds = [otherUserId];
+    if (peerIds.length === 1 && (await isSenderBlockedByRecipient(u.id, peerIds))) {
+      set.status = 403;
+      return { error: "Сообщение не отправлено: пользователь заблокирован" };
+    }
+    const { chat, members } = await getOrCreateDmChat(u.id, otherUserId);
+    const isFirstMessage = !(await chatHasMessages(chat.id));
+    const messageType = b.messageType ?? "text";
+    const attachmentUrl = normalizeMessageAttachmentUrl(b.attachmentUrl ?? null);
+    const attachmentMetadata = normalizeAttachmentMetadataForStorage(b.attachmentMetadata ?? null);
+    const { messageId, createdAt } = await scyllaInsertMessage(chat.id, u.id, content, {
+      messageType,
+      attachmentUrl,
+      attachmentMetadata,
+    });
+    try {
+      await grantMediaFromAttachment(attachmentUrl, chat.id, attachmentMetadata);
+    } catch (err) {
+      console.warn("[DM send] grantMediaFromAttachment failed:", err);
+    }
+    if (messageType !== "system") {
+      trackMessageCreated();
+      await incrementUnreadForChat(chat.id, u.id).catch((err) => {
+        console.warn("[DM send] incrementUnread failed:", err);
+      });
+    }
+    const message: Message = {
+      id: messageId,
+      chatId: chat.id,
+      senderId: u.id,
+      content,
+      createdAt: createdAt.toISOString(),
+      sender: await signUserMedia(toUser(u), u.id),
+      messageType,
+      attachmentUrl: attachmentUrl ? (await signMediaPath(attachmentUrl, u.id)) ?? attachmentUrl : null,
+      attachmentMetadata: (await signAttachmentMetadata(attachmentMetadata, u.id)) ?? attachmentMetadata,
+    };
+    if (isFirstMessage) {
+      await notifyMembersChatCreated(chat, members, u.id);
+    }
+    await publishMessageEvent(chat.id, { type: "message", message });
+    const readMap = await getUserReadCursorsByChat(u.id);
+    const lastRead = readMap.get(chat.id) ?? null;
+    const [myRow] = await db
+      .select({ muted: chatMembers.muted })
       .from(chatMembers)
-      .innerJoin(users, eq(users.id, chatMembers.userId))
-      .where(eq(chatMembers.chatId, chat.id));
-    return signChatDto(await buildChatDto(chat, members, u.id, null, false), u.id);
+      .where(and(eq(chatMembers.chatId, chat.id), eq(chatMembers.userId, u.id)))
+      .limit(1);
+    const chatDto = await signChatDto(await buildChatDto(chat, members, u.id, lastRead, myRow?.muted ?? false), u.id);
+    return { chat: chatDto, message };
   })
   .post("/group", async ({ user, body, set }) => {
     const u = requireAuth(set)(user);
@@ -408,6 +517,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       .from(chatMembers)
       .innerJoin(users, eq(users.id, chatMembers.userId))
       .where(eq(chatMembers.chatId, chat.id));
+    await notifyMembersChatCreated(chat, members, u.id);
     return signChatDto(
       {
         id: chat.id,
@@ -915,7 +1025,7 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       attachmentUrl,
       attachmentMetadata,
     };
-    await publishChatEvent(targetChatId, { type: "message", message: wsMessage });
+    await publishMessageEvent(targetChatId, { type: "message", message: wsMessage });
     await incrementUnreadForChat(targetChatId, u.id).catch(() => {});
     const preview = row.content.slice(0, 120) || "Пересланное сообщение";
     const title = senderUser?.username ?? "Watermelon";

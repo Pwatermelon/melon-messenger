@@ -1,12 +1,14 @@
 import { Elysia } from "elysia";
 import { and, desc, eq } from "drizzle-orm";
 import { authPlugin, requireAuth } from "../auth";
+import { legalRequiredPlugin } from "../plugins/legalRequired";
 import { db, userBlocks, users } from "../db";
 import { toPublicProfile } from "../lib/userDto";
 import { signUserMedia } from "../services/mediaAccess";
 
 export const blockRoutes = new Elysia({ prefix: "/blocks" })
   .use(authPlugin)
+  .use(legalRequiredPlugin)
   .get("/check/:userId", async ({ user, params, set }) => {
     const me = requireAuth(set)(user);
     const userId = (params as { userId?: string }).userId?.trim();

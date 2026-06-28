@@ -67,6 +67,21 @@ body {
   min-height: 100dvh;
 }
 
+html.document-scroll,
+html.document-scroll body {
+  height: auto;
+  min-height: 100%;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  overscroll-behavior-y: none;
+}
+
+html.document-scroll #root {
+  height: auto;
+  min-height: 100dvh;
+  overflow: visible;
+}
+
 #root {
   min-height: 100vh;
   min-height: 100dvh;
@@ -197,6 +212,32 @@ a {
   padding: 1rem;
 }
 
+.not-found-card {
+  text-align: center;
+  padding: 2rem;
+}
+
+.not-found-card h1 {
+  margin: 0 0 0.5rem;
+  font-size: 3rem;
+  color: var(--accent);
+}
+
+.not-found-card p {
+  margin: 0 0 1rem;
+  color: var(--muted);
+}
+
+.not-found-link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.not-found-link:hover {
+  text-decoration: underline;
+}
+
 .auth-card {
   width: 100%;
   max-width: 360px;
@@ -256,6 +297,12 @@ a {
 
 .auth-error {
   color: var(--danger);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.auth-success {
+  color: #22c55e;
   font-size: 0.9rem;
   margin: 0;
 }
@@ -3409,6 +3456,36 @@ a {
   background: rgba(239, 68, 68, 0.1);
 }
 
+.settings-danger-zone {
+  margin-top: 0.5rem;
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.settings-danger-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.settings-delete-account-btn {
+  width: 100%;
+  padding: 0.7rem 1rem;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  border-radius: var(--radius);
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--danger);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.settings-delete-account-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
 .settings-card .profile-info-block {
   margin: 0.5rem 0 0;
 }
@@ -5059,11 +5136,18 @@ a {
 }
 
 .yandex-btn:disabled {
-  opacity: 0.55;
+  opacity: 0.45;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
-.yandex-btn:hover {
+.yandex-btn:disabled:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.yandex-btn:hover:not(:disabled) {
   transform: translateY(-1px);
   box-shadow: 0 4px 20px rgba(252, 63, 29, 0.35);
 }
@@ -5086,6 +5170,180 @@ a {
   color: var(--muted);
   line-height: 1.5;
   text-align: center;
+}
+
+.login-consent {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  margin: 1rem 0 1.25rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.login-consent input {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.login-consent a {
+  color: var(--accent);
+}
+
+.login-privacy-banner {
+  margin: 0 0 0.85rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.login-privacy-banner a {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.login-consent-required {
+  margin: -0.5rem 0 0.85rem;
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
+.login-legal-links,
+.login-legal-contact {
+  margin: 0.75rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.5;
+}
+
+.login-legal-links a,
+.login-legal-contact a {
+  color: var(--accent);
+}
+
+.login-legal-version {
+  margin: 0 0 1rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* ── Legal documents ── */
+.legal-page {
+  min-height: 100dvh;
+  padding: 1.5rem 1rem 3rem;
+  background:
+    radial-gradient(ellipse 70% 50% at 10% 0%, rgba(232, 72, 85, 0.1), transparent),
+    var(--bg);
+}
+
+.legal-card {
+  position: relative;
+  max-width: 760px;
+  margin: 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.5rem 1.25rem 2rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+}
+
+.legal-header h1 {
+  margin: 0.5rem 0 0.35rem;
+  font-size: 1.5rem;
+  line-height: 1.25;
+}
+
+.legal-subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.legal-meta {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.legal-back {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.88rem;
+}
+
+.legal-body {
+  margin-top: 1.5rem;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.legal-section + .legal-section {
+  margin-top: 1.35rem;
+}
+
+.legal-section h2 {
+  margin: 0 0 0.65rem;
+  font-size: 1.05rem;
+}
+
+.legal-section p {
+  margin: 0 0 0.65rem;
+}
+
+.legal-section ul {
+  margin: 0 0 0.65rem;
+  padding-left: 1.25rem;
+}
+
+.legal-section li {
+  margin-bottom: 0.35rem;
+}
+
+.legal-footer {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.legal-footer a {
+  color: var(--accent);
+}
+
+.settings-legal-contact {
+  margin: 0.75rem 1rem 0.25rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.settings-legal-contact a {
+  color: var(--accent);
+}
+
+.settings-legal-ok {
+  margin: 0.5rem 1rem 0.25rem;
+  font-size: 0.76rem;
+  color: var(--green);
+}
+
+.settings-legal-warn {
+  margin: 0.5rem 1rem 0.25rem;
+  font-size: 0.76rem;
+  color: var(--danger);
 }
 
 .auth-card-center {
@@ -5719,7 +5977,10 @@ a {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overflow-anchor: none;
   padding: 1rem 1.25rem 1.25rem;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: auto;
 }
 
 .admin-embedded .admin-section h2 {
@@ -8013,4 +8274,602 @@ video.message-circle {
   font-weight: 400;
   color: var(--accent);
   margin-top: 0.1rem;
+}
+
+/* ── FAQ ── */
+.faq-list {
+  margin-top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.faq-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-elevated);
+  padding: 0.65rem 0.85rem;
+}
+
+.faq-item summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.faq-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.faq-item p {
+  margin: 0.65rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+/* ── Cookie banner ── */
+.cookie-banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 12000;
+  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+  background: var(--surface-elevated);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.cookie-banner-inner {
+  max-width: 960px;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  justify-content: space-between;
+}
+
+.cookie-banner p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--muted);
+  flex: 1 1 280px;
+}
+
+.cookie-banner a {
+  color: var(--accent);
+}
+
+.cookie-banner-btn {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 999px;
+  padding: 0.5rem 1.1rem;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ── Report FAB ── */
+.app-report-fab {
+  position: fixed;
+  right: calc(1rem + env(safe-area-inset-right));
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  z-index: 11000;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(232, 72, 85, 0.45);
+}
+
+.app-report-fab:hover {
+  background: var(--accent-hover);
+}
+
+.report-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12050;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.report-modal {
+  width: 100%;
+  max-width: 480px;
+  max-height: min(90dvh, 640px);
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+.report-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.report-modal-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.report-modal-body {
+  padding: 1rem;
+}
+
+.report-hint {
+  margin: 0 0 1rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.report-hint code {
+  font-size: 0.78rem;
+}
+
+.report-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.85rem;
+}
+
+.report-field textarea,
+.report-field select,
+.report-field input[type="file"] {
+  width: 100%;
+}
+
+.report-field textarea {
+  resize: vertical;
+  min-height: 6rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text);
+}
+
+.report-submit-btn {
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.65rem 1rem;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.report-submit-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.report-success {
+  margin: 0 0 1rem;
+  color: var(--green);
+}
+
+/* ── Admin reports ── */
+.admin-reports-filters {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.admin-reports-filter {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.admin-reports-filter.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.admin-reports-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.admin-report-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  background: var(--surface-elevated);
+}
+
+.admin-report-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.admin-report-status {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+}
+
+.admin-report-status-open {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+}
+
+.admin-report-status-resolved {
+  background: rgba(61, 214, 140, 0.15);
+  color: var(--green);
+}
+
+.admin-report-meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.admin-report-message {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.admin-report-url {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+
+.admin-report-screenshot-link {
+  display: inline-block;
+  margin-top: 0.45rem;
+  font-size: 0.82rem;
+}
+
+.admin-report-note {
+  margin: 0.45rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.admin-report-resolve-btn {
+  margin-top: 0.65rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--green);
+  background: transparent;
+  color: var(--green);
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.admin-legal-list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.admin-legal-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.65rem 0.75rem;
+  background: var(--surface-elevated);
+  font-size: 0.84rem;
+}
+
+.admin-legal-head {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.admin-legal-user {
+  margin-top: 0.25rem;
+  color: var(--text);
+}
+
+.admin-legal-meta {
+  margin-top: 0.2rem;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.delete-account-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12100;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.delete-account-modal {
+  width: 100%;
+  max-width: 440px;
+  max-height: min(90dvh, 640px);
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+.delete-account-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.delete-account-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--danger);
+}
+
+.delete-account-body {
+  padding: 1rem;
+}
+
+.delete-account-lead {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.delete-account-list {
+  margin: 0 0 0.85rem 1.1rem;
+  padding: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.delete-account-note {
+  margin: 0 0 1rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.delete-account-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.delete-account-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.85rem;
+}
+
+.delete-account-field input {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.delete-account-error {
+  margin: 0 0 0.75rem;
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+
+.delete-account-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.delete-account-cancel,
+.delete-account-next,
+.delete-account-danger {
+  flex: 1;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.delete-account-cancel {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+}
+
+.delete-account-next {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+}
+
+.delete-account-next:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.delete-account-danger {
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  background: var(--danger);
+  color: #fff;
+}
+
+.delete-account-danger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.legal-gate-blocked {
+  pointer-events: none;
+  user-select: none;
+}
+
+.legal-update-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12200;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.legal-update-overlay-loading {
+  z-index: 12150;
+}
+
+.legal-update-modal {
+  width: 100%;
+  max-width: 480px;
+  max-height: min(92dvh, 720px);
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 1.25rem;
+}
+
+.legal-update-modal-compact {
+  max-width: 320px;
+  text-align: center;
+}
+
+.legal-update-modal h2 {
+  margin: 0 0 0.65rem;
+  font-size: 1.15rem;
+}
+
+.legal-update-lead {
+  margin: 0 0 1rem;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.legal-update-docs {
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.legal-update-docs li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+}
+
+.legal-update-docs a {
+  color: var(--accent);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.legal-update-doc-meta {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.legal-update-check {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.legal-update-check input {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.legal-update-error {
+  margin: 0 0 0.75rem;
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+
+.legal-update-submit {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.legal-update-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }

@@ -17,10 +17,17 @@ import {
   getOAuthConfig,
   isYandexConfigured,
   isYandexOAuthError,
+  parseOAuthState,
   resolveRedirectUri,
   verifyOAuthState,
   YANDEX_REDIRECT_URI,
 } from "../services/yandexOAuth";
+import { bundleFromQuery, isCurrentLegalBundle } from "../lib/legalConfig";
+import { auditMetaFromRequest } from "../services/legalAcceptance";
+import { deleteUserAccount } from "../services/deleteAccount";
+import { getUserLegalStatus } from "../services/legalAcceptance";
+
+const DELETE_ACCOUNT_PHRASE = "УДАЛИТЬ";
 
 const WEB_URL = process.env.WEB_URL ?? "http://localhost:5173";
 const JWT_SECRET = process.env.JWT_SECRET ?? "watermelon-dev-secret-change-in-prod";
@@ -50,9 +57,26 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       return { error: "Yandex OAuth не настроен (YANDEX_CLIENT_ID)" };
     }
     try {
-      const q = query as { redirect_uri?: string; platform?: string };
+      const q = query as {
+        redirect_uri?: string;
+        platform?: string;
+        legal_pd?: string;
+        legal_terms?: string;
+        legal_privacy?: string;
+      };
       const redirectUri = resolveRedirectUri(q.redirect_uri);
-      const state = await createOAuthState();
+
+      let state: string;
+      if (q.platform === "native") {
+        state = await createOAuthState();
+      } else {
+        const legal = bundleFromQuery(q);
+        if (!legal || !isCurrentLegalBundle(legal)) {
+          return Response.redirect(`${WEB_URL}/login?error=yandex_consent_required`, 302);
+        }
+        state = await createOAuthState(legal);
+      }
+
       const url = buildYandexAuthorizeUrl(redirectUri, state);
 
       if (q.platform === "native") {
@@ -77,11 +101,15 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     }
     try {
       const redirectUri = resolveRedirectUri(body.redirect_uri);
-      if (body.state && !(await verifyOAuthState(body.state))) {
+      const parsed = await parseOAuthState(body.state);
+      if (!parsed.valid) {
         set.status = 400;
         return { error: "Invalid state" };
       }
-      return await exchangeYandexCode(body.code.trim(), redirectUri);
+      return await exchangeYandexCode(body.code.trim(), redirectUri, {
+        legal: parsed.legal,
+        audit: auditMetaFromRequest(request),
+      });
     } catch (e) {
       console.error("[Yandex OAuth exchange]", e);
       if (isYandexOAuthError(e)) {
@@ -92,7 +120,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       return { error: e instanceof Error ? e.message : "OAuth failed" };
     }
   })
-  .get("/yandex/callback", async ({ query }) => {
+  .get("/yandex/callback", async ({ query, request }) => {
     const q = query as { code?: string; state?: string; error?: string };
     if (q.error || !q.code) {
       return Response.redirect(`${WEB_URL}/login?error=yandex_denied`, 302);
@@ -100,11 +128,18 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     if (!(await verifyOAuthState(q.state))) {
       return Response.redirect(`${WEB_URL}/login?error=yandex_failed`, 302);
     }
+    const parsed = await parseOAuthState(q.state);
+    if (!parsed.legal) {
+      return Response.redirect(`${WEB_URL}/login?error=yandex_consent_required`, 302);
+    }
     if (!isYandexConfigured()) {
       return Response.redirect(`${WEB_URL}/login?error=yandex_not_configured`, 302);
     }
     try {
-      const { token } = await exchangeYandexCode(q.code, YANDEX_REDIRECT_URI);
+      const { token } = await exchangeYandexCode(q.code, YANDEX_REDIRECT_URI, {
+        legal: parsed.legal,
+        audit: auditMetaFromRequest(request),
+      });
       return Response.redirect(`${WEB_URL}/auth/callback?token=${encodeURIComponent(token)}`, 302);
     } catch (e) {
       console.error("[Yandex OAuth callback]", e);
@@ -134,6 +169,14 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     if (!u) {
       set.status = 401;
       return { error: "Unauthorized" };
+    }
+    const legal = await getUserLegalStatus(u.id);
+    if (!legal.upToDate) {
+      set.status = 403;
+      return {
+        error: "Требуется принять актуальные юридические документы",
+        code: "legal_acceptance_required",
+      };
     }
     const body = (await request.json()) as {
       username?: string;
@@ -182,4 +225,25 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     ]);
     return signUserMedia(toPrivateProfile(updated!), updated!.id);
   })
-  .post("/logout", () => ({ ok: true }));
+  .post("/logout", () => ({ ok: true }))
+  .post("/me/delete", async ({ request, set }) => {
+    const u = await verifyBearerUser(request);
+    if (!u) {
+      set.status = 401;
+      return { error: "Unauthorized" };
+    }
+    const body = (await request.json()) as { confirmPhrase?: string };
+    const phrase = body.confirmPhrase?.trim();
+    if (phrase !== DELETE_ACCOUNT_PHRASE) {
+      set.status = 400;
+      return { error: `Введите «${DELETE_ACCOUNT_PHRASE}» для подтверждения` };
+    }
+    try {
+      await deleteUserAccount(u.id);
+      return { ok: true };
+    } catch (e) {
+      console.error("[Delete account]", e);
+      set.status = 500;
+      return { error: "Не удалось удалить аккаунт" };
+    }
+  });

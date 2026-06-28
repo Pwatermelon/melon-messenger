@@ -15,7 +15,7 @@ import ChatInfoModal from "../components/ChatInfoModal";
 import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo, IconBack, IconChevronDown, IconSmile } from "../components/Icons";
 import ComposeEmojiStickerPanel from "../components/ComposeEmojiStickerPanel";
 import StickerPackViewModal from "../components/StickerPackViewModal";
-import { getChat, getChats, getMessages, uploadFile, removeGroupMember, deleteChat, updateGroup, deleteMessage, editMessage, forwardMessage, signMediaPaths, markChatReadApi, getChatReadCursors, setMessageReaction } from "../api";
+import { getChat, getChats, getMessages, uploadFile, removeGroupMember, deleteChat, updateGroup, deleteMessage, editMessage, forwardMessage, signMediaPaths, markChatReadApi, getChatReadCursors, setMessageReaction, sendDmMessage } from "../api";
 import { extFromBlobType } from "../utils/mediaMime";
 import { compressImage, isGifFileDeep } from "../utils/imageCompress";
 import ImageLightbox from "../components/ImageLightbox";
@@ -56,7 +56,9 @@ import { captureCirclePoster } from "../utils/circlePoster";
 import { playMessageSound } from "../utils/messageSounds";
 
 type ChatRoomProps = {
-  chatId: string;
+  chatId?: string;
+  draftPeer?: User;
+  onDraftChatCreated?: (chat: Chat) => void;
   onClose: () => void;
   openProfile: (userId?: string) => void;
   onSyncPreview?: (message: Message) => void;
@@ -65,7 +67,8 @@ type ChatRoomProps = {
 
 const MESSAGE_PAGE_SIZE = 50;
 
-export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: _onSyncPreview, showBack = false }: ChatRoomProps) {
+export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClose, openProfile, onSyncPreview: _onSyncPreview, showBack = false }: ChatRoomProps) {
+  const isDraft = Boolean(draftPeer && !chatId);
   const { user } = useAuth();
   const { send, ready, status, reconnect, subscribe } = useWebSocketContext();
   const [chat, setChat] = useState<Chat | null>(null);
@@ -663,7 +666,34 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
   }, [chatId, messages, user?.id, messagesReady, tryMarkReadFromScroll, refreshUnreadJumpCount, unreadBounds.first]);
 
   useEffect(() => {
-    if (!chatId) return;
+    if (!isDraft || !draftPeer || !user) return;
+    setChat({
+      id: "",
+      type: "dm",
+      name: null,
+      createdAt: new Date().toISOString(),
+      lastMessageAt: null,
+      lastMessagePreview: null,
+      members: [
+        { ...draftPeer, role: "member", createdAt: draftPeer.createdAt ?? new Date().toISOString() },
+        {
+          id: user.id,
+          username: user.username,
+          avatarUrl: user.avatarUrl,
+          createdAt: user.createdAt ?? new Date().toISOString(),
+          role: "member",
+        },
+      ],
+    });
+    setMessages([]);
+    setLoading(false);
+    loadingRef.current = false;
+    setMessagesReady(true);
+    setLoadError("");
+  }, [isDraft, draftPeer, user]);
+
+  useEffect(() => {
+    if (!chatId || isDraft) return;
     let cancelled = false;
     setLoading(true);
     loadingRef.current = true;
@@ -982,6 +1012,10 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     },
     withReply = true
   ) {
+    if (isDraft && draftPeer) {
+      void sendDraftMessage(opts, withReply);
+      return;
+    }
     if (!chatId) return;
     const replyMeta: AttachmentMetadata | null =
       withReply && replyDraft
@@ -1000,12 +1034,47 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
     requestAnimationFrame(() => scrollToBottom(false));
   }
 
+  async function sendDraftMessage(
+    opts: {
+      content: string;
+      messageType?: MessageType;
+      attachmentUrl?: string | null;
+      attachmentMetadata?: AttachmentMetadata | null;
+    },
+    withReply = true
+  ) {
+    if (!draftPeer || sending) return;
+    const replyMeta: AttachmentMetadata | null =
+      withReply && replyDraft
+        ? { ...(opts.attachmentMetadata ?? {}), replyTo: buildReplyTo(replyDraft) }
+        : opts.attachmentMetadata ?? null;
+    setSending(true);
+    try {
+      const { chat } = await sendDmMessage(draftPeer.id, {
+        ...opts,
+        attachmentMetadata: replyMeta,
+      });
+      playMessageSound("outgoing");
+      setReplyDraft(null);
+      onDraftChatCreated?.(chat as Chat);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSending(false);
+    }
+  }
+
   async function sendMessage(opts: {
     content: string;
     messageType?: MessageType;
     attachmentUrl?: string | null;
     attachmentMetadata?: AttachmentMetadata | null;
   }) {
+    if (isDraft && draftPeer) {
+      await sendDraftMessage(opts);
+      setReplyDraft(null);
+      return;
+    }
     if (!chatId || sending) return;
     setSending(true);
     try {
@@ -1385,7 +1454,7 @@ export default function ChatRoom({ chatId, onClose, openProfile, onSyncPreview: 
 
   const displayName = chat
     ? chat.name ?? (chat.type === "dm" ? chat.members.find((m) => m.id !== user?.id)?.username : null) ?? "Chat"
-    : "…";
+    : draftPeer?.username ?? "…";
 
   function headerAvatarUrl(): string | null {
     if (!chat) return null;

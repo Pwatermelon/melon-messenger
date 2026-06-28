@@ -4,6 +4,8 @@ import { db, users } from "../db";
 import { toPrivateProfile } from "../lib/userDto";
 import { signUserMedia } from "./mediaAccess";
 import { parseYandexBirthday } from "@melon/shared";
+import type { LegalAcceptanceBundle } from "../lib/legalConfig";
+import { recordLegalAcceptances, type LegalAuditMeta } from "./legalAcceptance";
 
 export const YANDEX_CLIENT_ID = process.env.YANDEX_CLIENT_ID ?? "";
 export const YANDEX_CLIENT_SECRET = process.env.YANDEX_CLIENT_SECRET ?? "";
@@ -142,23 +144,45 @@ export function buildYandexAuthorizeUrl(redirectUri: string, state?: string): st
   return `https://oauth.yandex.ru/authorize?${params}`;
 }
 
-export async function createOAuthState(): Promise<string> {
+export async function createOAuthState(legal?: LegalAcceptanceBundle): Promise<string> {
   const secret = new TextEncoder().encode(JWT_SECRET);
-  return new jose.SignJWT({ purpose: "yandex_oauth", rnd: crypto.randomUUID() })
+  const payload: { purpose: string; rnd: string; legal?: LegalAcceptanceBundle } = {
+    purpose: "yandex_oauth",
+    rnd: crypto.randomUUID(),
+  };
+  if (legal) payload.legal = legal;
+  return new jose.SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
     .setExpirationTime("15m")
     .sign(secret);
 }
 
-export async function verifyOAuthState(state: string | null | undefined): Promise<boolean> {
-  if (!state) return false;
+export async function parseOAuthState(
+  state: string | null | undefined
+): Promise<{ valid: boolean; legal?: LegalAcceptanceBundle }> {
+  if (!state) return { valid: false };
   try {
     const secret = new TextEncoder().encode(JWT_SECRET);
     const { payload } = await jose.jwtVerify(state, secret);
-    return payload.purpose === "yandex_oauth";
+    if (payload.purpose !== "yandex_oauth") return { valid: false };
+    const legal = payload.legal as LegalAcceptanceBundle | undefined;
+    if (
+      legal &&
+      typeof legal.personal_data === "string" &&
+      typeof legal.terms === "string" &&
+      typeof legal.privacy === "string"
+    ) {
+      return { valid: true, legal };
+    }
+    return { valid: true };
   } catch {
-    return false;
+    return { valid: false };
   }
+}
+
+export async function verifyOAuthState(state: string | null | undefined): Promise<boolean> {
+  const parsed = await parseOAuthState(state);
+  return parsed.valid;
 }
 
 export async function signAppJwt(userId: string): Promise<string> {
@@ -171,7 +195,8 @@ export async function signAppJwt(userId: string): Promise<string> {
 
 export async function exchangeYandexCode(
   code: string,
-  redirectUri: string
+  redirectUri: string,
+  opts?: { legal?: LegalAcceptanceBundle; audit?: LegalAuditMeta }
 ): Promise<{ token: string; user: ReturnType<typeof toPrivateProfile> }> {
   if (!isYandexConfigured()) throw new Error("Yandex OAuth not configured");
 
@@ -288,6 +313,15 @@ export async function exchangeYandexCode(
     }
     if (Object.keys(updates).length > 0) {
       [user] = await db.update(users).set(updates).where(eq(users.id, user.id)).returning();
+    }
+  }
+
+  if (opts?.legal) {
+    try {
+      await recordLegalAcceptances(user!.id, opts.legal, opts.audit ?? {});
+    } catch (e) {
+      console.error("[Yandex OAuth] legal acceptance failed:", e);
+      throw new Error("Legal acceptance failed");
     }
   }
 

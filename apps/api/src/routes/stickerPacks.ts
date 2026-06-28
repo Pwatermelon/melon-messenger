@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import { and, asc, count, eq, inArray, sql } from "drizzle-orm";
 import { authPlugin, requireAuth } from "../auth";
+import { legalRequiredPlugin } from "../plugins/legalRequired";
 import { db, stickerPacks, stickers, userStickerPacks, users } from "../db";
 import { signMediaPath } from "../services/mediaAccess";
 import type { StickerItem, StickerPackDetail, StickerPackSummary } from "@melon/shared";
@@ -39,6 +40,7 @@ async function packSummary(
 
 export const stickerPackRoutes = new Elysia({ prefix: "/sticker-packs" })
   .use(authPlugin)
+  .use(legalRequiredPlugin)
   .get("/", async ({ user, set }) => {
     const me = requireAuth(set)(user);
     const owned = await db.select().from(stickerPacks).where(eq(stickerPacks.creatorId, me.id));

@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 import { extname } from "path";
 import { eq } from "drizzle-orm";
 import { authPlugin, requireAuth } from "../auth";
+import { legalRequiredPlugin } from "../plugins/legalRequired";
 import { db, mediaFiles } from "../db";
 import { getMediaStorage } from "../services/mediaStorage";
 import {
@@ -38,6 +39,7 @@ const UPLOAD_MIME: Record<string, string> = {
 
 export const mediaRoutes = new Elysia({ prefix: "/media" })
   .use(authPlugin)
+  .use(legalRequiredPlugin)
   .post("/sign", async ({ user, body, set }) => {
     const u = requireAuth(set)(user);
     const payload = body as { paths?: string[] };

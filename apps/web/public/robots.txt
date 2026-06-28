@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /login
+Allow: /legal/
+Allow: /faq
+Allow: /platinum
+Disallow: /auth/
+Disallow: /beta/
+Disallow: /chat/
+Disallow: /profile
+Disallow: /settings
+Disallow: /admin
+Disallow: /icon
+
+Sitemap: https://watermelon-messenger.ru/sitemap.xml
