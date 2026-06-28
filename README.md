@@ -1,7 +1,6 @@
 # Watermelon Messenger
 
 **Real-time мессенджер** с личными и групповыми чатами, медиа, голосовыми и видеокружками.
-
 Production: [watermelon-messenger.ru](https://watermelon-messenger.ru)
 
 ---
