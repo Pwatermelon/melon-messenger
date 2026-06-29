@@ -224,6 +224,18 @@ export async function searchUser(query: string): Promise<User | null> {
   return res.json();
 }
 
+export async function suggestUsers(query: string, limit = 8): Promise<User[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const params = new URLSearchParams({ q, limit: String(limit) });
+  const res = await fetch(`${getApiUrl()}/chats/users/suggest?${params}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) return [];
+  const data = (await res.json()) as { users?: User[] };
+  return Array.isArray(data.users) ? data.users : [];
+}
+
 export async function getUserById(id: string): Promise<User | null> {
   const res = await fetch(`${getApiUrl()}/chats/users/${encodeURIComponent(id)}`, {
     headers: { Authorization: `Bearer ${getToken()}` },

@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import { eq, and, inArray, or, sql } from "drizzle-orm";
+import { eq, and, inArray, or, sql, ilike, ne } from "drizzle-orm";
 import { authPlugin, requireAuth } from "../auth";
 import { legalRequiredPlugin } from "../plugins/legalRequired";
 import { db, users, chats, chatMembers } from "../db";
@@ -209,6 +209,31 @@ async function findUserByLoginOrUsername(query: string) {
   return target ?? null;
 }
 
+function ilikeContainsPattern(query: string): string {
+  return `%${query.replace(/[%_\\]/g, "\\$&")}%`;
+}
+
+async function suggestUsersByQuery(viewerId: string, query: string, limit: number) {
+  const q = query.trim();
+  if (!q) return [];
+  const pattern = ilikeContainsPattern(q);
+  const prefix = `${q.replace(/[%_\\]/g, "\\$&")}%`;
+  return db
+    .select()
+    .from(users)
+    .where(
+      and(
+        ne(users.id, viewerId),
+        or(ilike(users.yandexLogin, pattern), ilike(users.username, pattern))
+      )
+    )
+    .orderBy(
+      sql`CASE WHEN lower(${users.username}) LIKE lower(${prefix}) OR lower(${users.yandexLogin}) LIKE lower(${prefix}) THEN 0 ELSE 1 END`,
+      users.username
+    )
+    .limit(limit);
+}
+
 export const chatRoutes = new Elysia({ prefix: "/chats" })
   .use(authPlugin)
   .use(legalRequiredPlugin)
@@ -230,6 +255,18 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
     }
     const includeBirthday = await usersShareChat(viewer.id, target.id);
     return signUserMedia(toPublicProfile(target, includeBirthday), viewer.id);
+  })
+  .get("/users/suggest", async ({ user, query, set }) => {
+    const viewer = requireAuth(set)(user);
+    const q = String((query as { q?: string }).q ?? "").trim();
+    const limit = Math.min(Math.max(Number((query as { limit?: string }).limit) || 8, 1), 15);
+    if (!q) return { users: [] as ReturnType<typeof toPublicProfile>[] };
+
+    const rows = await suggestUsersByQuery(viewer.id, q, limit);
+    const usersOut = await Promise.all(
+      rows.map((target) => signUserMedia(toPublicProfile(target, false), viewer.id))
+    );
+    return { users: usersOut };
   })
   .get("/users/search/:query", async ({ user, params, set }) => {
     const viewer = requireAuth(set)(user);

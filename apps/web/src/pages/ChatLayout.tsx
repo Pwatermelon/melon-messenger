@@ -32,6 +32,8 @@ import {
   type ChatListMenuState,
 } from "../components/ChatListContextMenu";
 import AppReportButton from "../components/AppReportButton";
+import UserSearchSuggestions from "../components/UserSearchSuggestions";
+import { useUserSearchSuggestions } from "../hooks/useUserSearchSuggestions";
 import SupportThankYouModal from "../components/SupportThankYouModal";
 import { usePlatinumBalance } from "../hooks/usePlatinumBalance";
 
@@ -86,6 +88,23 @@ export default function ChatLayout() {
   const [sidebarUser, setSidebarUser] = useState<{ id: string; username: string; yandexLogin?: string | null; avatarUrl: string | null } | null>(null);
   const [sidebarLoading, setSidebarLoading] = useState(false);
   const [sidebarError, setSidebarError] = useState("");
+  const selfId = user?.id;
+  const { suggestions: sidebarSuggestions, loading: sidebarSuggestionsLoading } = useUserSearchSuggestions(
+    sidebarQuery,
+    { excludeIds: selfId ? [selfId] : [] }
+  );
+  const { suggestions: dmSuggestions, loading: dmSuggestionsLoading } = useUserSearchSuggestions(dmLogin, {
+    excludeIds: selfId ? [selfId] : [],
+    enabled: dmOpen,
+  });
+  const groupExcludeIds = [
+    ...(selfId ? [selfId] : []),
+    ...groupSelected.map((u) => u.id),
+  ];
+  const { suggestions: groupSuggestions, loading: groupSuggestionsLoading } = useUserSearchSuggestions(
+    groupAddLogin,
+    { excludeIds: groupExcludeIds, enabled: groupOpen }
+  );
   const [sidebarTab, setSidebarTab] = useState<"chats" | "contacts">("chats");
   const [contacts, setContacts] = useState<User[]>([]);
   const [contactsLoading, setContactsLoading] = useState(false);
@@ -447,6 +466,10 @@ export default function ChatLayout() {
   async function lookupSidebarUser() {
     const q = sidebarQuery.trim();
     if (!q) return;
+    if (sidebarSuggestions.length > 0) {
+      pickSidebarUser(sidebarSuggestions[0]!);
+      return;
+    }
     if (user?.yandexLogin && q.toLowerCase() === user.yandexLogin.toLowerCase()) {
       setSidebarError("Нельзя искать себя");
       setSidebarUser(null);
@@ -466,9 +489,19 @@ export default function ChatLayout() {
     }
   }
 
+  function pickSidebarUser(u: User) {
+    setSidebarUser(u);
+    setSidebarQuery(userDisplayName(u));
+    setSidebarError("");
+  }
+
   async function lookupDmUser() {
     const q = dmLogin.trim();
     if (!q) return;
+    if (dmSuggestions.length > 0) {
+      pickDmUser(dmSuggestions[0]!);
+      return;
+    }
     if (user?.yandexLogin && q.toLowerCase() === user.yandexLogin.toLowerCase()) {
       setDmError("Нельзя искать себя");
       setDmUser(null);
@@ -593,9 +626,29 @@ export default function ChatLayout() {
     setGroupSelected((prev) => [...prev, { id: c.id, username: userDisplayName(c) }]);
   }
 
+  function pickDmUser(u: User) {
+    setDmUser(u);
+    setDmLogin(userDisplayName(u));
+    setDmError("");
+  }
+
+  function pickGroupUser(u: User) {
+    if (u.id === user?.id) {
+      setGroupAddError("Вы уже будете в группе как создатель");
+      return;
+    }
+    addContactToGroup(u);
+    setGroupAddLogin("");
+    setGroupAddError("");
+  }
+
   async function addGroupMemberByLogin() {
     const login = groupAddLogin.trim();
     if (!login) return;
+    if (groupSuggestions.length > 0) {
+      pickGroupUser(groupSuggestions[0]!);
+      return;
+    }
     setGroupAddError("");
     try {
       const u = await searchUser(login);
@@ -683,8 +736,12 @@ export default function ChatLayout() {
               data-testid="sidebar-user-search"
               placeholder="Логин или имя"
               value={sidebarQuery}
-              onChange={(e) => { setSidebarQuery(e.target.value); setSidebarError(""); setSidebarUser(null); }}
-              onKeyDown={(e) => e.key === "Enter" && lookupSidebarUser()}
+              onChange={(e) => {
+                setSidebarQuery(e.target.value);
+                setSidebarError("");
+                setSidebarUser(null);
+              }}
+              onKeyDown={(e) => e.key === "Enter" && void lookupSidebarUser()}
               spellCheck={false}
               autoComplete="off"
             />
@@ -698,6 +755,14 @@ export default function ChatLayout() {
               {sidebarLoading ? "…" : "Найти"}
             </button>
           </div>
+          {!sidebarUser && sidebarQuery.trim().length > 0 && (
+            <UserSearchSuggestions
+              users={sidebarSuggestions}
+              loading={sidebarSuggestionsLoading}
+              onPick={pickSidebarUser}
+              emptyText={sidebarSuggestionsLoading ? undefined : "Никого не нашли"}
+            />
+          )}
           {sidebarError && <p className="sidebar-search-error">{sidebarError}</p>}
           {sidebarUser && (
             <div className="sidebar-search-result" data-testid="sidebar-search-result">
@@ -922,16 +987,28 @@ export default function ChatLayout() {
                   data-testid="dm-user-id-input"
                   placeholder="Логин или имя"
                   value={dmLogin}
-                  onChange={(e) => { setDmLogin(e.target.value); setDmError(""); }}
-                  onKeyDown={(e) => e.key === "Enter" && lookupDmUser()}
+                  onChange={(e) => {
+                    setDmLogin(e.target.value);
+                    setDmError("");
+                    setDmUser(null);
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && void lookupDmUser()}
                   autoFocus
                   spellCheck={false}
                   autoComplete="off"
                 />
-                <button type="button" className="btn" data-testid="dm-lookup-btn" onClick={lookupDmUser} disabled={dmLoading || !dmLogin.trim()}>
+                <button type="button" className="btn" data-testid="dm-lookup-btn" onClick={() => void lookupDmUser()} disabled={dmLoading || !dmLogin.trim()}>
                   {dmLoading ? "…" : "Найти"}
                 </button>
               </div>
+              {!dmUser && dmLogin.trim().length > 0 && (
+                <UserSearchSuggestions
+                  users={dmSuggestions}
+                  loading={dmSuggestionsLoading}
+                  onPick={pickDmUser}
+                  emptyText={dmSuggestionsLoading ? undefined : "Никого не нашли"}
+                />
+              )}
               {dmError && <p className="search-error">{dmError}</p>}
               {dmUser && (
                 <div className="search-result-single">
@@ -1027,15 +1104,26 @@ export default function ChatLayout() {
                 type="text"
                 placeholder="Логин или имя"
                 value={groupAddLogin}
-                onChange={(e) => { setGroupAddLogin(e.target.value); setGroupAddError(""); }}
-                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addGroupMemberByLogin())}
+                onChange={(e) => {
+                  setGroupAddLogin(e.target.value);
+                  setGroupAddError("");
+                }}
+                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), void addGroupMemberByLogin())}
                 spellCheck={false}
                 autoComplete="off"
               />
-              <button type="button" className="btn" onClick={addGroupMemberByLogin} disabled={!groupAddLogin.trim()}>
+              <button type="button" className="btn" onClick={() => void addGroupMemberByLogin()} disabled={!groupAddLogin.trim()}>
                 Добавить
               </button>
             </div>
+            {groupAddLogin.trim().length > 0 && (
+              <UserSearchSuggestions
+                users={groupSuggestions}
+                loading={groupSuggestionsLoading}
+                onPick={pickGroupUser}
+                emptyText={groupSuggestionsLoading ? undefined : "Никого не нашли"}
+              />
+            )}
             {groupAddError && <p className="search-error">{groupAddError}</p>}
             {groupError && <p className="search-error">{groupError}</p>}
             <p className="dm-contacts-label">Контакты</p>

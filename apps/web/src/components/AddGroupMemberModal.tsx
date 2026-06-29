@@ -5,6 +5,8 @@ import { addGroupMembers, getContacts, searchUser } from "../api";
 import { mediaUrl } from "../utils/mediaUrl";
 import { userAvatarLetter, userDisplayName, userLoginTag } from "../utils/userDisplay";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
+import { useUserSearchSuggestions } from "../hooks/useUserSearchSuggestions";
+import UserSearchSuggestions from "./UserSearchSuggestions";
 import { IconPlus } from "./Icons";
 
 type Props = {
@@ -33,6 +35,11 @@ export default function AddGroupMemberModal({
   const [contactsLoading, setContactsLoading] = useState(false);
 
   const memberIdSet = useMemo(() => new Set(memberIds.map((id) => id.toLowerCase())), [memberIds]);
+
+  const { suggestions, loading: suggestionsLoading } = useUserSearchSuggestions(query, {
+    excludeIds: [...memberIds, currentUserId],
+    enabled: open,
+  });
 
   const addableContacts = useMemo(
     () =>
@@ -80,6 +87,10 @@ export default function AddGroupMemberModal({
   async function handleSearchAdd() {
     const q = query.trim();
     if (!q || busy) return;
+    if (suggestions.length > 0) {
+      await handlePickSuggestion(suggestions[0]!);
+      return;
+    }
     setBusy(true);
     try {
       const u = await searchUser(q);
@@ -87,6 +98,20 @@ export default function AddGroupMemberModal({
         setError("Пользователь не найден");
         return;
       }
+      const ok = await tryAddUserId(u.id);
+      if (ok) {
+        setQuery("");
+        onClose();
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handlePickSuggestion(u: { id: string }) {
+    if (busy) return;
+    setBusy(true);
+    try {
       const ok = await tryAddUserId(u.id);
       if (ok) {
         setQuery("");
@@ -146,6 +171,14 @@ export default function AddGroupMemberModal({
               Добавить
             </button>
           </div>
+          {query.trim().length > 0 && (
+            <UserSearchSuggestions
+              users={suggestions}
+              loading={suggestionsLoading}
+              onPick={(u) => void handlePickSuggestion(u)}
+              emptyText={suggestionsLoading ? undefined : "Никого не нашли"}
+            />
+          )}
           <h4 className="add-group-member-contacts-title">Контакты</h4>
           {contactsLoading ? (
             <p className="search-hint">Загрузка контактов…</p>
