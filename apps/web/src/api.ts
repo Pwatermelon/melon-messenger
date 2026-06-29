@@ -320,30 +320,25 @@ export async function updateProfile(updates: {
   return res.json();
 }
 
-export async function createPlatinumPayment(): Promise<{
-  paymentId?: string;
-  confirmationUrl?: string | null;
-  amount?: string;
-  currency?: string;
-  user?: User;
-  devMode?: boolean;
-  message?: string;
-}> {
-  const res = await fetch(`${getApiUrl()}/payments/platinum`, {
-    method: "POST",
+export async function getCoinBalance(): Promise<{ coins: number; user: User }> {
+  const res = await fetch(`${getApiUrl()}/coins/balance`, {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? "Payment failed");
+  if (!res.ok) throw new Error(data.error ?? "Failed to load balance");
   return data;
 }
 
-export async function getPlatinumPaymentStatus(paymentId: string): Promise<{ status: string; user: User }> {
-  const res = await fetch(`${getApiUrl()}/payments/platinum/${encodeURIComponent(paymentId)}`, {
+export async function getCoinTopupInfo(): Promise<{
+  userId: string;
+  donationAlertsUrl: string | null;
+  messageHint: string;
+}> {
+  const res = await fetch(`${getApiUrl()}/coins/topup-info`, {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? "Not found");
+  if (!res.ok) throw new Error(data.error ?? "Failed to load topup info");
   return data;
 }
 

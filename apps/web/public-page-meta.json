@@ -1,0 +1,42 @@
+[
+  {
+    "pathname": "/",
+    "htmlFile": "home.html",
+    "title": "Watermelon Messenger — безопасный мессенджер с чатами, медиа и голосовыми",
+    "description": "Watermelon Messenger — self-hosted мессенджер: личные и групповые чаты, медиа, голосовые сообщения и push-уведомления. Вход через Яндекс ID. Клиенты для iOS, Android и web.",
+    "seoBody": "landing",
+    "jsonLd": ["WebSite", "SoftwareApplication"]
+  },
+  {
+    "pathname": "/login",
+    "htmlFile": "login.html",
+    "title": "Вход — Watermelon Messenger",
+    "description": "Войдите в Watermelon Messenger через Яндекс ID. Self-hosted мессенджер с чатами, медиа, голосовыми сообщениями и push-уведомлениями.",
+    "canonicalPath": "/",
+    "seoBody": "login"
+  },
+  {
+    "pathname": "/legal/privacy",
+    "htmlFile": "legal-privacy.html",
+    "title": "Политика конфиденциальности — Watermelon Messenger",
+    "description": "Политика конфиденциальности Watermelon Messenger: какие персональные данные обрабатываются, цели, права пользователей и контакты оператора (152-ФЗ)."
+  },
+  {
+    "pathname": "/legal/personal-data-consent",
+    "htmlFile": "legal-personal-data-consent.html",
+    "title": "Согласие на обработку ПДн — Watermelon Messenger",
+    "description": "Согласие на обработку персональных данных в сервисе Watermelon Messenger: перечень данных, цели обработки и порядок отзыва согласия."
+  },
+  {
+    "pathname": "/legal/terms",
+    "htmlFile": "legal-terms.html",
+    "title": "Пользовательское соглашение — Watermelon Messenger",
+    "description": "Пользовательское соглашение Watermelon Messenger: правила использования мессенджера, контент и ответственность сторон."
+  },
+  {
+    "pathname": "/faq",
+    "htmlFile": "faq.html",
+    "title": "FAQ — Watermelon Messenger",
+    "description": "Ответы на частые вопросы о Watermelon Messenger: вход, beta-доступ, безопасность сообщений, уведомления и удаление аккаунта."
+  }
+]

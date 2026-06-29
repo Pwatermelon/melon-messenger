@@ -34,6 +34,7 @@ FROM nginx:alpine
 RUN rm -rf /usr/share/nginx/html/*
 COPY --from=builder /app/apps/web/dist /usr/share/nginx/html
 COPY deploy/nginx-spa-routes.map.conf /etc/nginx/conf.d/spa-routes.map.conf
+COPY deploy/nginx-spa-html.map.conf /etc/nginx/conf.d/spa-html.map.conf
 COPY deploy/nginx-spa-locations.snippet /etc/nginx/wm-spa-locations.conf
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 

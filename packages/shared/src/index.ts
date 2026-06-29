@@ -30,6 +30,8 @@ export interface User {
   avatarHistory?: string[];
   betaApproved?: boolean;
   isAdmin?: boolean;
+  /** Коины — подарок за поддержку проекта (melon-payment) */
+  coinBalance?: number;
 }
 
 export interface Chat {

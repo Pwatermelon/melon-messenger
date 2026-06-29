@@ -1,8 +1,9 @@
 User-agent: *
+Allow: /$
 Allow: /login
 Allow: /legal/
 Allow: /faq
-Allow: /platinum
+Disallow: /platinum
 Disallow: /auth/
 Disallow: /beta/
 Disallow: /chat/

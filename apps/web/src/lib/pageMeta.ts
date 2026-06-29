@@ -1,60 +1,53 @@
+import publicPages from "../../public-page-meta.json";
+
 export type PageMeta = {
   title: string;
   description: string;
   robots?: string;
+  canonical?: string;
+};
+
+const SITE_URL = "https://watermelon-messenger.ru";
+
+export const HOME_PAGE_META: PageMeta = {
+  title: "Watermelon Messenger — безопасный мессенджер с чатами, медиа и голосовыми",
+  description:
+    "Watermelon Messenger — self-hosted мессенджер: личные и групповые чаты, медиа, голосовые сообщения и push-уведомления. Вход через Яндекс ID. Клиенты для iOS, Android и web.",
+  canonical: `${SITE_URL}/`,
 };
 
 export const DEFAULT_PAGE_META: PageMeta = {
-  title: "Watermelon Messenger",
-  description:
-    "Watermelon Messenger — self-hosted мессенджер с личными и групповыми чатами, медиа и голосовыми сообщениями. Вход через Яндекс ID.",
+  ...HOME_PAGE_META,
 };
 
 const NOINDEX = "noindex, nofollow";
 
+const PUBLIC_PAGE_BY_PATH = new Map(
+  publicPages
+    .filter((page) => page.pathname !== "/")
+    .map((page) => {
+      const canonicalPath = "canonicalPath" in page && page.canonicalPath ? page.canonicalPath : page.pathname;
+      return [
+        page.pathname,
+        {
+          title: page.title,
+          description: page.description,
+          canonical: `${SITE_URL}${canonicalPath}`,
+        } satisfies PageMeta,
+      ] as const;
+    }),
+);
+
 /** Публичные страницы с уникальными title/description для поисковиков. */
 export function getPageMeta(pathname: string): PageMeta {
-  if (pathname === "/login") {
-    return {
-      title: "Вход — Watermelon Messenger",
-      description:
-        "Войдите в Watermelon Messenger через Яндекс ID. Self-hosted мессенджер с чатами, медиа и голосовыми сообщениями.",
-    };
+  const publicMeta = PUBLIC_PAGE_BY_PATH.get(pathname);
+  if (publicMeta) {
+    return publicMeta;
   }
-  if (pathname === "/legal/privacy") {
-    return {
-      title: "Политика конфиденциальности — Watermelon Messenger",
-      description:
-        "Политика конфиденциальности Watermelon Messenger: какие персональные данные обрабатываются, цели, права пользователей и контакты оператора (152-ФЗ).",
-    };
-  }
-  if (pathname === "/legal/personal-data-consent") {
-    return {
-      title: "Согласие на обработку ПДн — Watermelon Messenger",
-      description:
-        "Согласие на обработку персональных данных в сервисе Watermelon Messenger: перечень данных, цели обработки и порядок отзыва согласия.",
-    };
-  }
-  if (pathname === "/legal/terms") {
-    return {
-      title: "Пользовательское соглашение — Watermelon Messenger",
-      description:
-        "Пользовательское соглашение Watermelon Messenger: правила использования мессенджера, контент, подписка Platinum и ответственность сторон.",
-    };
-  }
-  if (pathname === "/faq") {
-    return {
-      title: "FAQ — Watermelon Messenger",
-      description:
-        "Ответы на частые вопросы о Watermelon Messenger: вход, beta-доступ, Platinum, безопасность сообщений, уведомления и удаление аккаунта.",
-    };
-  }
-  if (pathname === "/platinum") {
-    return {
-      title: "Platinum — Watermelon Messenger",
-      description:
-        "Подписка Platinum в Watermelon Messenger: ранний доступ к новым функциям, native-клиентам и расширенным возможностям мессенджера.",
-    };
+
+  // Корень: в статическом HTML — главная для поиска; в SPA с авторизацией — закрытый интерфейс чатов.
+  if (pathname === "/") {
+    return HOME_PAGE_META;
   }
 
   // Приватные и служебные маршруты — не индексируем.
@@ -65,10 +58,9 @@ export function getPageMeta(pathname: string): PageMeta {
     pathname.startsWith("/profile") ||
     pathname.startsWith("/settings") ||
     pathname === "/admin" ||
-    pathname === "/icon" ||
-    pathname === "/"
+    pathname === "/icon"
   ) {
-    return { ...DEFAULT_PAGE_META, robots: NOINDEX };
+    return { ...HOME_PAGE_META, robots: NOINDEX };
   }
 
   if (pathname !== "/" && pathname !== "") {
@@ -79,7 +71,7 @@ export function getPageMeta(pathname: string): PageMeta {
     };
   }
 
-  return { ...DEFAULT_PAGE_META, robots: NOINDEX };
+  return { ...HOME_PAGE_META, robots: NOINDEX };
 }
 
 function upsertMeta(attr: "name" | "property", key: string, content: string) {
@@ -96,6 +88,20 @@ function removeMeta(attr: "name" | "property", key: string) {
   document.head.querySelector(`meta[${attr}="${key}"]`)?.remove();
 }
 
+function upsertLink(rel: string, href: string) {
+  let el = document.head.querySelector(`link[rel="${rel}"]`) as HTMLLinkElement | null;
+  if (!el) {
+    el = document.createElement("link");
+    el.setAttribute("rel", rel);
+    document.head.appendChild(el);
+  }
+  el.setAttribute("href", href);
+}
+
+function removeLink(rel: string) {
+  document.head.querySelector(`link[rel="${rel}"]`)?.remove();
+}
+
 export function applyPageMeta(meta: PageMeta) {
   document.title = meta.title;
   upsertMeta("name", "description", meta.description);
@@ -106,5 +112,13 @@ export function applyPageMeta(meta: PageMeta) {
     upsertMeta("name", "robots", meta.robots);
   } else {
     removeMeta("name", "robots");
+  }
+
+  if (meta.canonical) {
+    upsertMeta("property", "og:url", meta.canonical);
+    upsertLink("canonical", meta.canonical);
+  } else {
+    removeMeta("property", "og:url");
+    removeLink("canonical");
   }
 }

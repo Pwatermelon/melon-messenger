@@ -9,8 +9,7 @@ export function isPublicLegalRoute(pathname: string): boolean {
   return (
     pathname.startsWith("/legal/") ||
     pathname === "/faq" ||
-    pathname === "/login" ||
-    pathname === "/platinum"
+    pathname === "/login"
   );
 }
 

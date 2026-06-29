@@ -15,6 +15,7 @@ services:
     volumes:
       - ./deploy/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
       - ./deploy/nginx-spa-routes.map.conf:/etc/nginx/conf.d/spa-routes.map.conf:ro
+      - ./deploy/nginx-spa-html.map.conf:/etc/nginx/conf.d/spa-html.map.conf:ro
       - ./deploy/nginx-spa-locations.snippet:/etc/nginx/wm-spa-locations.conf:ro
       - certbot-conf:/etc/letsencrypt:ro
       - certbot-www:/var/www/certbot:ro

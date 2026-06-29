@@ -84,6 +84,7 @@ export function toPrivateProfile(u: typeof users.$inferSelect) {
     birthdayVisible: u.birthdayVisible ?? false,
     betaApproved: u.betaApproved ?? false,
     isAdmin: u.isAdmin ?? false,
+    coinBalance: u.coinBalance ?? 0,
   };
 }
 

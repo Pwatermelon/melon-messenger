@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Message, MessageAttachment } from "@melon/shared";
 import { mediaUrl } from "../utils/mediaUrl";
 import { getMessageAttachments, isGifAttachment } from "../utils/messageAttachments";
@@ -23,6 +24,15 @@ function MediaTile({
 }) {
   const src = mediaUrl(attachment.url);
   const isGif = isGifAttachment(attachment);
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <div className="message-media-item message-media-item--failed" aria-hidden>
+        <span className="message-media-failed-label">Не удалось загрузить</span>
+      </div>
+    );
+  }
 
   return (
     <button
@@ -36,6 +46,7 @@ function MediaTile({
         className={`message-media-img${isGif ? " message-media-img-gif" : ""}`}
         loading={priority ? "eager" : "lazy"}
         decoding="async"
+        onError={() => setFailed(true)}
       />
       {isGif && <span className="message-media-gif-badge">GIF</span>}
     </button>

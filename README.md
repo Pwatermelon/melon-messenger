@@ -38,7 +38,7 @@ Watermelon Messenger — self-hosted мессенджер в духе Telegram: 
 | **Действия** | Удаление и пересылка сообщений, режим выбора как в Telegram |
 | **Медиа** | Приватное хранилище (MinIO / S3), выдача по подписанным URL |
 | **Профиль** | Аватар, обложка, био, галерея до 12 фото |
-| **Подписка** | Platinum — ранний доступ; оплата через YooKassa (опционально) |
+| **Коины** | Подарок за добровольную поддержку проекта → [melon-payment](../melon-payment) |
 | **Клиент** | Тёмная / светлая тема, Web Push, PWA (service worker) |
 | **Админка** | Панель для beta-доступа и модерации |
 
@@ -176,7 +176,8 @@ S3_BUCKET=watermelon-media
 
 | Переменные | Назначение |
 |------------|------------|
-| `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY` | Оплата Platinum |
+| `MELON_PAYMENT_URL`, `MELON_PAYMENT_API_KEY`, `MELON_PAYMENT_WEBHOOK_SECRET` | Учёт коинов через [melon-payment](../melon-payment) |
+| `DONATION_ALERTS_URL` | Ссылка на страницу поддержки проекта в настройках |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Уведомления в браузере (Web Push; не email). `npx web-push generate-vapid-keys` |
 | `ADMIN_YANDEX_LOGINS`, `ADMIN_YANDEX_IDS` | Доступ в админ-панель |
 
@@ -300,9 +301,16 @@ bun run db:studio    # Drizzle Studio
 ./scripts/backup-postgres.sh
 ```
 
-### Platinum
+### Поддержка проекта и коины
 
-Страница `/platinum` — подписка с расширенными возможностями. Без ключей YooKassa API активирует Platinum в dev-режиме (`POST /auth/subscription/platinum`).
+**DonationAlerts:**
+
+1. **`DA_SECRET_TOKEN`** в `.env` **melon-payment** — секретный токен виджета (тот же, что в OBS). По нему payment получает уведомления о поддержке.
+2. **`DONATION_ALERTS_URL`** в `.env` **мессенджера** — ссылка на страницу поддержки для кнопки в настройках.
+
+OAuth-приложение DonationAlerts **не нужно**. Коины начисляются как подарок за поддержку, не как покупка.
+
+Подробнее: [melon-payment/README.md](../melon-payment/README.md).
 
 ---
 

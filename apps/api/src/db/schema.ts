@@ -23,6 +23,8 @@ export const users = pgTable("users", {
   birthdayVisible: boolean("birthday_visible").notNull().default(false),
   subscriptionTier: varchar("subscription_tier", { length: 20 }).notNull().default("free"),
   subscriptionExpiresAt: timestamp("subscription_expires_at", { withTimezone: true }),
+  /** Баланс коинов — подарок за поддержку (синхронизируется с melon-payment) */
+  coinBalance: integer("coin_balance").notNull().default(0),
   betaApproved: boolean("beta_approved").notNull().default(false),
   isAdmin: boolean("is_admin").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

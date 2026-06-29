@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { sql } from "drizzle-orm";
-import { paymentRoutes } from "./routes/payments";
+import { coinRoutes } from "./routes/coins";
 import { pushRoutes } from "./routes/push";
 import { healthRoutes, incrementRequestCount } from "./routes/health";
 import { metricsRoutes } from "./routes/metrics";
@@ -49,6 +49,7 @@ async function main() {
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthday_visible boolean NOT NULL DEFAULT false`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_history text`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_expires_at timestamptz`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS coin_balance integer NOT NULL DEFAULT 0`);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS payments (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -267,7 +268,7 @@ async function main() {
     .use(adminReportsRoutes)
     .use(adminLegalRoutes)
     .use(adminObservabilityRoutes)
-    .use(paymentRoutes)
+    .use(coinRoutes)
     .use(pushRoutes)
     .use(isE2eEnabled() ? e2eRoutes : new Elysia())
     .use(chatRoutes)

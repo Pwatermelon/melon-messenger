@@ -35,12 +35,12 @@ function loadUrls(host) {
     /* fallback below */
   }
   return [
+    `${base}/`,
     `${base}/login`,
     `${base}/legal/privacy`,
     `${base}/legal/personal-data-consent`,
     `${base}/legal/terms`,
     `${base}/faq`,
-    `${base}/platinum`,
   ];
 }
 

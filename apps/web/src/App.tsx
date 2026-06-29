@@ -6,7 +6,6 @@ import Login from "./pages/Login";
 import AuthCallback from "./pages/AuthCallback";
 import BetaWelcome from "./pages/BetaWelcome";
 import BetaPending from "./pages/BetaPending";
-import Platinum from "./pages/Platinum";
 import ChatLayout from "./pages/ChatLayout";
 import ChatLegacyRedirect from "./pages/ChatLegacyRedirect";
 import IconPreview from "./pages/IconPreview";
@@ -53,7 +52,6 @@ export default function App() {
       <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
-      <Route path="/platinum" element={<Platinum />} />
       <Route path="/icon" element={<IconPreview />} />
       <Route path="/legal/privacy" element={<PrivacyPolicy />} />
       <Route path="/legal/personal-data-consent" element={<PersonalDataConsent />} />
