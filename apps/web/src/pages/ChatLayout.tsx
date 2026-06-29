@@ -32,7 +32,6 @@ import {
   type ChatListMenuState,
 } from "../components/ChatListContextMenu";
 import AppReportButton from "../components/AppReportButton";
-import PlatinumBalanceBadge from "../components/PlatinumBalanceBadge";
 import SupportThankYouModal from "../components/SupportThankYouModal";
 import { usePlatinumBalance } from "../hooks/usePlatinumBalance";
 
@@ -657,18 +656,15 @@ export default function ChatLayout() {
     >
       <aside className="sidebar">
         <div className="sidebar-header">
-          <div className="sidebar-header-left">
-            <h2 className="sidebar-title">
-              <BrandIcon size={28} className="sidebar-brand-icon" />
-              <span className="sidebar-title-text">
-                Watermelon
-                <span className="sidebar-version" title={`Версия ${APP_VERSION}`}>
-                  v{APP_VERSION}
-                </span>
+          <h2 className="sidebar-title">
+            <BrandIcon size={28} className="sidebar-brand-icon" />
+            <span className="sidebar-title-text">
+              Watermelon
+              <span className="sidebar-version" title={`Версия ${APP_VERSION}`}>
+                v{APP_VERSION}
               </span>
-            </h2>
-            <PlatinumBalanceBadge balance={platinumBalance} />
-          </div>
+            </span>
+          </h2>
           <button
             type="button"
             className="sidebar-settings-btn"
@@ -870,6 +866,7 @@ export default function ChatLayout() {
 
       {settingsOpen && (
         <SettingsModal
+          platinumBalance={platinumBalance}
           onClose={() => setSettingsOpen(false)}
           onOpenAdmin={() => setAdminConsoleOpen(true)}
         />

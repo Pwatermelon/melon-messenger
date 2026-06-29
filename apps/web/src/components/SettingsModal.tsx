@@ -16,11 +16,13 @@ import StickerPacksSettings from "./StickerPacksSettings";
 import BlockedUsersSettings from "./BlockedUsersSettings";
 import ChatFoldersSettings from "./ChatFoldersSettings";
 import DeleteAccountModal from "./DeleteAccountModal";
+import PlatinumBalanceBadge from "./PlatinumBalanceBadge";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 
 type Props = {
   onClose: () => void;
   onOpenAdmin?: () => void;
+  platinumBalance?: number;
 };
 
 function SettingsSwitch({
@@ -49,7 +51,7 @@ function SettingsSwitch({
   );
 }
 
-export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
+export default function SettingsModal({ onClose, onOpenAdmin, platinumBalance = 0 }: Props) {
   const overlayDismiss = useOverlayDismiss(onClose);
   const { user, updateUser, logout, token } = useAuth();
   const { theme, setTheme } = useTheme();
@@ -252,6 +254,7 @@ export default function SettingsModal({ onClose, onOpenAdmin }: Props) {
           onPointerDown={overlayDismiss.onModalPointerDown}
           onClick={(e) => e.stopPropagation()}
         >
+          <PlatinumBalanceBadge balance={platinumBalance} className="settings-modal-platinum" />
           <button type="button" className="modal-close settings-modal-close" onClick={onClose} aria-label="Закрыть">
             ×
           </button>

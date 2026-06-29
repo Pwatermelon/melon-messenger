@@ -1,14 +1,18 @@
 type Props = {
   balance: number;
+  className?: string;
 };
 
-export default function PlatinumBalanceBadge({ balance }: Props) {
+export default function PlatinumBalanceBadge({ balance, className }: Props) {
   return (
-    <div className="sidebar-platinum-balance" title="Platinum за поддержку проекта">
-      <span className="sidebar-platinum-star" aria-hidden>
+    <div
+      className={`settings-platinum-balance${className ? ` ${className}` : ""}`}
+      title="Platinum за поддержку проекта"
+    >
+      <span className="settings-platinum-star" aria-hidden>
         ✦
       </span>
-      <span className="sidebar-platinum-amount">{balance}</span>
+      <span className="settings-platinum-amount">{balance}</span>
     </div>
   );
 }
