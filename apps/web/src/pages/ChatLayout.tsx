@@ -504,10 +504,12 @@ export default function ChatLayout() {
         setChats((prev) => upsertChatInList(prev, { ...(result.chat as Chat), unreadCount: result.chat.unreadCount ?? 0 }));
         ensureChatSubscribed(result.chat.id);
         await openChat(result.chat.id);
+        window.dispatchEvent(new Event("wm:close-chat-overlays"));
         return true;
       }
       closeChat();
       setDraftDmPeer(result.peer);
+      window.dispatchEvent(new Event("wm:close-chat-overlays"));
       return true;
     } catch (e) {
       setDmError(e instanceof Error ? e.message : "Не удалось открыть диалог");

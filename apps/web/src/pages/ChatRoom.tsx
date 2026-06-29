@@ -139,6 +139,12 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
   onCloseRef.current = onClose;
 
   useEffect(() => {
+    const closeOverlays = () => setContactInfoOpen(false);
+    window.addEventListener("wm:close-chat-overlays", closeOverlays);
+    return () => window.removeEventListener("wm:close-chat-overlays", closeOverlays);
+  }, []);
+
+  useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
 
