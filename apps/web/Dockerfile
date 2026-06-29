@@ -7,6 +7,7 @@ WORKDIR /app
 COPY package.json ./
 COPY packages ./packages
 COPY apps/web ./apps/web
+COPY scripts ./scripts
 
 WORKDIR /app/apps/web
 ARG WM_VERSION=dev
