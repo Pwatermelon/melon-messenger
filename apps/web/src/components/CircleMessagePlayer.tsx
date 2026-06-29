@@ -261,7 +261,7 @@ export function CircleMessagePlayer({ src, duration: metaDuration, size = DEFAUL
           src={src}
           poster={poster ?? undefined}
           playsInline
-          preload={poster ? "metadata" : "auto"}
+          preload="metadata"
           muted={false}
           disablePictureInPicture
           controls={false}

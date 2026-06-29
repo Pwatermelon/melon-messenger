@@ -112,6 +112,9 @@ export interface MessageAttachment {
   fileName?: string;
   mimeType?: string;
   size?: number;
+  /** Intrinsic pixel size — позволяет зарезервировать место и избежать скачков скролла. */
+  width?: number;
+  height?: number;
 }
 
 /** Attachment metadata (JSON) */
@@ -120,6 +123,9 @@ export interface AttachmentMetadata {
   mimeType?: string;
   size?: number;
   duration?: number;
+  /** Intrinsic pixel size одиночного вложения (для резервирования места). */
+  width?: number;
+  height?: number;
   /** First-frame JPEG for video circles */
   posterUrl?: string;
   lat?: number;

@@ -299,7 +299,15 @@ export async function getMessageRowsRaw(
   chatId: string,
   limit: number,
   beforeMessageId?: string
-): Promise<Array<{ message_id: string; content: string; attachment_metadata: string | null }>> {
+): Promise<
+  Array<{
+    message_id: string;
+    content: string;
+    attachment_metadata: string | null;
+    attachment_url: string | null;
+    message_type: string | null;
+  }>
+> {
   const params = beforeMessageId ? [chatId, beforeMessageId, limit] : [chatId, limit];
   const query = beforeMessageId ? selectFromQuery : selectQuery;
   try {
@@ -308,6 +316,8 @@ export async function getMessageRowsRaw(
       message_id: row.message_id?.toString() ?? "",
       content: String(row.content ?? ""),
       attachment_metadata: row.attachment_metadata != null ? String(row.attachment_metadata) : null,
+      attachment_url: row.attachment_url != null ? String(row.attachment_url) : null,
+      message_type: row.message_type != null ? String(row.message_type) : null,
     }));
   } catch (err) {
     console.warn("[Scylla] getMessageRowsRaw failed:", err);

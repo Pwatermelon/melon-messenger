@@ -12,6 +12,30 @@ export function isGifFile(file: File): boolean {
   return file.type === "image/gif" || /\.gif$/i.test(file.name);
 }
 
+/** Читает натуральные размеры картинки, не дожидаясь полной загрузки в чат. */
+export async function getImageDimensions(
+  file: File
+): Promise<{ width: number; height: number } | null> {
+  if (!file.type.startsWith("image/")) return null;
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(
+        img.naturalWidth && img.naturalHeight
+          ? { width: img.naturalWidth, height: img.naturalHeight }
+          : null
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(null);
+    };
+    img.src = url;
+  });
+}
+
 export async function isGifFileDeep(file: File): Promise<boolean> {
   if (isGifFile(file)) return true;
   try {

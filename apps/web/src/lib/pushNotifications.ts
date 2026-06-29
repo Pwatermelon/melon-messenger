@@ -79,7 +79,46 @@ export async function unsubscribeFromPush(token: string): Promise<void> {
 
 export function registerServiceWorker(): void {
   if (!("serviceWorker" in navigator)) return;
-  navigator.serviceWorker.register("/sw.js").catch((err) => {
-    console.warn("[SW] registration failed:", err);
+
+  // Когда новый service worker берёт управление (после деплоя новой версии),
+  // перезагружаем страницу, чтобы клиент гарантированно перешёл на свежий код.
+  // Это решает проблему "залипшей" версии в PWA на iOS, где обычного обновления
+  // страницы нет, а приложение восстанавливается из памяти.
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (refreshing) return;
+    refreshing = true;
+    window.location.reload();
   });
+
+  navigator.serviceWorker
+    .register("/sw.js")
+    .then((reg) => {
+      const promoteWaiting = () => {
+        if (reg.waiting) reg.waiting.postMessage("SKIP_WAITING");
+      };
+      // Если новая версия уже ждёт активации — активируем сразу.
+      promoteWaiting();
+      reg.addEventListener("updatefound", () => {
+        const installing = reg.installing;
+        if (!installing) return;
+        installing.addEventListener("statechange", () => {
+          // Новая версия установлена и есть активный контроллер => это обновление.
+          if (installing.state === "installed" && navigator.serviceWorker.controller) {
+            promoteWaiting();
+          }
+        });
+      });
+
+      // iOS standalone PWA не проверяет обновления при возврате из фона сам —
+      // инициируем проверку при каждом показе приложения.
+      const checkForUpdate = () => {
+        if (document.visibilityState === "visible") void reg.update().catch(() => undefined);
+      };
+      document.addEventListener("visibilitychange", checkForUpdate);
+      window.addEventListener("focus", checkForUpdate);
+    })
+    .catch((err) => {
+      console.warn("[SW] registration failed:", err);
+    });
 }

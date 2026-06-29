@@ -17,7 +17,7 @@ import ComposeEmojiStickerPanel from "../components/ComposeEmojiStickerPanel";
 import StickerPackViewModal from "../components/StickerPackViewModal";
 import { getChat, getChats, getMessages, uploadFile, removeGroupMember, deleteChat, updateGroup, deleteMessage, editMessage, forwardMessage, signMediaPaths, markChatReadApi, getChatReadCursors, setMessageReaction, sendDmMessage } from "../api";
 import { extFromBlobType } from "../utils/mediaMime";
-import { compressImage, isGifFileDeep } from "../utils/imageCompress";
+import { compressImage, isGifFileDeep, getImageDimensions } from "../utils/imageCompress";
 import ImageLightbox from "../components/ImageLightbox";
 import { MessageMediaGallery } from "../components/MessageMediaGallery";
 import {
@@ -1175,9 +1175,13 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
 
   function handleReplyStart(m: Message) {
     setMessageMenu(null);
+    // Если пользователь редактировал сообщение, его текст в поле — это содержимое
+    // редактируемого сообщения, поэтому при переходе к ответу его нужно очистить.
+    // Если же он просто набирал новое сообщение, текст сохраняем.
+    if (editDraft) setInput("");
     setEditDraft(null);
-    setInput("");
     setReplyDraft(m);
+    composeInputRef.current?.focus();
   }
 
   function handleEditStart(m: Message) {
@@ -1200,6 +1204,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     const isGif = await isGifFileDeep(file);
     const isImage = file.type.startsWith("image/") && !isGif;
     const toUpload = isImage ? await compressImage(file) : file;
+    const dims = isImage || isGif ? await getImageDimensions(file) : null;
     const { path, fileName, mimeType, size } = await uploadFile(toUpload);
     const type = isGif || isImage ? "image" : file.type.startsWith("video/") ? "video" : "file";
     const fallback = isGif ? "GIF" : type === "image" ? "Фотография" : type === "video" ? "Видео" : file.name;
@@ -1210,9 +1215,9 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
         attachmentUrl: path,
         attachmentMetadata:
           isGif
-            ? { fileName: file.name || "animation.gif", mimeType: "image/gif", size: file.size }
+            ? { fileName: file.name || "animation.gif", mimeType: "image/gif", size: file.size, ...(dims ?? {}) }
             : type === "image"
-            ? { fileName: "Фотография", mimeType: toUpload.type, size: toUpload.size }
+            ? { fileName: "Фотография", mimeType: toUpload.type, size: toUpload.size, ...(dims ?? {}) }
             : { fileName: file.name ?? fileName, mimeType: mimeType ?? file.type, size: size ?? file.size },
       },
       withReply
@@ -1224,12 +1229,14 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     for (const file of files) {
       const isGif = await isGifFileDeep(file);
       const toUpload = isGif ? file : await compressImage(file);
+      const dims = await getImageDimensions(file);
       const { path, fileName, mimeType, size } = await uploadFile(toUpload);
       attachments.push({
         url: path,
         fileName: file.name || fileName,
         mimeType: isGif ? "image/gif" : mimeType || toUpload.type || "image/jpeg",
         size: size ?? file.size,
+        ...(dims ?? {}),
       });
     }
     const count = attachments.length;
@@ -1961,7 +1968,14 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
                 </a>
               )}
               {(m.messageType ?? "text") === "video" && m.attachmentUrl && (
-                <video src={mediaUrl(m.attachmentUrl)} controls className="message-video" />
+                <video
+                  src={mediaUrl(m.attachmentUrl)}
+                  poster={m.attachmentMetadata?.posterUrl ? mediaUrl(m.attachmentMetadata.posterUrl) : undefined}
+                  controls
+                  preload="metadata"
+                  playsInline
+                  className="message-video"
+                />
               )}
               {(m.messageType ?? "text") === "location" && (() => {
                 const loc = parseLocationCoords(m.content, m.attachmentMetadata);

@@ -33,6 +33,8 @@ export function getMessageAttachments(m: Pick<Message, "attachmentUrl" | "attach
         fileName: m.attachmentMetadata?.fileName,
         mimeType: m.attachmentMetadata?.mimeType,
         size: m.attachmentMetadata?.size,
+        width: m.attachmentMetadata?.width,
+        height: m.attachmentMetadata?.height,
       },
     ];
   }

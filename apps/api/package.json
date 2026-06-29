@@ -13,6 +13,7 @@
     "db:seed": "bun run src/db/seed.ts",
     "db:audit-yandex-users": "bun run src/db/auditYandexUsers.ts",
     "db:reencrypt-messages": "bun run src/db/reencryptMessages.ts",
+    "db:backfill-media-dimensions": "bun run src/db/backfillMediaDimensions.ts",
     "test": "bun test src/tests/unit.test.ts"
   },
   "dependencies": {
@@ -23,6 +24,7 @@
     "cassandra-driver": "^4.7.4",
     "drizzle-orm": "^0.38.0",
     "elysia": "^1.2.0",
+    "image-size": "^1.2.1",
     "ioredis": "^5.4.1",
     "jose": "^5.9.6",
     "postgres": "^3.4.5",

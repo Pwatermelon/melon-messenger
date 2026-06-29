@@ -24,6 +24,7 @@ import { validateProductionEnv } from "./lib/envCheck";
 import { e2eRoutes, isE2eEnabled } from "./routes/e2e";
 import { reportsRoutes, adminReportsRoutes } from "./routes/reports";
 import { legalRoutes, authLegalRoutes, adminLegalRoutes } from "./routes/legal";
+import { backfillMediaDimensions } from "./db/backfillMediaDimensions";
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -230,6 +231,12 @@ async function main() {
     await db.execute(sql`
       CREATE INDEX IF NOT EXISTS user_legal_acceptances_batch_idx ON user_legal_acceptances (batch_id)
     `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS app_migrations (
+        name varchar(128) PRIMARY KEY,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
   } catch (e) {
     console.warn("Schema migration (optional):", e);
   }
@@ -289,6 +296,35 @@ async function main() {
   }
   console.log(`API + WS on http://localhost:${PORT}`);
   if (isE2eEnabled()) console.log("[E2E] Test routes enabled at /e2e/*");
+
+  // Одноразовые фоновые миграции данных. Не блокируют старт сервиса и
+  // защищены маркером в app_migrations, чтобы не выполняться при каждом рестарте.
+  void runOneTimeDataMigrations();
+}
+
+const MIGRATION_MEDIA_DIMENSIONS = "media_dimensions_backfill_v1";
+
+async function runOneTimeDataMigrations(): Promise<void> {
+  try {
+    const done = (await db.execute(
+      sql`SELECT 1 FROM app_migrations WHERE name = ${MIGRATION_MEDIA_DIMENSIONS} LIMIT 1`
+    )) as unknown as { length: number };
+    if (done.length > 0) return;
+
+    console.log(`[migrate] ${MIGRATION_MEDIA_DIMENSIONS}: бэкфилл размеров медиа запущен…`);
+    const { scanned, updated } = await backfillMediaDimensions({
+      log: (m) => console.log(`[migrate] ${m}`),
+    });
+    await db.execute(
+      sql`INSERT INTO app_migrations (name) VALUES (${MIGRATION_MEDIA_DIMENSIONS}) ON CONFLICT (name) DO NOTHING`
+    );
+    console.log(
+      `[migrate] ${MIGRATION_MEDIA_DIMENSIONS}: готово — размеры добавлены к ${updated} из ${scanned} сообщений.`
+    );
+  } catch (e) {
+    // Не помечаем как выполненную — повторится при следующем рестарте.
+    console.warn(`[migrate] ${MIGRATION_MEDIA_DIMENSIONS} failed (повторим позже):`, e);
+  }
 }
 
 main();
