@@ -1,13 +1,13 @@
 import { useState, type CSSProperties } from "react";
 import type { Message, MessageAttachment } from "@melon/shared";
-import { mediaUrl } from "../utils/mediaUrl";
+import { mediaUrl, mediaDownloadUrl } from "../utils/mediaUrl";
 import { getMessageAttachments, isGifAttachment } from "../utils/messageAttachments";
 import { displayMessageMediaSize } from "../utils/messageMediaSize";
 
 type Props = {
   message: Message;
   priority?: boolean;
-  onOpenLightbox: (urls: string[], index: number) => void;
+  onOpenLightbox: (urls: string[], downloadHrefs: string[], index: number) => void;
 };
 
 function MediaTile({
@@ -74,6 +74,7 @@ export function MessageMediaGallery({ message, priority = false, onOpenLightbox 
   if (attachments.length === 0) return null;
 
   const urls = attachments.map((a) => mediaUrl(a.url));
+  const downloadHrefs = attachments.map((a) => mediaDownloadUrl(a.url, a.fileName));
   const count = attachments.length;
 
   return (
@@ -85,7 +86,7 @@ export function MessageMediaGallery({ message, priority = false, onOpenLightbox 
           count={count}
           index={i}
           priority={priority}
-          onOpen={(idx) => onOpenLightbox(urls, idx)}
+          onOpen={(idx) => onOpenLightbox(urls, downloadHrefs, idx)}
         />
       ))}
     </div>

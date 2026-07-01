@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type { MouseEvent as ReactMouseEvent, TouchEvent as ReactTouchEvent } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import SettingsModal from "../components/SettingsModal";
 import AdminConsoleModal from "../components/AdminConsoleModal";
@@ -133,6 +133,9 @@ export default function ChatLayout() {
   userIdRef.current = user?.id;
   const chatsRef = useRef(chats);
   chatsRef.current = chats;
+  const chatLongPressRef = useRef<number | null>(null);
+  const chatLongPressTriggeredRef = useRef(false);
+  const chatTouchMovedRef = useRef(false);
 
   const bumpChatPreview = useCallback((message: Pick<Message, "chatId" | "createdAt" | "content" | "messageType">) => {
     setChats((prev) => applyMessageToChatList(prev, message));
@@ -184,10 +187,37 @@ export default function ChatLayout() {
     saveActiveFolderId(folderId);
   }
 
+  function openChatContextMenuAt(x: number, y: number, chat: Chat) {
+    setChatListMenu({ chat, x, y });
+  }
+
   function openChatContextMenu(e: ReactMouseEvent, chat: Chat) {
     e.preventDefault();
     e.stopPropagation();
-    setChatListMenu({ chat, x: e.clientX, y: e.clientY });
+    openChatContextMenuAt(e.clientX, e.clientY, chat);
+  }
+
+  function onChatTouchStart(e: ReactTouchEvent, chat: Chat) {
+    const touch = e.touches[0];
+    if (!touch) return;
+    chatTouchMovedRef.current = false;
+    chatLongPressRef.current = window.setTimeout(() => {
+      chatLongPressRef.current = null;
+      chatLongPressTriggeredRef.current = true;
+      openChatContextMenuAt(touch.clientX, touch.clientY, chat);
+    }, 500);
+  }
+
+  function cancelChatLongPress() {
+    if (chatLongPressRef.current != null) {
+      clearTimeout(chatLongPressRef.current);
+      chatLongPressRef.current = null;
+    }
+  }
+
+  function onChatTouchMove() {
+    chatTouchMovedRef.current = true;
+    cancelChatLongPress();
   }
 
   async function handleMarkChatRead(chatId: string) {
@@ -850,9 +880,21 @@ export default function ChatLayout() {
                 type="button"
                 className={`chat-item chat-item-btn ${activeChatId === chat.id ? "chat-item-active" : ""}`}
                 onClick={() => {
+                  if (chatLongPressTriggeredRef.current) {
+                    chatLongPressTriggeredRef.current = false;
+                    return;
+                  }
+                  if (chatTouchMovedRef.current) {
+                    chatTouchMovedRef.current = false;
+                    return;
+                  }
                   void openChat(chat.id);
                 }}
                 onContextMenu={(e) => openChatContextMenu(e, chat)}
+                onTouchStart={(e) => onChatTouchStart(e, chat)}
+                onTouchEnd={cancelChatLongPress}
+                onTouchCancel={cancelChatLongPress}
+                onTouchMove={onChatTouchMove}
               >
                 <div className="chat-item-avatar">{chatAvatar(chat, activeChatId === chat.id)}</div>
                 <div className="chat-item-body">

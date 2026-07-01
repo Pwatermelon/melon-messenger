@@ -1,9 +1,17 @@
 import { useEffect, useState } from "react";
+import { MessageVideoPlayer } from "./MessageVideoPlayer";
+import { LightboxDownloadButton } from "./LightboxDownloadButton";
+import { mediaDownloadUrl } from "../utils/mediaUrl";
 
 export type MediaLightboxItem = {
   url: string;
   kind: "image" | "video";
   duration?: number;
+  poster?: string | null;
+  width?: number;
+  height?: number;
+  downloadPath?: string | null;
+  fileName?: string | null;
 };
 
 type Props = {
@@ -13,6 +21,11 @@ type Props = {
   nested?: boolean;
   title?: string;
 };
+
+function itemDownloadHref(item: MediaLightboxItem): string {
+  if (item.downloadPath) return mediaDownloadUrl(item.downloadPath, item.fileName);
+  return mediaDownloadUrl(item.url, item.fileName);
+}
 
 export default function MediaLightbox({
   items,
@@ -42,6 +55,7 @@ export default function MediaLightbox({
   const current = items[index] ?? items[0];
   const canPrev = index > 0;
   const canNext = index < items.length - 1;
+  const downloadHref = itemDownloadHref(current);
 
   return (
     <div
@@ -51,6 +65,7 @@ export default function MediaLightbox({
       aria-modal="true"
       aria-label={title ?? "Просмотр медиа"}
     >
+      <LightboxDownloadButton href={downloadHref} fileName={current.fileName} />
       <button type="button" className="lightbox-close" onClick={onClose} aria-label="Закрыть">
         ×
       </button>
@@ -85,25 +100,25 @@ export default function MediaLightbox({
           </div>
         </>
       )}
-      <div className="lightbox-gallery-body" onClick={(e) => e.stopPropagation()}>
-        <div className="lightbox-content">
+      <div className="lightbox-gallery-body">
+        <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
           {current.kind === "video" ? (
-            <video
+            <MessageVideoPlayer
               key={current.url}
               src={current.url}
-              className="lightbox-video"
-              controls
+              poster={current.poster}
+              width={current.width}
+              height={current.height}
+              duration={current.duration}
+              variant="lightbox"
               autoPlay
-              playsInline
-              disablePictureInPicture
-              controlsList="nodownload noplaybackrate"
             />
           ) : (
             <img src={current.url} alt="" className="lightbox-img" />
           )}
         </div>
         {items.length > 1 && (
-          <div className="lightbox-thumbs" role="listbox" aria-label="Миниатюры">
+          <div className="lightbox-thumbs" role="listbox" aria-label="Миниатюры" onClick={(e) => e.stopPropagation()}>
             {items.map((item, i) => (
               <button
                 key={`${item.url}-${i}`}

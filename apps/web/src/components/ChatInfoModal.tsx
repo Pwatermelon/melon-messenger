@@ -61,8 +61,23 @@ function isCircleItem(item: ChatSharedItem): boolean {
 function sharedItemToMedia(item: ChatSharedItem): MediaLightboxItem | null {
   if (!item.attachmentUrl || isCircleItem(item)) return null;
   const url = mediaUrl(item.attachmentUrl);
-  if (item.messageType === "video") return { url, kind: "video" };
-  if (item.messageType === "image") return { url, kind: "image" };
+  const meta = item.attachmentMetadata;
+  const base = {
+    downloadPath: item.attachmentUrl,
+    fileName: meta?.fileName ?? null,
+  };
+  if (item.messageType === "video") {
+    return {
+      url,
+      kind: "video",
+      poster: meta?.posterUrl ? mediaUrl(meta.posterUrl) : null,
+      width: meta?.width,
+      height: meta?.height,
+      duration: meta?.duration,
+      ...base,
+    };
+  }
+  if (item.messageType === "image") return { url, kind: "image", ...base };
   return null;
 }
 

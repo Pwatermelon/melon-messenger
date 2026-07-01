@@ -3,6 +3,7 @@ import { IconExpand, IconPause, IconPlay } from "./Icons";
 import { canPlayMediaUrl, mimeFromMediaUrl } from "../utils/mediaMime";
 import { claimMediaPlayback, releaseMediaPlayback } from "../utils/mediaPlayback";
 import { displayMessageMediaSize } from "../utils/messageMediaSize";
+import { resolvePlaybackDuration } from "../utils/mediaPlaybackDuration";
 import {
   getVideoMetaCache,
   getVideoPosterCache,
@@ -39,10 +40,21 @@ type Props = {
   width?: number;
   height?: number;
   duration?: number;
+  variant?: "inline" | "lightbox";
+  autoPlay?: boolean;
   onExpand?: () => void;
 };
 
-export function MessageVideoPlayer({ src, poster, width, height, duration: metaDuration, onExpand }: Props) {
+export function MessageVideoPlayer({
+  src,
+  poster,
+  width,
+  height,
+  duration: metaDuration,
+  variant = "inline",
+  autoPlay = false,
+  onExpand,
+}: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const scrubbingRef = useRef(false);
@@ -52,27 +64,23 @@ export function MessageVideoPlayer({ src, poster, width, height, duration: metaD
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [current, setCurrent] = useState(0);
-  const [duration, setDuration] = useState(metaDuration ?? 0);
+  const [mediaDuration, setMediaDuration] = useState(metaDuration ?? 0);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(() => resolveDims(width, height, src));
   const [posterSrc, setPosterSrc] = useState<string | null>(() => poster ?? getVideoPosterCache(src));
   const [showFrame, setShowFrame] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
 
+  const duration = resolvePlaybackDuration(metaDuration, mediaDuration);
   const mime = mimeFromMediaUrl(src, "video");
+  const isLightbox = variant === "lightbox";
 
   const stopPlayback = useCallback(() => {
-    const video = videoRef.current;
-    if (video) {
-      video.pause();
-    }
+    videoRef.current?.pause();
     setPlaying(false);
   }, []);
 
   stopRef.current = () => {
-    const video = videoRef.current;
-    if (video) {
-      video.pause();
-    }
+    videoRef.current?.pause();
     setPlaying(false);
   };
 
@@ -81,17 +89,18 @@ export function MessageVideoPlayer({ src, poster, width, height, duration: metaD
       const track = trackRef.current;
       const video = videoRef.current;
       if (!track || !video) return;
-      const dur = video.duration;
+      const dur = resolvePlaybackDuration(metaDuration, video.duration) || video.duration;
       if (!dur || !Number.isFinite(dur)) return;
       const rect = track.getBoundingClientRect();
       const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
       const t = pct * dur;
-      video.currentTime = t;
+      const maxT = video.duration && Number.isFinite(video.duration) ? video.duration : t;
+      video.currentTime = Math.min(t, maxT);
       setProgress(pct);
-      setCurrent(t);
+      setCurrent(video.currentTime);
       setShowFrame(true);
     },
-    []
+    [metaDuration]
   );
 
   const scrubHandlersRef = useRef({
@@ -150,10 +159,9 @@ export function MessageVideoPlayer({ src, poster, width, height, duration: metaD
     setPlaying(false);
     setProgress(0);
     setCurrent(0);
-    setDuration(metaDuration ?? 0);
+    setMediaDuration(metaDuration ?? 0);
     setShowFrame(false);
-    const nextDims = resolveDims(width, height, src);
-    setDims(nextDims);
+    setDims(resolveDims(width, height, src));
     setPosterSrc(poster ?? getVideoPosterCache(src));
     return () => releaseMediaPlayback(stopRef.current);
   }, [src, poster, width, height, metaDuration]);
@@ -164,7 +172,7 @@ export function MessageVideoPlayer({ src, poster, width, height, duration: metaD
     void probeVideoMeta(src).then((meta) => {
       if (cancelled || !meta) return;
       setDims({ w: meta.width, h: meta.height });
-      if (meta.duration) setDuration(meta.duration);
+      if (meta.duration) setMediaDuration(meta.duration);
     });
     return () => {
       cancelled = true;
@@ -196,17 +204,17 @@ export function MessageVideoPlayer({ src, poster, width, height, duration: metaD
 
     const onTimeUpdate = () => {
       if (scrubbingRef.current) return;
-      const dur = video.duration;
-      if (dur && Number.isFinite(dur)) {
-        setProgress(video.currentTime / dur);
+      const dur = resolvePlaybackDuration(metaDuration, video.duration);
+      if (dur > 0) {
+        setProgress(Math.min(1, video.currentTime / dur));
         setCurrent(video.currentTime);
-        setDuration(dur);
       }
     };
     const onEnded = () => {
       setPlaying(false);
-      setProgress(0);
-      setCurrent(0);
+      const dur = resolvePlaybackDuration(metaDuration, video.duration);
+      setProgress(1);
+      setCurrent(dur > 0 ? dur : 0);
       setShowFrame(false);
       releaseMediaPlayback(stopRef.current);
     };
@@ -221,7 +229,7 @@ export function MessageVideoPlayer({ src, poster, width, height, duration: metaD
         setDims((prev) => prev ?? { w: meta.width, h: meta.height });
       }
       if (video.duration && Number.isFinite(video.duration)) {
-        setDuration(video.duration);
+        setMediaDuration(video.duration);
       }
     };
 
@@ -233,29 +241,11 @@ export function MessageVideoPlayer({ src, poster, width, height, duration: metaD
       video.removeEventListener("ended", onEnded);
       video.removeEventListener("loadedmetadata", onMeta);
     };
-  }, [src]);
+  }, [src, metaDuration]);
 
-  let boxStyle: CSSProperties;
-  if (dims) {
-    const size = displayMessageMediaSize(dims.w, dims.h);
-    boxStyle = { width: size.width, height: size.height };
-  } else {
-    const size = displayMessageMediaSize(9, 16);
-    boxStyle = { width: size.width, height: size.height };
-  }
-
-  const showPoster = !playing && !showFrame && Boolean(posterSrc);
-
-  function togglePlay(e: React.MouseEvent) {
-    e.stopPropagation();
+  const startPlayback = useCallback(() => {
     const video = videoRef.current;
     if (!video || unsupported) return;
-    if (playing) {
-      video.pause();
-      setPlaying(false);
-      releaseMediaPlayback(stopRef.current);
-      return;
-    }
     setShowFrame(true);
     claimMediaPlayback(stopRef.current);
     void video
@@ -265,6 +255,59 @@ export function MessageVideoPlayer({ src, poster, width, height, duration: metaD
         setPlaying(false);
         releaseMediaPlayback(stopRef.current);
       });
+  }, [unsupported]);
+
+  useEffect(() => {
+    if (!autoPlay || unsupported) return;
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      startPlayback();
+      return;
+    }
+    const onReady = () => startPlayback();
+    video.addEventListener("loadedmetadata", onReady, { once: true });
+    return () => video.removeEventListener("loadedmetadata", onReady);
+  }, [autoPlay, src, unsupported, startPlayback]);
+
+  let boxStyle: CSSProperties;
+  if (isLightbox) {
+    if (dims) {
+      const size = displayMessageMediaSize(dims.w, dims.h);
+      boxStyle = {
+        width: size.width,
+        maxWidth: "min(92vw, 960px)",
+        maxHeight: "min(80vh, 720px)",
+        aspectRatio: `${dims.w} / ${dims.h}`,
+      };
+    } else {
+      boxStyle = {
+        width: "min(92vw, 960px)",
+        maxHeight: "min(80vh, 720px)",
+        aspectRatio: "16 / 9",
+      };
+    }
+  } else if (dims) {
+    const size = displayMessageMediaSize(dims.w, dims.h);
+    boxStyle = { width: size.width, height: size.height };
+  } else {
+    const size = displayMessageMediaSize(9, 16);
+    boxStyle = { width: size.width, height: size.height };
+  }
+
+  const showPoster = !playing && !showFrame && Boolean(posterSrc);
+
+  function togglePlay(e?: React.MouseEvent) {
+    e?.stopPropagation();
+    const video = videoRef.current;
+    if (!video || unsupported) return;
+    if (playing) {
+      video.pause();
+      setPlaying(false);
+      releaseMediaPlayback(stopRef.current);
+      return;
+    }
+    startPlayback();
   }
 
   function handleScrubDown(e: React.PointerEvent<HTMLDivElement>) {
@@ -291,8 +334,23 @@ export function MessageVideoPlayer({ src, poster, width, height, duration: metaD
   }
 
   return (
-    <div className="message-video-player" style={boxStyle}>
-      <div className="message-video-stage">
+    <div
+      className={`message-video-player${isLightbox ? " message-video-player--lightbox" : ""}${playing ? " is-playing" : ""}`}
+      style={boxStyle}
+    >
+      <div
+        className="message-video-stage message-video-stage--interactive"
+        onClick={togglePlay}
+        role="button"
+        tabIndex={0}
+        aria-label={playing ? "Пауза" : "Воспроизвести"}
+        onKeyDown={(e) => {
+          if (e.key === " " || e.key === "Enter") {
+            e.preventDefault();
+            togglePlay();
+          }
+        }}
+      >
         {showPoster && (
           <img src={posterSrc!} alt="" className="message-video-poster" draggable={false} />
         )}
@@ -313,17 +371,9 @@ export function MessageVideoPlayer({ src, poster, width, height, duration: metaD
         >
           <source src={src} type={mime} />
         </video>
-        {!playing && (
-          <button
-            type="button"
-            className="message-video-center-play"
-            onClick={togglePlay}
-            disabled={unsupported}
-            aria-label="Воспроизвести"
-          >
-            {unsupported ? "!" : <IconPlay size={30} />}
-          </button>
-        )}
+        <span className={`message-video-center-play${playing ? " is-playing" : ""}`} aria-hidden>
+          {unsupported ? "!" : playing ? <IconPause size={30} /> : <IconPlay size={30} />}
+        </span>
       </div>
       <div className="message-video-bar" onClick={(e) => e.stopPropagation()}>
         <button
@@ -352,7 +402,7 @@ export function MessageVideoPlayer({ src, poster, width, height, duration: metaD
         <span className="message-video-bar-time">
           {formatTime(current)} / {formatTime(duration)}
         </span>
-        {onExpand && (
+        {onExpand && !isLightbox && (
           <button type="button" className="message-video-bar-btn" onClick={handleExpand} aria-label="На весь экран">
             <IconExpand size={15} />
           </button>

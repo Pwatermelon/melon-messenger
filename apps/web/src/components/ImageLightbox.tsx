@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { LightboxDownloadButton } from "./LightboxDownloadButton";
 
 type Props = {
   images: string[];
@@ -7,6 +8,8 @@ type Props = {
   canDelete?: boolean;
   onDelete?: (index: number) => void;
   title?: string;
+  downloadHrefs?: (string | null | undefined)[];
+  downloadFileNames?: (string | null | undefined)[];
 };
 
 export default function ImageLightbox({
@@ -16,6 +19,8 @@ export default function ImageLightbox({
   canDelete,
   onDelete,
   title,
+  downloadHrefs,
+  downloadFileNames,
 }: Props) {
   const [index, setIndex] = useState(initialIndex);
 
@@ -38,6 +43,8 @@ export default function ImageLightbox({
   const current = images[index] ?? images[0];
   const canPrev = index > 0;
   const canNext = index < images.length - 1;
+  const downloadHref = downloadHrefs?.[index] ?? undefined;
+  const downloadName = downloadFileNames?.[index] ?? undefined;
 
   return (
     <div
@@ -47,6 +54,7 @@ export default function ImageLightbox({
       aria-modal="true"
       aria-label={title ?? "Просмотр фото"}
     >
+      {downloadHref && <LightboxDownloadButton href={downloadHref} fileName={downloadName} />}
       <button type="button" className="lightbox-close" onClick={onClose} aria-label="Закрыть">
         ×
       </button>
@@ -81,12 +89,12 @@ export default function ImageLightbox({
           </div>
         </>
       )}
-      <div className="lightbox-gallery-body" onClick={(e) => e.stopPropagation()}>
-        <div className="lightbox-content">
+      <div className="lightbox-gallery-body">
+        <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
           <img src={current} alt="" className="lightbox-img" />
         </div>
         {images.length > 1 && (
-          <div className="lightbox-thumbs" role="listbox" aria-label="Миниатюры">
+          <div className="lightbox-thumbs" role="listbox" aria-label="Миниатюры" onClick={(e) => e.stopPropagation()}>
             {images.map((src, i) => (
               <button
                 key={`${src}-${i}`}
@@ -105,7 +113,10 @@ export default function ImageLightbox({
           <button
             type="button"
             className="lightbox-delete-btn"
-            onClick={() => onDelete(index)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(index);
+            }}
           >
             Удалить это фото
           </button>

@@ -22,7 +22,7 @@ import { extFromBlobType } from "../utils/mediaMime";
 import { compressImage, isGifFileDeep, getImageDimensions } from "../utils/imageCompress";
 import { getVideoDimensions } from "../utils/videoDimensions";
 import ImageLightbox from "../components/ImageLightbox";
-import MediaLightbox from "../components/MediaLightbox";
+import MediaLightbox, { type MediaLightboxItem } from "../components/MediaLightbox";
 import { MessageVideoPlayer } from "../components/MessageVideoPlayer";
 import { MessageMediaGallery } from "../components/MessageMediaGallery";
 import {
@@ -100,8 +100,8 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [emojiPanelOpen, setEmojiPanelOpen] = useState(false);
   const [stickerPackViewId, setStickerPackViewId] = useState<string | null>(null);
-  const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
-  const [videoLightbox, setVideoLightbox] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ urls: string[]; downloadHrefs: string[]; index: number } | null>(null);
+  const [videoLightbox, setVideoLightbox] = useState<MediaLightboxItem | null>(null);
   const [fileDragActive, setFileDragActive] = useState(false);
   const [contactInfoOpen, setContactInfoOpen] = useState(false);
   const [deleteChatConfirmOpen, setDeleteChatConfirmOpen] = useState(false);
@@ -2377,7 +2377,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
                   <MessageMediaGallery
                     message={m}
                     priority={msgIndex >= messages.length - 16}
-                    onOpenLightbox={(urls, index) => setLightbox({ urls, index })}
+                    onOpenLightbox={(urls, downloadHrefs, index) => setLightbox({ urls, downloadHrefs, index })}
                   />
                   {isPending && uploadPct != null && uploadPct >= 0 && (
                     <div className="message-pending-progress">{uploadPct}%</div>
@@ -2402,7 +2402,18 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
                     width={m.attachmentMetadata?.width}
                     height={m.attachmentMetadata?.height}
                     duration={m.attachmentMetadata?.duration}
-                    onExpand={() => setVideoLightbox(mediaUrl(m.attachmentUrl!))}
+                    onExpand={() =>
+                      setVideoLightbox({
+                        url: mediaUrl(m.attachmentUrl!),
+                        kind: "video",
+                        poster: m.attachmentMetadata?.posterUrl ? mediaUrl(m.attachmentMetadata.posterUrl) : null,
+                        width: m.attachmentMetadata?.width,
+                        height: m.attachmentMetadata?.height,
+                        duration: m.attachmentMetadata?.duration,
+                        downloadPath: m.attachmentUrl,
+                        fileName: m.attachmentMetadata?.fileName,
+                      })
+                    }
                   />
                   {isPending && uploadPct != null && uploadPct >= 0 && (
                     <div className="message-pending-progress">{uploadPct}%</div>
@@ -2647,6 +2658,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
       {lightbox && (
         <ImageLightbox
           images={lightbox.urls}
+          downloadHrefs={lightbox.downloadHrefs}
           initialIndex={lightbox.index}
           onClose={() => setLightbox(null)}
           title="Фото"
@@ -2654,7 +2666,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
       )}
       {videoLightbox && (
         <MediaLightbox
-          items={[{ url: videoLightbox, kind: "video" }]}
+          items={[videoLightbox]}
           onClose={() => setVideoLightbox(null)}
           title="Видео"
         />

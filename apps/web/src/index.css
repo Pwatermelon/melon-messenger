@@ -3373,6 +3373,29 @@ a {
   background: #0a0a0a;
 }
 
+.message-video-stage--interactive {
+  cursor: pointer;
+}
+
+.message-video-player--lightbox {
+  border-radius: 10px;
+  width: 100%;
+}
+
+.message-video-player--lightbox .message-video-stage {
+  min-height: 180px;
+}
+
+.message-video-player.is-playing .message-video-center-play {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.message-video-player.is-playing .message-video-stage:hover .message-video-center-play,
+.message-video-player.is-playing .message-video-stage:focus-visible .message-video-center-play {
+  opacity: 1;
+}
+
 .message-video-poster {
   position: absolute;
   inset: 0;
@@ -3420,22 +3443,15 @@ a {
   justify-content: center;
   width: 3rem;
   height: 3rem;
-  padding: 0;
-  border: none;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.52);
   color: #fff;
-  cursor: pointer;
-  transition: background 0.15s;
+  pointer-events: none;
+  transition: opacity 0.15s, background 0.15s;
 }
 
-.message-video-center-play:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.68);
-}
-
-.message-video-center-play:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.message-video-player:not(.is-playing) .message-video-center-play {
+  opacity: 1;
 }
 
 .message-video-bar {
@@ -5469,6 +5485,28 @@ a {
   transition: background 0.15s;
 }
 
+.lightbox-download-btn {
+  position: absolute;
+  top: 1rem;
+  right: 4.25rem;
+  z-index: 1001;
+  width: 2.5rem;
+  height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.lightbox-download-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
 .lightbox-close:hover {
   background: rgba(255, 255, 255, 0.25);
 }
@@ -5543,6 +5581,7 @@ a {
 
 .lightbox-gallery {
   flex-direction: column;
+  align-items: center;
   cursor: pointer;
 }
 
@@ -5550,8 +5589,8 @@ a {
   display: flex;
   flex-direction: column;
   align-items: center;
+  width: auto;
   max-width: min(960px, 100%);
-  width: 100%;
   cursor: default;
 }
 
@@ -8486,6 +8525,10 @@ video.message-circle {
   background: none;
   text-align: left;
   font: inherit;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .profile-overlay {
