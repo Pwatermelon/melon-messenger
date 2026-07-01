@@ -96,16 +96,27 @@ export default function AdminReportsPanel({ active = true }: Props) {
                   </a>
                 </p>
               )}
-              {r.screenshotUrl && (
-                <a
-                  href={mediaUrl(r.screenshotUrl)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="admin-report-screenshot-link"
-                >
-                  Открыть скриншот
-                </a>
-              )}
+              {r.screenshotUrl && (() => {
+                const src = mediaUrl(r.screenshotUrl);
+                const isVideo = /\.(mp4|webm|mov|mkv|avi)(\?|$)/i.test(r.screenshotUrl);
+                return isVideo ? (
+                  <div className="admin-report-media">
+                    <video src={src} controls playsInline className="admin-report-video" preload="metadata" />
+                    <a href={src} target="_blank" rel="noopener noreferrer" className="admin-report-screenshot-link">
+                      Открыть видео
+                    </a>
+                  </div>
+                ) : (
+                  <a
+                    href={src}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="admin-report-screenshot-link"
+                  >
+                    Открыть вложение
+                  </a>
+                );
+              })()}
               {r.adminNote && <p className="admin-report-note">Заметка: {r.adminNote}</p>}
               {r.status === "open" && (
                 <button

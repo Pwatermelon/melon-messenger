@@ -9,7 +9,8 @@ import { useActiveChat } from "../context/ActiveChatContext";
 import { getChats, getChat, resolveDm, createGroup, searchUser, getContacts, addContact, uploadFile, getChatFolders, markChatReadAllApi, addChatToFolderApi, removeChatFromFolderApi, deleteChat } from "../api";
 import type { Chat, ChatFolder, User, Message } from "@melon/shared";
 import { VIRTUAL_FOLDER_ALL } from "@melon/shared";
-import { mediaUrl } from "../utils/mediaUrl";
+import { prefetchMedia } from "../utils/mediaImageCache";
+import { UserAvatar } from "../components/UserAvatar";
 import { BrandIcon } from "../components/BrandIcon";
 import { IconPlus, IconSettings } from "../components/Icons";
 import { UserListLabel } from "../components/UserListLabel";
@@ -23,6 +24,7 @@ import { APP_VERSION } from "../version";
 import { applyMessageToChatList, mergeChatLists, upsertChatInList } from "../utils/chatListUpdate";
 import { playMessageSound } from "../utils/messageSounds";
 import { useCompactLayout } from "../hooks/useCompactLayout";
+import { formatPreviewText } from "../utils/formatMessageText";
 import { useMobileBackHandler } from "../hooks/useMobileBackHandler";
 import {
   ChatListContextMenu,
@@ -411,6 +413,17 @@ export default function ChatLayout() {
   }, []);
 
   useEffect(() => {
+    const paths: Array<string | null | undefined> = [];
+    for (const chat of chats) {
+      paths.push(chat.avatarUrl);
+      const other = chat.members.find((m) => m.id !== user?.id);
+      paths.push(other?.avatarUrl);
+    }
+    for (const c of contacts) paths.push(c.avatarUrl);
+    prefetchMedia(paths);
+  }, [chats, contacts, user?.id]);
+
+  useEffect(() => {
     const onChatRead = (e: Event) => {
       const chatId = (e as CustomEvent<{ chatId?: string }>).detail?.chatId;
       if (!chatId) return;
@@ -684,22 +697,26 @@ export default function ChatLayout() {
     return name.slice(0, 1).toUpperCase();
   }
 
-  function chatAvatar(chat: Chat) {
+  function chatAvatar(chat: Chat, eager = false) {
     if (chat.type === "group") {
-      const url = chat.avatarUrl ?? null;
-      if (url) {
-        const src = mediaUrl(url);
-        return <img src={src} alt="" className="chat-item-avatar-img" />;
-      }
-      return <span className="chat-item-avatar-letter">{avatarLetter(chat)}</span>;
+      return (
+        <UserAvatar
+          path={chat.avatarUrl}
+          name={avatarLetter(chat)}
+          imgClassName="chat-item-avatar-img"
+          eager={eager}
+        />
+      );
     }
     const other = chat.members.find((m) => m.id !== user?.id);
-    const url = other?.avatarUrl ?? null;
-    if (url) {
-      const src = mediaUrl(url);
-      return <img src={src} alt="" className="chat-item-avatar-img" />;
-    }
-    return <span className="chat-item-avatar-letter">{avatarLetter(chat)}</span>;
+    return (
+      <UserAvatar
+        path={other?.avatarUrl}
+        name={avatarLetter(chat)}
+        imgClassName="chat-item-avatar-img"
+        eager={eager}
+      />
+    );
   }
 
   return (
@@ -768,14 +785,7 @@ export default function ChatLayout() {
             <div className="sidebar-search-result" data-testid="sidebar-search-result">
               <div className="sidebar-search-user">
                 <div className="sidebar-search-avatar">
-                  {sidebarUser.avatarUrl ? (
-                    <img
-                      src={mediaUrl(sidebarUser.avatarUrl)}
-                      alt=""
-                    />
-                  ) : (
-                    <span>{userAvatarLetter(sidebarUser)}</span>
-                  )}
+                  <UserAvatar path={sidebarUser.avatarUrl} name={userAvatarLetter(sidebarUser)} />
                 </div>
                 <div className="sidebar-search-user-body">
                   <span className="sidebar-search-name">{userDisplayName(sidebarUser)}</span>
@@ -844,9 +854,7 @@ export default function ChatLayout() {
                 }}
                 onContextMenu={(e) => openChatContextMenu(e, chat)}
               >
-                <div className="chat-item-avatar">
-                  {chatAvatar(chat)}
-                </div>
+                <div className="chat-item-avatar">{chatAvatar(chat, activeChatId === chat.id)}</div>
                 <div className="chat-item-body">
                   <div className="chat-item-top">
                     <p className="chat-item-name">{displayName(chat)}</p>
@@ -856,7 +864,9 @@ export default function ChatLayout() {
                       </span>
                     )}
                   </div>
-                  <p className="chat-item-preview">{chat.lastMessagePreview ?? "Нет сообщений"}</p>
+                  <p className="chat-item-preview">
+                    {chat.lastMessagePreview ? formatPreviewText(chat.lastMessagePreview) : "Нет сообщений"}
+                  </p>
                 </div>
               </button>
             ))
@@ -875,11 +885,7 @@ export default function ChatLayout() {
                 onClick={() => openProfile(c.id)}
               >
                 <div className="chat-item-avatar">
-                  {c.avatarUrl ? (
-                    <img src={mediaUrl(c.avatarUrl)} alt="" className="chat-item-avatar-img" />
-                  ) : (
-                    <span className="chat-item-avatar-letter">{userAvatarLetter(c)}</span>
-                  )}
+                  <UserAvatar path={c.avatarUrl} name={userAvatarLetter(c)} imgClassName="chat-item-avatar-img" />
                 </div>
                 <div className="chat-item-body">
                   <UserListLabel user={c} />
@@ -1012,9 +1018,9 @@ export default function ChatLayout() {
               {dmError && <p className="search-error">{dmError}</p>}
               {dmUser && (
                 <div className="search-result-single">
-                  <div className="avatar">{dmUser.avatarUrl ? (
-                    <img src={mediaUrl(dmUser.avatarUrl)} alt="" />
-                  ) : userAvatarLetter(dmUser)}</div>
+                  <div className="avatar">
+                    <UserAvatar path={dmUser.avatarUrl} name={userAvatarLetter(dmUser)} />
+                  </div>
                   <div className="search-result-user-text">
                     <span className="search-result-name">{userDisplayName(dmUser)}</span>
                     {dmUser.yandexLogin && dmUser.yandexLogin.toLowerCase() !== dmUser.username?.toLowerCase() && (

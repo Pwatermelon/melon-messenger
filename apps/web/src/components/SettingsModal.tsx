@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { LEGAL } from "../config/legal";
 import { useTheme } from "../context/ThemeContext";
 import { updateProfile, uploadFile, getLegalStatus, getCoinTopupInfo } from "../api";
-import { mediaUrl } from "../utils/mediaUrl";
+import { UserAvatar } from "./UserAvatar";
 import { compressImage } from "../utils/imageCompress";
 import { subscribeToPush, unsubscribeFromPush, isPushServerConfigured } from "../lib/pushNotifications";
 import { areMessageSoundsEnabled, setMessageSoundsEnabled } from "../utils/messageSounds";
@@ -117,7 +117,6 @@ export default function SettingsModal({ onClose, onOpenAdmin, platinumBalance = 
     }
   }
 
-  const avatarDisplayUrl = avatarUrl ? mediaUrl(avatarUrl) : null;
   const nameDirty = username.trim() !== (user?.username ?? "").trim();
 
   async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -261,13 +260,12 @@ export default function SettingsModal({ onClose, onOpenAdmin, platinumBalance = 
 
           <div className="settings-hero">
             <div className="settings-hero-avatar-wrap">
-              {avatarDisplayUrl ? (
-                <img src={avatarDisplayUrl} alt="" className="settings-hero-avatar" />
-              ) : (
-                <div className="settings-hero-avatar settings-hero-avatar-placeholder">
-                  {(user?.username ?? "?").slice(0, 1).toUpperCase()}
-                </div>
-              )}
+              <UserAvatar
+                path={avatarUrl}
+                name={user?.username ?? "?"}
+                imgClassName="settings-hero-avatar"
+                eager
+              />
               <input
                 type="file"
                 ref={fileInputRef}

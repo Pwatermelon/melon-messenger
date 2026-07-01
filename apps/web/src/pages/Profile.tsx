@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useOutletContext } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getUserById, updateProfile, uploadFile, getContacts, addContact, removeContact, blockUser, unblockUser, isUserBlocked } from "../api";
-import { mediaUrl as resolveMediaUrl, canonicalStoragePath } from "../utils/mediaUrl";
+import { MediaImage } from "../components/MediaImage";
 import { compressImage } from "../utils/imageCompress";
 import type { User } from "@melon/shared";
 import type { ChatLayoutOutletContext } from "./ChatLayout";
@@ -10,6 +10,7 @@ import BirthdayInfoBlock from "../components/BirthdayInfoBlock";
 import ImageLightbox from "../components/ImageLightbox";
 import ImageCropModal from "../components/ImageCropModal";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
+import { mediaUrl as resolveMediaUrl, canonicalStoragePath } from "../utils/mediaUrl";
 
 type ProfileProps = {
   modal?: boolean;
@@ -334,8 +335,6 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
     );
   }
 
-  const coverDisplay = mediaFullUrl(profile.coverUrl);
-  const avatarDisplay = mediaFullUrl(profile.avatarUrl);
   const photos = buildProfilePhotoPaths(profile);
   const avatarPaths = buildAvatarLightboxPaths(profile);
   const avatarUrls = avatarPaths.map((p) => mediaFullUrl(p)).filter(Boolean) as string[];
@@ -354,8 +353,13 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
       )}
 
       <div className="profile-cover-wrap">
-        {coverDisplay ? (
-          <img src={coverDisplay} alt="" className="profile-cover" />
+        {profile.coverUrl ? (
+          <MediaImage
+            src={profile.coverUrl}
+            className="profile-cover"
+            placeholder={<div className="profile-cover-placeholder" />}
+            eager
+          />
         ) : (
           <div className="profile-cover-placeholder" />
         )}
@@ -381,14 +385,21 @@ export default function Profile({ modal, onClose, userIdProp, onOpenSettings, on
 
       <div className="profile-header">
         <div className="profile-avatar-wrap">
-          {avatarDisplay ? (
+          {profile.avatarUrl ? (
             <button
               type="button"
               className="profile-avatar-btn"
               onClick={() => avatarUrls.length > 0 && setAvatarLightboxIndex(0)}
               title="Открыть аватар"
             >
-              <img src={avatarDisplay} alt="" className="profile-avatar" />
+              <MediaImage
+                src={profile.avatarUrl}
+                className="profile-avatar"
+                placeholder={
+                  <div className="profile-avatar-placeholder">{profile.username.slice(0, 1).toUpperCase()}</div>
+                }
+                eager
+              />
             </button>
           ) : (
             <div className="profile-avatar-placeholder">{profile.username.slice(0, 1).toUpperCase()}</div>

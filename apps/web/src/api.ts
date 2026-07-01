@@ -1,3 +1,4 @@
+import { MAX_UPLOAD_BYTES, uploadTooLargeMessage } from "@melon/shared";
 import type { AttachmentMetadata, Chat, ChatFolder, ChatSharedCategory, ChatSharedItem, MessageType, StickerItem, StickerPackDetail, StickerPackSummary, User } from "@melon/shared";
 import { getApiUrl } from "./config";
 
@@ -399,6 +400,21 @@ export async function getChatReadCursors(chatId: string): Promise<ReadCursor[]> 
   return data.readCursors ?? [];
 }
 
+export async function searchChatMessages(
+  chatId: string,
+  q: string,
+  opts?: { limit?: number; cursor?: string | null }
+): Promise<{ messages: MessageItem[]; hasMore: boolean; cursor: string | null }> {
+  const params = new URLSearchParams({ q });
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.cursor) params.set("cursor", opts.cursor);
+  const res = await fetch(`${getApiUrl()}/chats/${encodeURIComponent(chatId)}/messages/search?${params}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error("Не удалось выполнить поиск");
+  return res.json();
+}
+
 export async function getMessages(
   chatId: string,
   limit?: number,
@@ -794,35 +810,67 @@ export async function uploadFile(
   file: File,
   opts?: { purpose?: "chat" | "profile" | "sticker" | "report" }
 ): Promise<{ url: string; path: string; fileName: string; mimeType: string; size: number }> {
+  return uploadFileWithProgress(file, undefined, opts);
+}
+
+export async function uploadFileWithProgress(
+  file: File,
+  onProgress?: (percent: number) => void,
+  opts?: { purpose?: "chat" | "profile" | "sticker" | "report" }
+): Promise<{ url: string; path: string; fileName: string; mimeType: string; size: number }> {
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return Promise.reject(new Error(uploadTooLargeMessage()));
+  }
   const form = new FormData();
   form.append("file", file);
   if (opts?.purpose) form.append("purpose", opts.purpose);
-  const res = await fetch(`${getApiUrl()}/upload`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${getToken()}` },
-    body: form,
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${getApiUrl()}/upload`);
+    xhr.setRequestHeader("Authorization", `Bearer ${getToken()}`);
+
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(Math.min(100, Math.round((e.loaded / e.total) * 100)));
+      }
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        let msg = "Ошибка загрузки";
+        try {
+          const data = JSON.parse(xhr.responseText) as { error?: string };
+          if (xhr.status === 413) msg = uploadTooLargeMessage();
+          else if (typeof data.error === "string") msg = data.error;
+        } catch {}
+        reject(new Error(msg));
+        return;
+      }
+      try {
+        const data = JSON.parse(xhr.responseText) as {
+          url?: string;
+          fileName?: string;
+          mimeType?: string;
+          size?: number;
+        };
+        const path = typeof data.url === "string" ? data.url : "/uploads/";
+        const base = getApiUrl().replace(/\/api\/?$/, "");
+        resolve({
+          url: `${base}${path.startsWith("/") ? path : `/${path}`}`,
+          path: path.startsWith("/") ? path : `/${path}`,
+          fileName: data.fileName ?? file.name,
+          mimeType: data.mimeType ?? file.type,
+          size: data.size ?? file.size,
+        });
+      } catch {
+        reject(new Error("Ошибка загрузки"));
+      }
+    });
+
+    xhr.addEventListener("error", () => reject(new Error("Ошибка загрузки")));
+    xhr.send(form);
   });
-  if (!res.ok) {
-    const text = await res.text();
-    let data: { error?: string } = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {}
-    const msg =
-      res.status === 413 ? "Файл слишком большой (макс. 100 МБ)" :
-      (typeof data.error === "string" && data.error) || "Ошибка загрузки";
-    throw new Error(msg);
-  }
-  const data = await res.json();
-  const path = typeof data.url === "string" ? data.url : "/uploads/";
-  const base = getApiUrl().replace(/\/api\/?$/, "");
-  return {
-    url: `${base}${path.startsWith("/") ? path : `/${path}`}`,
-    path: path.startsWith("/") ? path : `/${path}`,
-    fileName: data.fileName,
-    mimeType: data.mimeType,
-    size: data.size,
-  };
 }
 
 export async function getStickerPacksLibrary(): Promise<{ owned: StickerPackSummary[]; installed: StickerPackSummary[] }> {

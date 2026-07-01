@@ -1,4 +1,5 @@
 import type { MessageReaction } from "@melon/shared";
+import { AppleEmoji } from "./AppleEmoji";
 
 type Props = {
   reactions: MessageReaction[];
@@ -26,7 +27,7 @@ export function MessageReactions({ reactions, userId, onToggle }: Props) {
           className={`message-reaction-chip${mine ? " message-reaction-chip-mine" : ""}`}
           onClick={() => onToggle(emoji)}
         >
-          <span>{emoji}</span>
+          <AppleEmoji emoji={emoji} size={18} />
           {count > 1 && <span className="message-reaction-count">{count}</span>}
         </button>
       ))}

@@ -1,4 +1,5 @@
 import { EMOJI_GROUPS } from "../utils/emojiData";
+import { AppleEmoji } from "./AppleEmoji";
 
 type Props = {
   onPick: (emoji: string) => void;
@@ -14,8 +15,8 @@ export function EmojiPickerGrid({ onPick }: { onPick: (emoji: string) => void })
           <p className="compose-emoji-group-label">{g.label}</p>
           <div className="compose-emoji-grid">
             {g.emojis.map((e) => (
-              <button key={e} type="button" className="compose-emoji-btn" onClick={() => onPick(e)}>
-                {e}
+              <button key={e} type="button" className="compose-emoji-btn" onClick={() => onPick(e)} aria-label={e}>
+                <AppleEmoji emoji={e} size={28} />
               </button>
             ))}
           </div>

@@ -1,5 +1,5 @@
 import type { User } from "@melon/shared";
-import { mediaUrl } from "../utils/mediaUrl";
+import { UserAvatar } from "./UserAvatar";
 import { userAvatarLetter } from "../utils/userDisplay";
 import { UserListLabel } from "./UserListLabel";
 
@@ -28,11 +28,7 @@ export function ContactPickItem({
       onClick={onClick}
     >
       <div className="chat-item-avatar">
-        {user.avatarUrl ? (
-          <img src={mediaUrl(user.avatarUrl)} alt="" className="chat-item-avatar-img" />
-        ) : (
-          <span className="chat-item-avatar-letter">{userAvatarLetter(user)}</span>
-        )}
+        <UserAvatar path={user.avatarUrl} name={userAvatarLetter(user)} imgClassName="chat-item-avatar-img" />
       </div>
       <div className="dm-contact-body">
         <UserListLabel user={user} nameClassName={nameClassName} tagClassName={tagClassName} />

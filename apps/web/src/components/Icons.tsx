@@ -130,6 +130,15 @@ export function IconEdit({ size = 20, className }: IconProps) {
   );
 }
 
+export function IconSearch({ size = 20, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
+      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+      <path d="m20 20-4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function IconBack({ size = 20, className }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
@@ -218,6 +227,23 @@ export function IconUser({ size = 20, className }: IconProps) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
       <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
       <path d="M5 20c0-4 3.5-7 7-7s7 3 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Read receipt — SVG watermelon, одинаковый на всех устройствах. */
+export function IconMessageRead({ size = 14, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" className={className} aria-hidden>
+      <path
+        d="M8 1.2C4.2 1.2 1.5 4.6 1.5 8c0 3.4 2.7 6.8 6.5 6.8S14.5 11.4 14.5 8C14.5 4.6 11.8 1.2 8 1.2Z"
+        fill="#e84855"
+      />
+      <path d="M8 2.8v10.4" stroke="#3dd68c" strokeWidth="0.75" strokeLinecap="round" opacity="0.75" />
+      <circle cx="6.2" cy="5.8" r="0.65" fill="#3dd68c" />
+      <circle cx="9.4" cy="7.6" r="0.65" fill="#3dd68c" />
+      <circle cx="6.8" cy="9.6" r="0.65" fill="#3dd68c" />
+      <circle cx="9.1" cy="10.8" r="0.55" fill="#3dd68c" />
     </svg>
   );
 }

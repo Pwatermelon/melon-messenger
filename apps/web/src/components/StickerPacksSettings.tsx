@@ -16,6 +16,7 @@ import {
 import { normalizeStickerImage } from "../utils/imageCompress";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import EmojiPickerPanel from "./EmojiPickerPanel";
+import { AppleEmoji } from "./AppleEmoji";
 
 type Props = {
   onClose: () => void;
@@ -267,7 +268,7 @@ export default function StickerPacksSettings({ onClose }: Props) {
               {viewDetail.stickers.map((s) => (
                 <div key={s.id} className="sticker-pack-editor-item">
                   <img src={s.imageUrl} alt={s.emoji} />
-                  <span className="sticker-pack-view-emoji">{s.emoji}</span>
+                  <span className="sticker-pack-view-emoji"><AppleEmoji emoji={s.emoji} size={16} /></span>
                 </div>
               ))}
             </div>
@@ -316,7 +317,7 @@ export default function StickerPacksSettings({ onClose }: Props) {
                     onClick={() => openEmojiPickerForSticker(s.id)}
                     title="Изменить emoji"
                   >
-                    {s.emoji}
+                    <AppleEmoji emoji={s.emoji} size={20} />
                   </button>
                   <button type="button" className="sticker-pack-editor-remove" onClick={() => void handleDeleteSticker(s)}>
                     ×

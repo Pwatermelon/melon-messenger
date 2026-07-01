@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { IconDownload, IconEdit, IconForward, IconReply } from "./Icons";
+import { AppleEmoji } from "./AppleEmoji";
 import type { MessageReader } from "../utils/messageRead";
-import { mediaUrl } from "../utils/mediaUrl";
+import { UserAvatar } from "./UserAvatar";
 
 export const QUICK_REACTIONS = ["👍", "❤️", "🔥", "🥰", "👏", "😁", "🤔", "🤯", "😢", "🎉"] as const;
 
@@ -100,7 +101,7 @@ export function MessageContextMenu({
             }}
             aria-label={`Реакция ${emoji}`}
           >
-            {emoji}
+            <AppleEmoji emoji={emoji} size={22} />
           </button>
         ))}
       </div>
@@ -149,7 +150,7 @@ export function MessageContextMenu({
                 readers.map((r) => (
                   <div key={r.id} className="message-context-viewers-item">
                     <span className="message-context-viewers-avatar">
-                      {r.avatarUrl ? <img src={mediaUrl(r.avatarUrl)} alt="" /> : r.username.slice(0, 1).toUpperCase()}
+                      <UserAvatar path={r.avatarUrl} name={r.username} />
                     </span>
                     <span className="message-context-viewers-name">{r.username}</span>
                   </div>

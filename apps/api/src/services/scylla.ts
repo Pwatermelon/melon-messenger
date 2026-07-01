@@ -232,6 +232,76 @@ function mapRow(row: {
   };
 }
 
+const SEARCH_BATCH_SIZE = 200;
+const SEARCH_MAX_SCAN = 6000;
+
+function messageMatchesSearch(row: MessageRow, q: string): boolean {
+  const type = row.message_type ?? "text";
+  if (type === "system") return false;
+  if (row.content.toLowerCase().includes(q)) return true;
+  if (!row.attachment_metadata) return false;
+  try {
+    const meta = JSON.parse(row.attachment_metadata) as {
+      fileName?: string;
+      attachments?: { fileName?: string }[];
+    };
+    if (meta.fileName?.toLowerCase().includes(q)) return true;
+    if (meta.attachments?.some((a) => a.fileName?.toLowerCase().includes(q))) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/** Поиск по тексту сообщений в чате (линейное сканирование истории). */
+export async function searchMessages(
+  chatId: string,
+  query: string,
+  limit: number,
+  scanBeforeMessageId?: string
+): Promise<{ rows: MessageRow[]; hasMore: boolean; nextCursor: string | null }> {
+  const q = query.trim().toLowerCase();
+  if (!q) return { rows: [], hasMore: false, nextCursor: null };
+
+  const cap = Math.min(Math.max(limit, 1), 50);
+  const matches: MessageRow[] = [];
+  let before = scanBeforeMessageId;
+  let scanned = 0;
+  let lastScannedId: string | null = null;
+  let exhausted = false;
+
+  while (matches.length < cap && scanned < SEARCH_MAX_SCAN) {
+    const batch = await getMessages(chatId, SEARCH_BATCH_SIZE, before);
+    if (batch.length === 0) {
+      exhausted = true;
+      break;
+    }
+
+    for (const row of batch) {
+      scanned++;
+      lastScannedId = row.message_id;
+      if (messageMatchesSearch(row, q)) {
+        matches.push(row);
+        if (matches.length >= cap) break;
+      }
+    }
+
+    if (matches.length >= cap) break;
+    before = batch[batch.length - 1]!.message_id;
+    if (batch.length < SEARCH_BATCH_SIZE) {
+      exhausted = true;
+      break;
+    }
+  }
+
+  const hasMore = !exhausted && lastScannedId !== null;
+  return {
+    rows: matches,
+    hasMore,
+    nextCursor: hasMore ? lastScannedId : null,
+  };
+}
+
 export async function getMessage(chatId: string, messageId: string): Promise<MessageRow | null> {
   try {
     const id = types.TimeUuid.fromString(messageId.trim().toLowerCase());

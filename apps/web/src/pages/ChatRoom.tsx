@@ -12,10 +12,12 @@ import { LocationPickerModal } from "../components/LocationPickerModal";
 import { LocationPreview } from "../components/LocationPreview";
 import ImageCropModal from "../components/ImageCropModal";
 import ChatInfoModal from "../components/ChatInfoModal";
-import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo, IconBack, IconChevronDown, IconSmile } from "../components/Icons";
+import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo, IconBack, IconChevronDown, IconSmile, IconSearch, IconMessageRead } from "../components/Icons";
+import { ChatMessageSearchPanel } from "../components/ChatMessageSearchPanel";
+import { AppleEmoji } from "../components/AppleEmoji";
 import ComposeEmojiStickerPanel from "../components/ComposeEmojiStickerPanel";
 import StickerPackViewModal from "../components/StickerPackViewModal";
-import { getChat, getChats, getMessages, uploadFile, removeGroupMember, deleteChat, updateGroup, deleteMessage, editMessage, forwardMessage, signMediaPaths, markChatReadApi, getChatReadCursors, setMessageReaction, sendDmMessage } from "../api";
+import { getChat, getChats, getMessages, uploadFile, uploadFileWithProgress, removeGroupMember, deleteChat, updateGroup, deleteMessage, editMessage, forwardMessage, signMediaPaths, markChatReadApi, getChatReadCursors, setMessageReaction, sendDmMessage } from "../api";
 import { extFromBlobType } from "../utils/mediaMime";
 import { compressImage, isGifFileDeep, getImageDimensions } from "../utils/imageCompress";
 import ImageLightbox from "../components/ImageLightbox";
@@ -34,8 +36,9 @@ import { formatPeerActivity, type PeerActivityKind } from "../utils/chatActivity
 import type { MessageItem } from "../api";
 import { getWsUrl } from "../config";
 import { mediaUrl, mediaDownloadUrl } from "../utils/mediaUrl";
+import { UserAvatar } from "../components/UserAvatar";
 import { buildReplyTo } from "../utils/messagePreview";
-import { linkifyText } from "../utils/linkify";
+import { formatMessageText } from "../utils/formatMessageText";
 import { parseLocationCoords } from "../utils/yandexMaps";
 import {
   capturePrependScroll,
@@ -54,6 +57,12 @@ import { getMessageReaders, isMessageReadByAnyPeer, isMessageReadByCursor, merge
 import { formatMessageDateLabel, shouldShowDateDivider } from "../utils/messageDates";
 import { captureCirclePoster } from "../utils/circlePoster";
 import { playMessageSound } from "../utils/messageSounds";
+import {
+  clearComposeDraft,
+  getComposeDraft,
+  resolveComposeDraftKey,
+  setComposeDraft,
+} from "../utils/chatComposeDrafts";
 
 type ChatRoomProps = {
   chatId?: string;
@@ -100,6 +109,8 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
   const serverUnreadCountRef = useRef(0);
   const [serverUnreadCount, setServerUnreadCount] = useState(0);
   const [unreadJumpCount, setUnreadJumpCount] = useState(0);
+  const [awayFromBottom, setAwayFromBottom] = useState(false);
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const fileDragDepthRef = useRef(0);
   const longPressRef = useRef<number | null>(null);
   const [messageMenu, setMessageMenu] = useState<{ message: Message; x: number; y: number } | null>(null);
@@ -112,6 +123,10 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
   const [editDraft, setEditDraft] = useState<Message | null>(null);
   const [mediaSendDraft, setMediaSendDraft] = useState<{ items: MediaSendItem[]; caption: string } | null>(null);
   const composeInputRef = useRef<HTMLInputElement>(null);
+  const composeDraftKeyRef = useRef<string | null>(null);
+  const composeDraftTextRef = useRef("");
+  const editDraftRef = useRef<Message | null>(null);
+  editDraftRef.current = editDraft;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const selectionMode = selectedIds.size > 0;
   const [readCursors, setReadCursors] = useState<Record<string, string>>({});
@@ -329,19 +344,49 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     setDeleteChatBusy(false);
   }, [chatId]);
 
+  const applyComposeInput = useCallback((value: string | ((prev: string) => string)) => {
+    setInput((prev) => {
+      const next = typeof value === "function" ? value(prev) : value;
+      if (!editDraftRef.current) {
+        composeDraftTextRef.current = next;
+        const key = composeDraftKeyRef.current;
+        if (key) setComposeDraft(key, next);
+      }
+      return next;
+    });
+  }, []);
+
+  const restoreComposeInput = useCallback(() => {
+    applyComposeInput(composeDraftTextRef.current);
+  }, [applyComposeInput]);
+
+  useEffect(() => {
+    const key = resolveComposeDraftKey(chatId, draftPeer?.id);
+    composeDraftKeyRef.current = key;
+    const text = key ? getComposeDraft(key) : "";
+    composeDraftTextRef.current = text;
+    setInput(text);
+
+    return () => {
+      const saveKey = composeDraftKeyRef.current;
+      if (saveKey) setComposeDraft(saveKey, composeDraftTextRef.current);
+    };
+  }, [chatId, draftPeer?.id]);
+
   useEffect(() => {
     if (!replyDraft && !editDraft) return;
     composeInputRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setReplyDraft(null);
+      if (e.key !== "Escape") return;
+      if (editDraft) {
         setEditDraft(null);
-        setInput("");
+        restoreComposeInput();
       }
+      setReplyDraft(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [replyDraft, editDraft]);
+  }, [replyDraft, editDraft, restoreComposeInput]);
 
   useEffect(() => {
     if (!selectionMode) return;
@@ -403,6 +448,16 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
       )
     );
   }, [user?.id]);
+
+  const updateScrollAwayState = useCallback(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
+    const atBottom = distanceFromBottom < 80;
+    stickToBottomRef.current = atBottom;
+    setAwayFromBottom(!atBottom);
+    refreshUnreadJumpCount();
+  }, [refreshUnreadJumpCount]);
 
   const tryMarkReadFromScroll = useCallback(() => {
     if (!chatId || !user?.id || messagesRef.current.length === 0 || !canMarkReadNow() || !messagesReady) return;
@@ -494,7 +549,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
 
   const handleInputChange = useCallback(
     (value: string) => {
-      setInput(value);
+      applyComposeInput(value);
       if (!chatId || editDraft) return;
       if (!typingActiveRef.current) {
         typingActiveRef.current = true;
@@ -506,7 +561,76 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
         notifyTyping(false);
       }, 3000);
     },
-    [chatId, editDraft, notifyTyping]
+    [chatId, editDraft, notifyTyping, applyComposeInput]
+  );
+
+  const revokeMessageBlobUrls = useCallback((m: Message) => {
+    if (m.attachmentUrl?.startsWith("blob:")) URL.revokeObjectURL(m.attachmentUrl);
+    if (m.attachmentMetadata?.posterUrl?.startsWith("blob:")) {
+      URL.revokeObjectURL(m.attachmentMetadata.posterUrl);
+    }
+  }, []);
+
+  const appendOptimisticMessage = useCallback((msg: Message) => {
+    setMessages((prev) => [...prev, msg]);
+    stickToBottomRef.current = true;
+    requestAnimationFrame(() => scrollToBottom(false));
+  }, []);
+
+  const updateOptimisticMessage = useCallback((id: string, patch: Partial<Message>) => {
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+  }, []);
+
+  const resolveOptimisticWithServer = useCallback(
+    (serverMsg: Message) => {
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === serverMsg.id)) return prev;
+        const idx = prev.findIndex(
+          (m) => m.clientPending && m.senderId.toLowerCase() === serverMsg.senderId.toLowerCase()
+        );
+        if (idx < 0) return [...prev, serverMsg];
+        revokeMessageBlobUrls(prev[idx]!);
+        const next = [...prev];
+        next[idx] = { ...serverMsg, clientPending: false, uploadProgress: undefined, sendFailed: false };
+        return next;
+      });
+    },
+    [revokeMessageBlobUrls]
+  );
+
+  const insertOptimisticMessage = useCallback(
+    (
+      opts: {
+        content: string;
+        messageType?: MessageType;
+        attachmentUrl?: string | null;
+        attachmentMetadata?: AttachmentMetadata | null;
+        uploadProgress?: number | null;
+      },
+      withReply = true
+    ): string => {
+      const id = `pending-${crypto.randomUUID()}`;
+      if (!user || !chatId) return id;
+      const replyMeta: AttachmentMetadata | null =
+        withReply && replyDraft
+          ? { ...(opts.attachmentMetadata ?? {}), replyTo: buildReplyTo(replyDraft) }
+          : opts.attachmentMetadata ?? null;
+      appendOptimisticMessage({
+        id,
+        chatId,
+        senderId: user.id,
+        content: opts.content,
+        createdAt: new Date().toISOString(),
+        sender: user,
+        messageType: opts.messageType ?? "text",
+        attachmentUrl: opts.attachmentUrl ?? null,
+        attachmentMetadata: replyMeta,
+        clientPending: true,
+        uploadProgress: opts.uploadProgress ?? null,
+      });
+      return id;
+    },
+    [user, chatId, replyDraft, appendOptimisticMessage]
   );
 
   useEffect(() => {
@@ -530,17 +654,27 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
         const needsSign = paths.some((p) => p && !p.includes("access="));
         if (needsSign && paths.length) {
           void signMediaPaths(paths).then((signed) => {
-            setMessages((prev) => {
-              if (prev.some((m) => m.id === incoming.id)) return prev;
-              return afterAppend([...prev, applySignedPathsToMessage(incoming, signed)]);
-            });
+            const signedMsg = applySignedPathsToMessage(incoming, signed);
+            if (fromOther) {
+              setMessages((prev) => {
+                if (prev.some((m) => m.id === signedMsg.id)) return prev;
+                return afterAppend([...prev, signedMsg]);
+              });
+            } else {
+              resolveOptimisticWithServer(signedMsg);
+              if (stickToBottomRef.current) requestAnimationFrame(() => scrollToBottom(false));
+            }
           });
           return;
         }
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === incoming.id)) return prev;
-          return afterAppend([...prev, incoming]);
-        });
+        if (fromOther) {
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === incoming.id)) return prev;
+            return afterAppend([...prev, incoming]);
+          });
+        } else {
+          resolveOptimisticWithServer(incoming);
+        }
       }
       if (msg.type === "message_deleted" && msg.chatId === chatId) {
         setMessages((prev) => prev.filter((m) => m.id !== msg.messageId));
@@ -588,7 +722,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
         setPeerActivity(msg.userId, msg.kind, msg.active);
       }
     });
-  }, [subscribe, chatId, user?.id, setPeerActivity]);
+  }, [subscribe, chatId, user?.id, setPeerActivity, resolveOptimisticWithServer]);
 
   const loadOlderMessages = useCallback(async () => {
     if (!chatId || loadOlderLockRef.current || !hasMoreOlderRef.current || loadingRef.current) return;
@@ -710,6 +844,9 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     pendingPrependRef.current = null;
     hasMoreOlderRef.current = true;
     setMessages([]);
+    setAwayFromBottom(false);
+    setChatSearchOpen(false);
+    stickToBottomRef.current = true;
     setLoadError("");
     getChat(chatId)
       .then((c) => {
@@ -800,7 +937,10 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
         lastHeight = h;
         stableFrames = 0;
       }
-      if (stableFrames >= 2) finish();
+      if (stableFrames >= 2) {
+        updateScrollAwayState();
+        finish();
+      }
     };
 
     stick();
@@ -876,14 +1016,44 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     } else {
       messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
     }
+    stickToBottomRef.current = true;
+    setAwayFromBottom(false);
   }, []);
+
+  const jumpDown = useCallback(() => {
+    const list = listRef.current;
+    if (!list) return;
+
+    const firstUnread =
+      serverUnreadCountRef.current > 0 && user?.id
+        ? findUnreadBounds(
+            messagesRef.current,
+            readCursorsRef.current[user.id.toLowerCase()] ?? readCursorsRef.current[user.id] ?? null,
+            user.id,
+            serverUnreadCountRef.current
+          ).first
+        : null;
+
+    if (firstUnread) {
+      suppressAutoReadRef.current = true;
+      scrollListToMessage(list, firstUnread.id, "start", 16);
+      stickToBottomRef.current = false;
+      setAwayFromBottom(true);
+    } else {
+      scrollToBottom(false);
+    }
+
+    requestAnimationFrame(() => {
+      updateScrollAwayState();
+      tryMarkReadFromScroll();
+    });
+  }, [scrollToBottom, updateScrollAwayState, tryMarkReadFromScroll, user?.id]);
 
   useEffect(() => {
     const list = listRef.current;
-    if (!list) return;
+    if (!list || !messagesReady) return;
     const onScroll = () => {
-      stickToBottomRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 120;
-      refreshUnreadJumpCount();
+      updateScrollAwayState();
       tryMarkReadFromScroll();
     };
     const onFocus = () => tryMarkReadFromScroll();
@@ -893,12 +1063,13 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     list.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
+    updateScrollAwayState();
     return () => {
       list.removeEventListener("scroll", onScroll);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [chatId, refreshUnreadJumpCount, tryMarkReadFromScroll]);
+  }, [chatId, messagesReady, updateScrollAwayState, tryMarkReadFromScroll]);
 
   useLayoutEffect(() => {
     if (loading && messages.length === 0) return;
@@ -931,7 +1102,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     requestAnimationFrame(snap);
     pendingInitialScrollRef.current = false;
     setMessagesReady(true);
-    refreshUnreadJumpCount();
+    requestAnimationFrame(() => updateScrollAwayState());
     tryMarkReadFromScroll();
 
     let refineFrames = 0;
@@ -951,6 +1122,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     unreadBounds.first,
     serverUnreadCount,
     refreshUnreadJumpCount,
+    updateScrollAwayState,
     tryMarkReadFromScroll,
   ]);
 
@@ -1016,7 +1188,8 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
       attachmentUrl?: string | null;
       attachmentMetadata?: AttachmentMetadata | null;
     },
-    withReply = true
+    withReply = true,
+    pendingId?: string
   ) {
     if (isDraft && draftPeer) {
       void sendDraftMessage(opts, withReply);
@@ -1027,6 +1200,29 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
       withReply && replyDraft
         ? { ...(opts.attachmentMetadata ?? {}), replyTo: buildReplyTo(replyDraft) }
         : opts.attachmentMetadata ?? null;
+
+    let activePendingId = pendingId;
+    if (!activePendingId) {
+      activePendingId = insertOptimisticMessage(
+        {
+          content: opts.content,
+          messageType: opts.messageType,
+          attachmentUrl: opts.attachmentUrl,
+          attachmentMetadata: replyMeta,
+          uploadProgress: null,
+        },
+        withReply
+      );
+    } else {
+      updateOptimisticMessage(activePendingId, {
+        content: opts.content,
+        messageType: opts.messageType,
+        attachmentUrl: opts.attachmentUrl,
+        attachmentMetadata: replyMeta,
+        uploadProgress: null,
+      });
+    }
+
     send({
       type: "message",
       chatId,
@@ -1036,6 +1232,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
       attachmentMetadata: replyMeta,
     });
     playMessageSound("outgoing");
+    setReplyDraft(null);
     stickToBottomRef.current = true;
     requestAnimationFrame(() => scrollToBottom(false));
   }
@@ -1081,14 +1278,8 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
       setReplyDraft(null);
       return;
     }
-    if (!chatId || sending) return;
-    setSending(true);
-    try {
-      dispatchMessage(opts);
-      setReplyDraft(null);
-    } finally {
-      setSending(false);
-    }
+    if (!chatId) return;
+    dispatchMessage(opts);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -1102,17 +1293,24 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     typingActiveRef.current = false;
     notifyTyping(false);
-    setInput("");
+    const key = composeDraftKeyRef.current;
+    if (key) clearComposeDraft(key);
+    composeDraftTextRef.current = "";
+    applyComposeInput("");
     await sendMessage({ content: text });
   }
 
   function insertEmoji(emoji: string) {
-    setInput((prev) => prev + emoji);
+    if (editDraft) {
+      setInput((prev) => prev + emoji);
+    } else {
+      applyComposeInput((prev) => prev + emoji);
+    }
     composeInputRef.current?.focus();
   }
 
   function sendSticker(sticker: StickerItem, pack: StickerPackSummary) {
-    if (!chatId || sending || editDraft) return;
+    if (!chatId || editDraft) return;
     setEmojiPanelOpen(false);
     void sendMessage({
       content: sticker.emoji,
@@ -1134,7 +1332,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
       const updated = await editMessage(chatId, editDraft.id, text);
       setMessages((prev) => prev.map((m) => (m.id === updated.id ? { ...m, ...updated } as Message : m)));
       setEditDraft(null);
-      setInput("");
+      restoreComposeInput();
       window.dispatchEvent(new Event("wm:refresh-chats"));
     } catch (err) {
       console.error(err);
@@ -1163,14 +1361,45 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     });
   }
 
-  function jumpToLastUnread() {
-    const list = listRef.current;
-    if (!unreadBounds.last || !list) return;
-    scrollListToMessage(list, unreadBounds.last.id, "nearest", 24);
-    requestAnimationFrame(() => {
-      refreshUnreadJumpCount();
-      tryMarkReadFromScroll();
-    });
+  const ensureMessageInView = useCallback(
+    async (messageId: string): Promise<boolean> => {
+      const target = messageId.trim().toLowerCase();
+      let working = messagesRef.current;
+      if (working.some((m) => m.id.toLowerCase() === target)) return true;
+      if (!chatId) return false;
+
+      let before = working[0]?.id;
+      for (let i = 0; i < 50; i++) {
+        if (!before || !hasMoreOlderRef.current) break;
+        const { messages: older } = await getMessages(chatId, MESSAGE_PAGE_SIZE, before);
+        if (older.length === 0) {
+          hasMoreOlderRef.current = false;
+          break;
+        }
+        const ids = new Set(working.map((m) => m.id));
+        const fresh = (older as Message[]).filter((m) => !ids.has(m.id));
+        if (fresh.length) {
+          working = [...fresh, ...working];
+          setMessages(working);
+        }
+        if (working.some((m) => m.id.toLowerCase() === target)) return true;
+        if (older.length < MESSAGE_PAGE_SIZE) {
+          hasMoreOlderRef.current = false;
+          break;
+        }
+        before = older[0]?.id;
+      }
+      return working.some((m) => m.id.toLowerCase() === target);
+    },
+    [chatId]
+  );
+
+  async function jumpToSearchResult(messageId: string) {
+    setChatSearchOpen(false);
+    const found = await ensureMessageInView(messageId);
+    if (!found) return;
+    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+    scrollToMessage(messageId);
   }
 
   function handleReplyStart(m: Message) {
@@ -1178,8 +1407,10 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     // Если пользователь редактировал сообщение, его текст в поле — это содержимое
     // редактируемого сообщения, поэтому при переходе к ответу его нужно очистить.
     // Если же он просто набирал новое сообщение, текст сохраняем.
-    if (editDraft) setInput("");
-    setEditDraft(null);
+    if (editDraft) {
+      setEditDraft(null);
+      restoreComposeInput();
+    }
     setReplyDraft(m);
     composeInputRef.current?.focus();
   }
@@ -1205,61 +1436,132 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     const isImage = file.type.startsWith("image/") && !isGif;
     const toUpload = isImage ? await compressImage(file) : file;
     const dims = isImage || isGif ? await getImageDimensions(file) : null;
-    const { path, fileName, mimeType, size } = await uploadFile(toUpload);
     const type = isGif || isImage ? "image" : file.type.startsWith("video/") ? "video" : "file";
     const fallback = isGif ? "GIF" : type === "image" ? "Фотография" : type === "video" ? "Видео" : file.name;
-    dispatchMessage(
+    const content = withReply ? resolveMediaCaption(caption, fallback) : fallback;
+    const previewUrl =
+      type === "image" || type === "video" ? URL.createObjectURL(type === "image" ? toUpload : file) : null;
+    const baseMeta: AttachmentMetadata =
+      isGif
+        ? { fileName: file.name || "animation.gif", mimeType: "image/gif", size: file.size, ...(dims ?? {}) }
+        : type === "image"
+        ? { fileName: "Фотография", mimeType: toUpload.type, size: toUpload.size, ...(dims ?? {}) }
+        : { fileName: file.name, mimeType: file.type, size: file.size };
+
+    const pendingId = insertOptimisticMessage(
       {
-        content: withReply ? resolveMediaCaption(caption, fallback) : fallback,
+        content,
         messageType: type,
-        attachmentUrl: path,
-        attachmentMetadata:
-          isGif
-            ? { fileName: file.name || "animation.gif", mimeType: "image/gif", size: file.size, ...(dims ?? {}) }
-            : type === "image"
-            ? { fileName: "Фотография", mimeType: toUpload.type, size: toUpload.size, ...(dims ?? {}) }
-            : { fileName: file.name ?? fileName, mimeType: mimeType ?? file.type, size: size ?? file.size },
+        attachmentUrl: previewUrl,
+        attachmentMetadata: baseMeta,
+        uploadProgress: 0,
       },
       withReply
     );
+
+    try {
+      const { path, fileName, mimeType, size } = await uploadFileWithProgress(toUpload, (pct) => {
+        updateOptimisticMessage(pendingId, { uploadProgress: pct });
+      });
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      const finalMeta: AttachmentMetadata =
+        isGif
+          ? { fileName: file.name || "animation.gif", mimeType: "image/gif", size: file.size, ...(dims ?? {}) }
+          : type === "image"
+          ? { fileName: "Фотография", mimeType: toUpload.type, size: toUpload.size, ...(dims ?? {}) }
+          : { fileName: file.name ?? fileName, mimeType: mimeType ?? file.type, size: size ?? file.size };
+
+      dispatchMessage(
+        {
+          content,
+          messageType: type,
+          attachmentUrl: path,
+          attachmentMetadata: finalMeta,
+        },
+        withReply,
+        pendingId
+      );
+    } catch (err) {
+      console.error(err);
+      updateOptimisticMessage(pendingId, { sendFailed: true, uploadProgress: undefined });
+    }
   }
 
   async function uploadAlbumFiles(files: File[], withReply: boolean, caption?: string) {
-    const attachments: MessageAttachment[] = [];
-    for (const file of files) {
-      const isGif = await isGifFileDeep(file);
-      const toUpload = isGif ? file : await compressImage(file);
-      const dims = await getImageDimensions(file);
-      const { path, fileName, mimeType, size } = await uploadFile(toUpload);
-      attachments.push({
-        url: path,
-        fileName: file.name || fileName,
-        mimeType: isGif ? "image/gif" : mimeType || toUpload.type || "image/jpeg",
-        size: size ?? file.size,
-        ...(dims ?? {}),
-      });
-    }
-    const count = attachments.length;
-    const hasGif = attachments.some((a) => a.mimeType === "image/gif");
-    const fallback = count === 1 ? (hasGif ? "GIF" : "Фотография") : `${count} фото`;
-    dispatchMessage(
-      {
-        content: withReply ? resolveMediaCaption(caption, fallback) : fallback,
-        messageType: "image",
-        attachmentUrl: attachments[0]!.url,
-        attachmentMetadata: {
-          attachments,
-          mimeType: attachments[0]!.mimeType,
-          fileName: attachments[0]!.fileName,
+    const previewUrls: string[] = [];
+    const pendingId = (() => {
+      const fallback = `${files.length} фото`;
+      const content = withReply ? resolveMediaCaption(caption, fallback) : fallback;
+      return insertOptimisticMessage(
+        {
+          content,
+          messageType: "image",
+          attachmentUrl: null,
+          attachmentMetadata: { mimeType: "image/jpeg" },
+          uploadProgress: 0,
         },
-      },
-      withReply
-    );
+        withReply
+      );
+    })();
+
+    try {
+      const attachments: MessageAttachment[] = [];
+      let done = 0;
+      for (const file of files) {
+        const isGif = await isGifFileDeep(file);
+        const toUpload = isGif ? file : await compressImage(file);
+        const dims = await getImageDimensions(file);
+        const preview = URL.createObjectURL(toUpload);
+        previewUrls.push(preview);
+        const { path, fileName, mimeType, size } = await uploadFileWithProgress(toUpload, (pct) => {
+          const total = Math.round(((done + pct / 100) / files.length) * 100);
+          updateOptimisticMessage(pendingId, {
+            uploadProgress: total,
+            attachmentUrl: preview,
+          });
+        });
+        done += 1;
+        attachments.push({
+          url: path,
+          fileName: file.name || fileName,
+          mimeType: isGif ? "image/gif" : mimeType || toUpload.type || "image/jpeg",
+          size: size ?? file.size,
+          ...(dims ?? {}),
+        });
+        updateOptimisticMessage(pendingId, {
+          uploadProgress: Math.round((done / files.length) * 100),
+          attachmentUrl: preview,
+        });
+      }
+      for (const url of previewUrls) URL.revokeObjectURL(url);
+
+      const count = attachments.length;
+      const hasGif = attachments.some((a) => a.mimeType === "image/gif");
+      const fallback = count === 1 ? (hasGif ? "GIF" : "Фотография") : `${count} фото`;
+      const content = withReply ? resolveMediaCaption(caption, fallback) : fallback;
+      dispatchMessage(
+        {
+          content,
+          messageType: "image",
+          attachmentUrl: attachments[0]!.url,
+          attachmentMetadata: {
+            attachments,
+            mimeType: attachments[0]!.mimeType,
+            fileName: attachments[0]!.fileName,
+          },
+        },
+        withReply,
+        pendingId
+      );
+    } catch (err) {
+      console.error(err);
+      for (const url of previewUrls) URL.revokeObjectURL(url);
+      updateOptimisticMessage(pendingId, { sendFailed: true, uploadProgress: undefined });
+    }
   }
 
   async function uploadFiles(files: File[], caption?: string) {
-    if (!files.length || !chatId || sending || !ready) return;
-    setSending(true);
+    if (!files.length || !chatId || !ready) return;
     try {
       const album: File[] = [];
       const other: File[] = [];
@@ -1282,8 +1584,6 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
       setReplyDraft(null);
     } catch (err) {
       console.error(err);
-    } finally {
-      setSending(false);
     }
   }
 
@@ -1295,7 +1595,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
       return;
     }
     const caption = input.trim();
-    setInput("");
+    applyComposeInput("");
     setAttachMenuOpen(false);
     setEmojiPanelOpen(false);
     setMediaSendDraft({ items, caption });
@@ -1305,7 +1605,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     if (!mediaSendDraft) return;
     const { items, caption } = mediaSendDraft;
     revokeMediaSendItems(items);
-    if (caption) setInput(caption);
+    if (caption) applyComposeInput(caption);
     setMediaSendDraft(null);
   }
 
@@ -1315,7 +1615,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
     const items = mediaSendDraft.items.filter((item) => item.id !== id);
     if (items.length === 0) {
-      if (mediaSendDraft.caption) setInput(mediaSendDraft.caption);
+      if (mediaSendDraft.caption) applyComposeInput(mediaSendDraft.caption);
       setMediaSendDraft(null);
       return;
     }
@@ -1323,7 +1623,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
   }
 
   async function confirmMediaSend() {
-    if (!mediaSendDraft || !chatId || sending || !ready) return;
+    if (!mediaSendDraft || !chatId || !ready) return;
     const files = mediaSendDraft.items.map((item) => item.file);
     const caption = mediaSendDraft.caption;
     revokeMediaSendItems(mediaSendDraft.items);
@@ -1409,55 +1709,92 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
   async function handleVoiceSend(blob: Blob, d: number) {
     const minSize = 200;
     if (blob.size < minSize) return;
-    setSending(true);
+    const mime = blob.type || "audio/webm";
+    const ext = extFromBlobType(mime, "audio");
+    const file = new File([blob], `voice.${ext}`, { type: mime });
+    const previewUrl = URL.createObjectURL(blob);
+    const pendingId = insertOptimisticMessage({
+      content: "Голосовое сообщение",
+      messageType: "voice",
+      attachmentUrl: previewUrl,
+      attachmentMetadata: { duration: d, mimeType: mime },
+      uploadProgress: 0,
+    });
     try {
-      const mime = blob.type || "audio/webm";
-      const ext = extFromBlobType(mime, "audio");
-      const file = new File([blob], `voice.${ext}`, { type: mime });
-      const { path } = await uploadFile(file);
-      await sendMessage({
-        content: "Голосовое сообщение",
-        messageType: "voice",
-        attachmentUrl: path,
-        attachmentMetadata: { duration: d, mimeType: mime },
+      const { path } = await uploadFileWithProgress(file, (pct) => {
+        updateOptimisticMessage(pendingId, { uploadProgress: pct });
       });
+      URL.revokeObjectURL(previewUrl);
+      dispatchMessage(
+        {
+          content: "Голосовое сообщение",
+          messageType: "voice",
+          attachmentUrl: path,
+          attachmentMetadata: { duration: d, mimeType: mime },
+        },
+        true,
+        pendingId
+      );
     } catch (err) {
       console.error("Voice send failed:", err);
-    } finally {
-      setSending(false);
+      updateOptimisticMessage(pendingId, { sendFailed: true, uploadProgress: undefined });
     }
   }
 
   async function handleCircleSend(blob: Blob, d: number) {
     const minSize = 200;
     if (blob.size < minSize) return;
-    setSending(true);
+    const mime = blob.type || "video/webm";
+    const ext = extFromBlobType(mime, "video");
+    const file = new File([blob], `circle.${ext}`, { type: mime });
+    const previewUrl = URL.createObjectURL(blob);
+    let posterBlobUrl: string | undefined;
+    const pendingId = insertOptimisticMessage({
+      content: "Кружок",
+      messageType: "circle",
+      attachmentUrl: previewUrl,
+      attachmentMetadata: { duration: d, mimeType: mime },
+      uploadProgress: 0,
+    });
     try {
-      const mime = blob.type || "video/webm";
-      const ext = extFromBlobType(mime, "video");
-      const file = new File([blob], `circle.${ext}`, { type: mime });
       const posterBlob = await captureCirclePoster(blob);
       let posterUrl: string | undefined;
       if (posterBlob) {
+        posterBlobUrl = URL.createObjectURL(posterBlob);
+        updateOptimisticMessage(pendingId, {
+          attachmentMetadata: { duration: d, mimeType: mime, posterUrl: posterBlobUrl },
+        });
         const posterFile = new File([posterBlob], "circle-poster.jpg", { type: "image/jpeg" });
-        const uploadedPoster = await uploadFile(posterFile);
+        const uploadedPoster = await uploadFileWithProgress(posterFile, (pct) => {
+          updateOptimisticMessage(pendingId, { uploadProgress: Math.round(pct * 0.15) });
+        });
         posterUrl = uploadedPoster.path;
       }
-      const { path } = await uploadFile(file);
-      await sendMessage({
-        content: "Кружок",
-        messageType: "circle",
-        attachmentUrl: path,
-        attachmentMetadata: {
-          duration: d,
-          mimeType: mime,
-          ...(posterUrl ? { posterUrl } : {}),
-        },
+      const { path } = await uploadFileWithProgress(file, (pct) => {
+        const base = posterBlob ? 15 : 0;
+        updateOptimisticMessage(pendingId, { uploadProgress: base + Math.round(pct * (1 - base / 100)) });
       });
+      URL.revokeObjectURL(previewUrl);
+      if (posterBlobUrl) URL.revokeObjectURL(posterBlobUrl);
+      dispatchMessage(
+        {
+          content: "Кружок",
+          messageType: "circle",
+          attachmentUrl: path,
+          attachmentMetadata: {
+            duration: d,
+            mimeType: mime,
+            ...(posterUrl ? { posterUrl } : {}),
+          },
+        },
+        true,
+        pendingId
+      );
     } catch (err) {
       console.error("Circle send failed:", err);
-    } finally {
-      setSending(false);
+      URL.revokeObjectURL(previewUrl);
+      if (posterBlobUrl) URL.revokeObjectURL(posterBlobUrl);
+      updateOptimisticMessage(pendingId, { sendFailed: true, uploadProgress: undefined });
     }
   }
 
@@ -1696,9 +2033,21 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
 
   if (!chatId && !isDraft) return null;
 
+  const scrollDownBadgeCount =
+    unreadJumpCount > 0 ? unreadJumpCount : awayFromBottom && serverUnreadCount > 0 ? serverUnreadCount : 0;
+
   return (
     <>
-      <div className={`chat-header${selectionMode ? " chat-header-select" : ""}`}>
+      <div className={`chat-header${selectionMode ? " chat-header-select" : ""}${chatSearchOpen ? " chat-header-search" : ""}`}>
+        {chatSearchOpen && chatId ? (
+          <ChatMessageSearchPanel
+            chatId={chatId}
+            isGroup={chat?.type === "group"}
+            onClose={() => setChatSearchOpen(false)}
+            onSelectMessage={(id) => void jumpToSearchResult(id)}
+          />
+        ) : (
+        <>
         {showBack && !selectionMode && (
           <button
             type="button"
@@ -1739,14 +2088,12 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
           title="Информация о чате"
         >
           <div className="chat-header-avatar">
-            {(() => {
-              const url = headerAvatarUrl();
-              return url ? (
-                <img src={mediaUrl(url)} alt="" />
-              ) : (
-                headerAvatarLetter()
-              );
-            })()}
+            <UserAvatar
+              path={headerAvatarUrl()}
+              name={headerAvatarLetter()}
+              imgClassName="chat-header-avatar-img"
+              eager
+            />
           </div>
           <div className="chat-header-name-wrap">
             <h3 className="chat-header-name">{displayName}</h3>
@@ -1755,7 +2102,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
             ) : (
               <>
                 {chat?.type === "dm" && otherMember?.isBirthdayToday && (
-                  <span className="chat-header-birthday">🎂 Сегодня день рождения</span>
+                  <span className="chat-header-birthday"><AppleEmoji emoji="🎂" size={14} /> Сегодня день рождения</span>
                 )}
                 {chat?.type === "group" && (
                   <span className="chat-header-meta">{chat.members.length} участников</span>
@@ -1777,7 +2124,20 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
             Disconnected. <button type="button" onClick={reconnect} className="link-button">Retry</button> (or log out and log in)
           </span>
         )}
+        {!selectionMode && chatId && !isDraft && (
+          <button
+            type="button"
+            className="chat-header-search-btn"
+            onClick={() => setChatSearchOpen(true)}
+            aria-label="Поиск по сообщениям"
+            title="Поиск"
+          >
+            <IconSearch size={20} />
+          </button>
+        )}
           </>
+        )}
+        </>
         )}
       </div>
       <div
@@ -1851,6 +2211,8 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
             const naked = mt === "circle" || mt === "voice" || mt === "sticker";
             const hasMediaBubble = mt === "image" || mt === "video";
             const own = user?.id != null && m.senderId.toLowerCase() === user.id.toLowerCase();
+            const isPending = Boolean(m.clientPending);
+            const uploadPct = m.uploadProgress;
             const sameSenderCluster =
               chat?.type === "group" &&
               !own &&
@@ -1914,7 +2276,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
                   </div>
                 )}
             <div
-              className={`message ${own ? "own" : ""}${naked ? " message-naked" : ""}${hasMediaBubble ? " message-has-media" : ""}${mt === "circle" ? " message-circle" : ""}${mt === "voice" ? " message-voice" : ""}`}
+              className={`message ${own ? "own" : ""}${naked ? " message-naked" : ""}${hasMediaBubble ? " message-has-media" : ""}${mt === "circle" ? " message-circle" : ""}${mt === "voice" ? " message-voice" : ""}${isPending ? " message-pending" : ""}${m.sendFailed ? " message-send-failed" : ""}`}
               onClick={(e) => onMessageBubbleClick(e, m)}
               onContextMenu={(e) => onMessageContextMenu(e, m)}
               onTouchStart={(e) => onMessageTouchStart(e, m)}
@@ -1949,14 +2311,19 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
                 </button>
               )}
               {(m.messageType ?? "text") === "text" && (
-                <p className="message-content">{linkifyText(displayContent(m))}</p>
+                <p className="message-content">{formatMessageText(displayContent(m))}</p>
               )}
               {(m.messageType ?? "text") === "image" && m.attachmentUrl && (
-                <MessageMediaGallery
-                  message={m}
-                  priority={msgIndex >= messages.length - 16}
-                  onOpenLightbox={(urls, index) => setLightbox({ urls, index })}
-                />
+                <div className="message-media-wrap">
+                  <MessageMediaGallery
+                    message={m}
+                    priority={msgIndex >= messages.length - 16}
+                    onOpenLightbox={(urls, index) => setLightbox({ urls, index })}
+                  />
+                  {isPending && uploadPct != null && uploadPct >= 0 && (
+                    <div className="message-pending-progress">{uploadPct}%</div>
+                  )}
+                </div>
               )}
               {(m.messageType ?? "text") === "file" && m.attachmentUrl && (
                 <a
@@ -1964,22 +2331,28 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
                   download={m.attachmentMetadata?.fileName ?? undefined}
                   className="message-file"
                 >
-                  📎 {m.attachmentMetadata?.fileName ?? "File"}
+                  <IconAttach size={16} className="message-file-icon" aria-hidden />
+                  {m.attachmentMetadata?.fileName ?? "File"}
                 </a>
               )}
               {(m.messageType ?? "text") === "video" && m.attachmentUrl && (
-                <video
-                  src={mediaUrl(m.attachmentUrl)}
-                  poster={m.attachmentMetadata?.posterUrl ? mediaUrl(m.attachmentMetadata.posterUrl) : undefined}
-                  controls
-                  preload="metadata"
-                  playsInline
-                  className="message-video"
-                />
+                <div className="message-media-wrap">
+                  <video
+                    src={mediaUrl(m.attachmentUrl)}
+                    poster={m.attachmentMetadata?.posterUrl ? mediaUrl(m.attachmentMetadata.posterUrl) : undefined}
+                    controls
+                    preload="metadata"
+                    playsInline
+                    className="message-video"
+                  />
+                  {isPending && uploadPct != null && uploadPct >= 0 && (
+                    <div className="message-pending-progress">{uploadPct}%</div>
+                  )}
+                </div>
               )}
               {(m.messageType ?? "text") === "location" && (() => {
                 const loc = parseLocationCoords(m.content, m.attachmentMetadata);
-                if (!loc) return <p className="message-content">{linkifyText(displayContent(m))}</p>;
+                if (!loc) return <p className="message-content">{formatMessageText(displayContent(m))}</p>;
                 return <LocationPreview lat={loc.lat} lng={loc.lng} />;
               })()}
               {(m.messageType ?? "text") === "voice" && m.attachmentUrl && (
@@ -2011,7 +2384,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
                 const mt = m.messageType ?? "text";
                 if (mt !== "image" && mt !== "video" && mt !== "file") return null;
                 const cap = mediaMessageCaption(m);
-                return cap ? <p className="message-content message-media-caption">{linkifyText(cap)}</p> : null;
+                return cap ? <p className="message-content message-media-caption">{formatMessageText(cap)}</p> : null;
               })()}
               {(m.reactions?.length ?? 0) > 0 && (
                 <MessageReactions
@@ -2020,8 +2393,17 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
                   onToggle={(emoji) => void handleReaction(m, emoji)}
                 />
               )}
-              {(mt !== "circle" && mt !== "voice") || (own && isMessageReadByPeers(m)) ? (
+              {(mt !== "circle" && mt !== "voice") || (own && isMessageReadByPeers(m)) || isPending ? (
               <div className="message-meta">
+                {isPending && (
+                  <span className="message-pending-status">
+                    {m.sendFailed
+                      ? "Не отправлено"
+                      : uploadPct != null && uploadPct >= 0
+                      ? `Загрузка ${uploadPct}%`
+                      : "Отправка…"}
+                  </span>
+                )}
                 {mt !== "circle" && mt !== "voice" && (
                   <div className="message-time">
                     {m.editedAt && <span className="message-edited">изменено</span>}
@@ -2030,7 +2412,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
                       : ""}
                   </div>
                 )}
-                {own && isMessageReadByPeers(m) && (
+                {own && !isPending && isMessageReadByPeers(m) && (
                   <span
                     className="message-read-receipt"
                     title={
@@ -2040,7 +2422,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
                     }
                     aria-label="Прочитано"
                   >
-                    🍉
+                    <IconMessageRead size={14} />
                   </span>
                 )}
               </div>
@@ -2055,15 +2437,22 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
         )}
         <div ref={messagesEndRef} />
       </div>
-      {unreadJumpCount > 0 && unreadBounds.last && serverUnreadCount > 0 && (
+      {awayFromBottom && (
         <button
           type="button"
-          className="messages-unread-jump"
-          onClick={jumpToLastUnread}
-          aria-label={`Прокрутить к непрочитанным: ${unreadJumpCount}`}
+          className="messages-scroll-down"
+          onClick={jumpDown}
+          aria-label={
+            scrollDownBadgeCount > 0
+              ? `К непрочитанным: ${scrollDownBadgeCount}`
+              : "В конец чата"
+          }
+          title={scrollDownBadgeCount > 0 ? "К непрочитанным" : "В конец чата"}
         >
           <IconChevronDown size={18} />
-          <span>{unreadJumpCount > 99 ? "99+" : unreadJumpCount}</span>
+          {scrollDownBadgeCount > 0 && (
+            <span>{scrollDownBadgeCount > 99 ? "99+" : scrollDownBadgeCount}</span>
+          )}
         </button>
       )}
       {dmBlockMessage ? (
@@ -2094,7 +2483,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
               className="compose-reply-close"
               onClick={() => {
                 setEditDraft(null);
-                setInput("");
+                restoreComposeInput();
               }}
               aria-label="Отменить редактирование"
             >

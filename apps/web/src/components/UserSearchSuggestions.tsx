@@ -1,6 +1,6 @@
 import type { User } from "@melon/shared";
-import { mediaUrl } from "../utils/mediaUrl";
 import { userAvatarLetter, userDisplayName, userLoginTag } from "../utils/userDisplay";
+import { UserAvatar } from "./UserAvatar";
 
 type Props = {
   users: User[];
@@ -33,11 +33,7 @@ export default function UserSearchSuggestions({
               <li key={u.id}>
                 <button type="button" className="user-search-suggestion" onClick={() => onPick(u)}>
                   <span className="user-search-suggestion-avatar">
-                    {u.avatarUrl ? (
-                      <img src={mediaUrl(u.avatarUrl)} alt="" />
-                    ) : (
-                      userAvatarLetter(u)
-                    )}
+                    <UserAvatar path={u.avatarUrl} name={userAvatarLetter(u)} />
                   </span>
                   <span className="user-search-suggestion-text">
                     <span className="user-search-suggestion-name">{userDisplayName(u)}</span>

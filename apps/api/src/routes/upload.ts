@@ -5,10 +5,9 @@ import { legalRequiredPlugin } from "../plugins/legalRequired";
 import { checkRateLimit, clientKey } from "../middleware/rateLimit";
 import { getMediaStorage, uploadsPathFromKey } from "../services/mediaStorage";
 import { registerMediaFile, registerProfileMedia } from "../services/mediaAccess";
+import { MAX_UPLOAD_BYTES, uploadTooLargeMessage } from "@melon/shared";
 
 export const UPLOAD_DIR = process.env.UPLOAD_DIR ?? join(import.meta.dir, "../../uploads");
-
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
 
 function extFromMime(mime: string): string {
   const base = mime.split(";")[0].trim().toLowerCase();
@@ -53,9 +52,9 @@ export const uploadRoutes = new Elysia({ prefix: "/upload" })
       set.status = 400;
       return { error: "Missing file" };
     }
-    if (file.size > MAX_FILE_SIZE) {
-      set.status = 400;
-      return { error: "File too large" };
+    if (file.size > MAX_UPLOAD_BYTES) {
+      set.status = 413;
+      return { error: uploadTooLargeMessage() };
     }
     const ext = extFromMime(file.type) || (file.name ? extname(file.name) : "");
     const filename = `${crypto.randomUUID()}${ext}`;

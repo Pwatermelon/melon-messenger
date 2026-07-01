@@ -3,7 +3,7 @@ import { eq, and, inArray, or, sql, ilike, ne } from "drizzle-orm";
 import { authPlugin, requireAuth } from "../auth";
 import { legalRequiredPlugin } from "../plugins/legalRequired";
 import { db, users, chats, chatMembers } from "../db";
-import { getMessages as scyllaGetMessages, getMessage as scyllaGetMessage, deleteMessage as scyllaDeleteMessage, insertMessage as scyllaInsertMessage, deleteChatMessages, updateMessageContent as scyllaUpdateMessageContent } from "../services/scylla";
+import { getMessages as scyllaGetMessages, getMessage as scyllaGetMessage, searchMessages as scyllaSearchMessages, deleteMessage as scyllaDeleteMessage, insertMessage as scyllaInsertMessage, deleteChatMessages, updateMessageContent as scyllaUpdateMessageContent } from "../services/scylla";
 import { publishChatEvent, publishMessageEvent, kickUserFromChat, publishUserEvent } from "../ws";
 import { notifyChatMembersExcept } from "../services/chatNotifications";
 import { getChatSharedItems } from "../services/chatSharedMedia";
@@ -851,6 +851,47 @@ export const chatRoutes = new Elysia({ prefix: "/chats" })
       });
     }
     return { ok: true, messageId: resolvedId };
+  })
+  .get("/:id/messages/search", async ({ user, params, query, set }) => {
+    const u = requireAuth(set)(user);
+    const { id: chatId } = params;
+    const q = String(query.q ?? "").trim();
+    if (q.length < 1) {
+      set.status = 400;
+      return { error: "q required" };
+    }
+    if (q.length > 200) {
+      set.status = 400;
+      return { error: "query too long" };
+    }
+    const limit = Math.min(Number(query.limit) || 30, 50);
+    const cursor = (query.cursor as string) || undefined;
+
+    const [member] = await db
+      .select()
+      .from(chatMembers)
+      .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.userId, u.id)))
+      .limit(1);
+    if (!member) {
+      set.status = 403;
+      return { error: "Not a member of this chat" };
+    }
+
+    const { rows, hasMore, nextCursor } = await scyllaSearchMessages(chatId, q, limit, cursor);
+    const userIds = [...new Set(rows.map((r) => r.sender_id))];
+    const userMap = new Map<string, typeof users.$inferSelect>();
+    if (userIds.length) {
+      const list = await db.select().from(users).where(inArray(users.id, userIds));
+      list.forEach((us) => userMap.set(us.id, us));
+    }
+    const messages = await Promise.all(
+      rows.map(async (r) => {
+        const senderRow = userMap.get(r.sender_id);
+        const sender = senderRow ? await signUserMedia(toUser(senderRow), u.id) : undefined;
+        return rowToMessageDto(r, u.id, sender);
+      })
+    );
+    return { messages, hasMore, cursor: nextCursor };
   })
   .get("/:id/messages", async ({ user, params, query, set }) => {
     const u = requireAuth(set)(user);

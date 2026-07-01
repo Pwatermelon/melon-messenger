@@ -81,9 +81,11 @@ export const mediaRoutes = new Elysia({ prefix: "/media" })
     const disposition = defaultMediaDisposition(ext, forceDownload);
     const queryName = typeof query.as === "string" ? sanitizeOriginalFilename(query.as) : null;
     const displayName = meta?.originalName || queryName || filename;
+    const visibility = meta?.visibility ?? "chat";
+    const maxAge = visibility === "profile" ? 86400 : 3600;
     return new Response(file.body, {
       headers: {
-        "Cache-Control": "private, max-age=300",
+        "Cache-Control": `private, max-age=${maxAge}`,
         "Content-Type": contentType,
         "Content-Disposition": buildContentDisposition(displayName, disposition),
       },

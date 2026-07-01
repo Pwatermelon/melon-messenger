@@ -5,6 +5,7 @@ export type SubscriptionTier = "free" | "platinum";
 
 export * from "./birthday";
 export * from "./timeUuid";
+export * from "./uploadLimits";
 
 /** Max messages kept per chat; older ones are removed silently on new sends. */
 export const MAX_CHAT_MESSAGES = 1000;
@@ -159,6 +160,12 @@ export interface Message {
   attachmentUrl?: string | null;
   attachmentMetadata?: AttachmentMetadata | null;
   reactions?: MessageReaction[];
+  /** Только на клиенте: сообщение ещё отправляется */
+  clientPending?: boolean;
+  /** Только на клиенте: прогресс загрузки вложения 0–100; null — уже загружено, ждём WS */
+  uploadProgress?: number | null;
+  /** Только на клиенте: отправка не удалась */
+  sendFailed?: boolean;
 }
 
 export interface MessageReaction {

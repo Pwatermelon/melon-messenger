@@ -20,6 +20,7 @@ export function canonicalStoragePath(path: string): string {
 /** Turn API-signed or storage path into a browser-loadable URL */
 export function mediaUrl(path: string | null | undefined): string {
   if (!path) return "";
+  if (path.startsWith("blob:")) return path;
   if (path.startsWith("http://") || path.startsWith("https://")) return path;
   if (path.includes("access=")) {
     if (path.startsWith("/api/")) {

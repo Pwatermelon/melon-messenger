@@ -1,4 +1,7 @@
-const CACHE = "wm-static-v3";
+const CACHE = "wm-static-v4";
+const MEDIA_CACHE = "wm-media-v1";
+/** Макс. размер одного файла в SW-кэше медиа (крупные видео не кэшируем) */
+const MEDIA_CACHE_MAX_ITEM_BYTES = 5 * 1024 * 1024;
 const OFFLINE_URLS = ["/", "/index.html"];
 
 self.addEventListener("install", (event) => {
@@ -12,10 +15,37 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) =>
+        Promise.all(keys.filter((k) => k !== CACHE && k !== MEDIA_CACHE).map((k) => caches.delete(k)))
+      )
       .then(() => self.clients.claim())
   );
 });
+
+function isMediaRequest(url) {
+  return /\/media\/[^/?#]+/.test(url.pathname);
+}
+
+function mediaCacheKey(url) {
+  const m = url.pathname.match(/\/media\/([^/?#]+)/);
+  return m ? `/media/${m[1]}` : url.pathname;
+}
+
+async function trimMediaCache(cache) {
+  const keys = await cache.keys();
+  const maxEntries = 400;
+  if (keys.length <= maxEntries) return;
+  const excess = keys.length - maxEntries;
+  await Promise.all(keys.slice(0, excess).map((k) => cache.delete(k)));
+}
+
+function shouldCacheMediaResponse(res) {
+  const len = Number(res.headers.get("content-length") || 0);
+  if (len > MEDIA_CACHE_MAX_ITEM_BYTES) return false;
+  const type = (res.headers.get("content-type") || "").toLowerCase();
+  if (type.startsWith("video/")) return false;
+  return true;
+}
 
 self.addEventListener("message", (event) => {
   if (event.data === "SKIP_WAITING" || event.data?.type === "SKIP_WAITING") {
@@ -31,7 +61,26 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
-  if (url.pathname.startsWith("/api") || url.pathname.startsWith("/ws")) return;
+  if (url.pathname.startsWith("/api") || url.pathname.startsWith("/ws")) {
+    if (isMediaRequest(url)) {
+      const key = mediaCacheKey(url);
+      event.respondWith(
+        caches.open(MEDIA_CACHE).then(async (cache) => {
+          const cached = await cache.match(key);
+          const network = fetch(request)
+            .then((res) => {
+              if (res.ok && shouldCacheMediaResponse(res)) {
+                cache.put(key, res.clone()).then(() => trimMediaCache(cache));
+              }
+              return res;
+            })
+            .catch(() => cached);
+          return cached ?? network;
+        })
+      );
+    }
+    return;
+  }
 
   // HTML/навигация: всегда сеть в первую очередь, кэш — только офлайн-запас.
   // Это гарантирует, что после деплоя клиент получит свежий index.html

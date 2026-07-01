@@ -43,7 +43,7 @@ function MediaTile({
   const src = mediaUrl(attachment.url);
   const isGif = isGifAttachment(attachment);
   const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(src.startsWith("blob:"));
 
   // Для одиночной картинки заранее резервируем точный контейнер по сохранённым
   // размерам — чтобы при подгрузке не дёргался скролл (как в Telegram).

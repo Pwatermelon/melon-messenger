@@ -4,14 +4,20 @@
   "tags": ["watermelon", "business"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
   "time": { "from": "now-24h", "to": "now" },
   "panels": [
     {
+      "type": "row",
+      "title": "Пользователи и чаты",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
       "type": "stat",
       "title": "Пользователи",
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
       "targets": [{ "expr": "wm_users_total", "refId": "A" }],
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
       "fieldConfig": { "defaults": { "unit": "short" } }
@@ -19,50 +25,156 @@
     {
       "type": "stat",
       "title": "Ожидают beta",
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
       "targets": [{ "expr": "wm_beta_pending_users", "refId": "A" }],
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] } } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] }
+        }
+      }
     },
     {
       "type": "stat",
       "title": "Чаты",
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
       "targets": [{ "expr": "wm_chats_total", "refId": "A" }],
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
     },
     {
       "type": "stat",
+      "title": "ЛС",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "targets": [{ "expr": "wm_dm_chats_total", "refId": "A" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "stat",
       "title": "Группы",
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
       "targets": [{ "expr": "wm_group_chats_total", "refId": "A" }],
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
     },
     {
       "type": "stat",
       "title": "Platinum",
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
       "targets": [{ "expr": "wm_platinum_users_total", "refId": "A" }],
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
     },
     {
+      "type": "row",
+      "title": "Коины и экономика",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "collapsed": false
+    },
+    {
+      "type": "stat",
+      "title": "Всего коинов",
+      "description": "Сумма coin_balance всех пользователей",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 6 },
+      "targets": [{ "expr": "wm_coins_total", "refId": "A" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "yellow" }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "С коинами",
+      "description": "Пользователи с балансом > 0",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 6 },
+      "targets": [{ "expr": "wm_users_with_coins_total", "refId": "A" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "stat",
+      "title": "Макс. баланс",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 6 },
+      "targets": [{ "expr": "max(wm_user_coins)", "refId": "A" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "stat",
+      "title": "Средний баланс",
+      "description": "Среди пользователей с коинами",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 6 },
+      "targets": [{ "expr": "wm_coins_total / clamp_min(wm_users_with_coins_total, 1)", "refId": "A" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "decimals": 1 } }
+    },
+    {
+      "type": "stat",
+      "title": "Доля с коинами",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 6 },
+      "targets": [{ "expr": "100 * wm_users_with_coins_total / clamp_min(wm_users_total, 1)", "refId": "A" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1 } }
+    },
+    {
       "type": "stat",
       "title": "Push-подписки",
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 6 },
       "targets": [{ "expr": "wm_push_subscriptions_total", "refId": "A" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "row",
+      "title": "Модерация и контент",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 10 },
+      "collapsed": false
+    },
+    {
+      "type": "stat",
+      "title": "Жалобы (открыты)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 11 },
+      "targets": [{ "expr": "wm_reports_open_total", "refId": "A" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Блокировки",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 11 },
+      "targets": [{ "expr": "wm_user_blocks_total", "refId": "A" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "stat",
+      "title": "Стикерпаки",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 11 },
+      "targets": [{ "expr": "wm_sticker_packs_total", "refId": "A" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "stat",
+      "title": "Онлайн (WS)",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 11 },
+      "targets": [{ "expr": "wm_ws_users_online", "refId": "A" }],
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
     },
     {
       "type": "timeseries",
       "title": "Сообщения в минуту",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
       "targets": [{ "expr": "rate(wm_messages_total[5m]) * 60", "legendFormat": "сообщений/мин", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 20 } } }
     },
     {
       "type": "timeseries",
       "title": "WebSocket онлайн",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
       "targets": [
         { "expr": "wm_ws_connections", "legendFormat": "соединения", "refId": "A" },
         { "expr": "wm_ws_users_online", "legendFormat": "пользователи", "refId": "B" }
@@ -71,10 +183,73 @@
     },
     {
       "type": "timeseries",
+      "title": "Всего коинов в системе",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "targets": [{ "expr": "wm_coins_total", "legendFormat": "коины", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 20 } } }
+    },
+    {
+      "type": "timeseries",
       "title": "Всего сообщений (накопительно)",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
       "targets": [{ "expr": "wm_messages_total", "legendFormat": "messages", "refId": "A" }],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } } }
+    },
+    {
+      "type": "table",
+      "title": "Баланс коинов по пользователям",
+      "description": "Все зарегистрированные пользователи, сортировка по балансу",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 31 },
+      "targets": [
+        {
+          "expr": "sort_desc(wm_user_coins)",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": { "mode": "columns", "keepLabels": ["username", "user_id"] }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "__name__": true, "instance": true, "job": true },
+            "indexByName": { "username": 0, "user_id": 1, "Value": 2 },
+            "renameByName": {
+              "username": "Пользователь",
+              "user_id": "ID",
+              "Value": "Коины"
+            }
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Коины", "desc": true }]
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Коины" },
+            "properties": [
+              { "id": "custom.width", "value": 100 },
+              { "id": "decimals", "value": 0 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Пользователь" },
+            "properties": [{ "id": "custom.width", "value": 180 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "ID" },
+            "properties": [{ "id": "custom.width", "value": 280 }]
+          }
+        ]
+      }
     }
   ]
 }
