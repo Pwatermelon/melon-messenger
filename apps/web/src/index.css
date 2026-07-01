@@ -3340,13 +3340,164 @@ a {
   object-fit: contain;
 }
 
-.message-has-media .message-video {
+.message-has-media .message-video-player {
   display: block;
   margin: 0;
-  width: min(320px, 100%);
   max-width: 100%;
-  max-height: 360px;
   border-radius: 8px;
+  overflow: hidden;
+}
+
+.message-video-player {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0a0a0a;
+}
+
+.message-video-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0a0a0a;
+}
+
+.message-video-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.message-video-skeleton {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    rgba(255, 255, 255, 0.04) 8%,
+    rgba(255, 255, 255, 0.1) 18%,
+    rgba(255, 255, 255, 0.04) 33%
+  );
+  background-size: 200% 100%;
+  animation: message-media-shimmer 1.2s ease-in-out infinite;
+  z-index: 0;
+}
+
+.message-video-el {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.message-video-el.is-hidden {
+  visibility: hidden;
+}
+
+.message-video-center-play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.52);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.message-video-center-play:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.68);
+}
+
+.message-video-center-play:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.message-video-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.4rem;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.78), rgba(0, 0, 0, 0.35) 70%, transparent);
+}
+
+.message-video-bar-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+.message-video-bar-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.message-video-bar-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.message-video-scrub {
+  flex: 1;
+  min-width: 0;
+  padding: 0.45rem 0;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.message-video-scrub-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.28);
+  overflow: hidden;
+}
+
+.message-video-scrub-fill {
+  height: 100%;
+  background: #fff;
+  border-radius: 2px;
+  transition: width 0.05s linear;
+}
+
+.message-video-bar-time {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.92);
+  white-space: nowrap;
 }
 
 .message-has-media {
@@ -5719,12 +5870,6 @@ a {
   color: rgba(255,255,255,0.95);
 }
 
-.message-video {
-  max-width: 320px;
-  border-radius: 8px;
-  margin: 0.25rem 0;
-}
-
 .message-voice {
   display: flex;
   flex-direction: column;
@@ -6775,6 +6920,8 @@ a {
   gap: 0.3rem;
   max-width: 100%;
   flex-shrink: 0;
+  overflow: visible;
+  padding-bottom: 0.1rem;
 }
 
 .message-row:has(.message-circle) {
@@ -7296,6 +7443,7 @@ video.message-circle {
   margin: 0;
   flex-wrap: nowrap;
   box-sizing: border-box;
+  overflow: visible;
 }
 
 .voice-player-time {
@@ -7725,6 +7873,7 @@ video.message-circle {
   max-width: min(320px, 100%);
   min-width: 0;
   gap: 0.15rem;
+  overflow: visible;
 }
 
 .message.own.message-naked.message-voice {
@@ -8510,7 +8659,7 @@ video.message-circle {
   .profile-overlay .profile-modal { width: 100%; border-radius: 12px 12px 0 0; align-self: flex-end; }
   .record-circle-preview { width: 150px; height: 150px; }
   .voice-player { max-width: min(280px, 72vw); }
-  .circle-player { transform: scale(0.9); transform-origin: top center; }
+  .circle-player { transform: scale(0.9); transform-origin: center center; }
   .compose { padding-bottom: max(0.5rem, env(safe-area-inset-bottom)); }
   .chat-header { padding-top: max(0.5rem, env(safe-area-inset-top)); }
 }

@@ -4,8 +4,10 @@ import {
   readCachedCircleConstraintIndex,
   writeCachedCircleConstraintIndex,
 } from "../utils/mediaAccess";
+import { finalizeRecordedDuration, probeBlobDuration } from "../utils/mediaPlaybackDuration";
 
 const MAX_DURATION = 60;
+const SAFARI_STOP_FLUSH_MS = 300;
 
 const CIRCLE_CONSTRAINTS: MediaStreamConstraints[] = [
   { video: { facingMode: "user", width: { ideal: 480 }, height: { ideal: 480 } }, audio: true },
@@ -156,7 +158,7 @@ export function useCircleRecorder() {
         : 1;
       const mime = recorder.mimeType || pickCircleMime() || "video/webm";
       let finalized = false;
-      const finish = () => {
+      const finish = async () => {
         if (finalized) return;
         finalized = true;
         const blob = new Blob(chunksRef.current, { type: mime });
@@ -167,18 +169,30 @@ export function useCircleRecorder() {
         setRecording(false);
         setDuration(0);
         startTimeRef.current = null;
-        resolve({ blob, duration: wallDuration });
+        const probed = await probeBlobDuration(blob, "video");
+        resolve({ blob, duration: finalizeRecordedDuration(wallDuration, probed) });
+      };
+      const finishWhenReady = (attempt = 0) => {
+        const size = chunksRef.current.reduce((n, c) => n + c.size, 0);
+        if (size > 0 || attempt >= 6) {
+          void finish();
+          return;
+        }
+        setTimeout(() => finishWhenReady(attempt + 1), 50);
       };
       recorder.onstop = () => {
-        const delay = isSafariBrowser() ? 150 : 0;
-        if (delay) setTimeout(finish, delay);
-        else requestAnimationFrame(() => requestAnimationFrame(finish));
+        const delay = isSafariBrowser() ? SAFARI_STOP_FLUSH_MS : 50;
+        setTimeout(() => finishWhenReady(), delay);
       };
       if (recorder.state === "recording") {
-        recorder.requestData?.();
+        try {
+          recorder.requestData?.();
+        } catch {
+          // ignore
+        }
         recorder.stop();
       } else {
-        finish();
+        void finish();
       }
     });
   }, [cleanup]);

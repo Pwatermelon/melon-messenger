@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconPlay, IconPause } from "./Icons";
 import { canPlayMediaUrl } from "../utils/mediaMime";
 import { claimMediaPlayback, releaseMediaPlayback } from "../utils/mediaPlayback";
+import { resolvePlaybackDuration } from "../utils/mediaPlaybackDuration";
 import { attachVideoPreviewHandlers, primeVideoPreviewFrame } from "../utils/videoPreview";
 
 const DEFAULT_SIZE = 220;
@@ -46,11 +47,13 @@ export function CircleMessagePlayer({ src, duration: metaDuration, size = DEFAUL
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [current, setCurrent] = useState(0);
-  const [duration, setDuration] = useState(metaDuration ?? 0);
+  const [mediaDuration, setMediaDuration] = useState(metaDuration ?? 0);
   const [error, setError] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
   const [previewReady, setPreviewReady] = useState(Boolean(poster));
   const posterClearedRef = useRef(false);
+
+  const duration = resolvePlaybackDuration(metaDuration, mediaDuration);
 
   const primeInitialPreview = useCallback(() => {
     const video = videoRef.current;
@@ -83,14 +86,15 @@ export function CircleMessagePlayer({ src, duration: metaDuration, size = DEFAUL
     if (!rect) return;
     const video = videoRef.current;
     if (!video) return;
-    const dur = video.duration;
+    const dur = resolvePlaybackDuration(metaDuration, video.duration) || video.duration;
     if (!dur || !Number.isFinite(dur)) return;
     const pct = angleFromPointer(clientX, clientY, rect);
     const t = Math.max(0, Math.min(1, pct)) * dur;
-    video.currentTime = t;
-    setProgress(t / dur);
-    setCurrent(t);
-  }, []);
+    const maxT = video.duration && Number.isFinite(video.duration) ? video.duration : t;
+    video.currentTime = Math.min(t, maxT);
+    setProgress(video.currentTime / dur);
+    setCurrent(video.currentTime);
+  }, [metaDuration]);
 
   const scrubHandlersRef = useRef({
     onMove: (e: PointerEvent) => {
@@ -153,20 +157,22 @@ export function CircleMessagePlayer({ src, duration: metaDuration, size = DEFAUL
 
     const onTime = () => {
       if (scrubbingRef.current) return;
-      if (video.duration && Number.isFinite(video.duration)) {
-        setProgress(video.currentTime / video.duration);
+      const dur = resolvePlaybackDuration(metaDuration, video.duration);
+      if (dur > 0) {
+        setProgress(Math.min(1, video.currentTime / dur));
         setCurrent(video.currentTime);
       }
     };
     const onMeta = () => {
       if (video.duration && Number.isFinite(video.duration)) {
-        setDuration(Math.round(video.duration));
+        setMediaDuration(video.duration);
       }
     };
     const onEnd = () => {
       setPlaying(false);
-      setProgress(0);
-      setCurrent(0);
+      const dur = resolvePlaybackDuration(metaDuration, video.duration);
+      setProgress(1);
+      setCurrent(dur > 0 ? dur : 0);
       primeInitialPreview();
       releaseMediaPlayback(stopRef.current);
     };
@@ -186,7 +192,7 @@ export function CircleMessagePlayer({ src, duration: metaDuration, size = DEFAUL
       video.removeEventListener("ended", onEnd);
       video.removeEventListener("error", onVideoError);
     };
-  }, [src, primeInitialPreview]);
+  }, [src, metaDuration, primeInitialPreview]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -197,10 +203,11 @@ export function CircleMessagePlayer({ src, duration: metaDuration, size = DEFAUL
   }, [src, poster]);
 
   useEffect(() => {
+    setMediaDuration(metaDuration ?? 0);
     resetPlayback();
     setError(false);
     return () => releaseMediaPlayback(stopRef.current);
-  }, [src, resetPlayback]);
+  }, [src, metaDuration, resetPlayback]);
 
   function togglePlay() {
     const video = videoRef.current;
@@ -243,7 +250,7 @@ export function CircleMessagePlayer({ src, duration: metaDuration, size = DEFAUL
     document.addEventListener("pointercancel", scrubHandlersRef.current.onUp, { passive: false });
   }
 
-  const offset = circumference * (1 - progress);
+  const offset = circumference * (1 - Math.min(1, progress));
 
   return (
     <div className="circle-player-stack">

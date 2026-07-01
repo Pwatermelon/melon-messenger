@@ -2,24 +2,7 @@ import { useState, type CSSProperties } from "react";
 import type { Message, MessageAttachment } from "@melon/shared";
 import { mediaUrl } from "../utils/mediaUrl";
 import { getMessageAttachments, isGifAttachment } from "../utils/messageAttachments";
-
-// Габариты кадра одиночной картинки (должны совпадать с CSS).
-const MAX_TILE_W = 320;
-const MAX_TILE_H = 360;
-
-function displayMediaSize(w: number, h: number): { width: number; height: number } {
-  let dw = w;
-  let dh = h;
-  if (dw > MAX_TILE_W) {
-    dh = (dh * MAX_TILE_W) / dw;
-    dw = MAX_TILE_W;
-  }
-  if (dh > MAX_TILE_H) {
-    dw = (dw * MAX_TILE_H) / dh;
-    dh = MAX_TILE_H;
-  }
-  return { width: Math.max(1, Math.round(dw)), height: Math.max(1, Math.round(dh)) };
-}
+import { displayMessageMediaSize } from "../utils/messageMediaSize";
 
 type Props = {
   message: Message;
@@ -51,7 +34,7 @@ function MediaTile({
   const h = attachment.height;
   let reserveStyle: CSSProperties | undefined;
   if (count === 1 && w && h) {
-    const size = displayMediaSize(w, h);
+    const size = displayMessageMediaSize(w, h);
     reserveStyle = { width: size.width, minHeight: size.height, aspectRatio: `${w} / ${h}` };
   }
   const reserved = Boolean(reserveStyle);

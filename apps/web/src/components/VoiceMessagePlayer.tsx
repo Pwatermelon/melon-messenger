@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { IconPlay, IconPause } from "./Icons";
 import { canPlayMediaUrl, mimeFromMediaUrl } from "../utils/mediaMime";
 import { claimMediaPlayback, releaseMediaPlayback } from "../utils/mediaPlayback";
+import { resolvePlaybackDuration } from "../utils/mediaPlaybackDuration";
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -19,9 +20,11 @@ export function VoiceMessagePlayer({ src, duration: metaDuration }: { src: strin
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [current, setCurrent] = useState(0);
-  const [duration, setDuration] = useState(metaDuration ?? 0);
+  const [mediaDuration, setMediaDuration] = useState(metaDuration ?? 0);
   const [error, setError] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
+
+  const duration = resolvePlaybackDuration(metaDuration, mediaDuration);
 
   const mime = mimeFromMediaUrl(src, "audio");
 
@@ -42,15 +45,16 @@ export function VoiceMessagePlayer({ src, duration: metaDuration }: { src: strin
     const track = trackRef.current;
     const audio = audioRef.current;
     if (!track || !audio) return;
-    const dur = audio.duration;
+    const dur = resolvePlaybackDuration(metaDuration, audio.duration) || audio.duration;
     if (!dur || !Number.isFinite(dur)) return;
     const rect = track.getBoundingClientRect();
     const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const t = pct * dur;
-    audio.currentTime = t;
+    const maxT = audio.duration && Number.isFinite(audio.duration) ? audio.duration : t;
+    audio.currentTime = Math.min(t, maxT);
     setProgress(pct);
-    setCurrent(t);
-  }, []);
+    setCurrent(audio.currentTime);
+  }, [metaDuration]);
 
   const scrubHandlersRef = useRef({
     onMove: (e: PointerEvent) => {
@@ -112,20 +116,22 @@ export function VoiceMessagePlayer({ src, duration: metaDuration }: { src: strin
     if (!audio) return;
     const onTime = () => {
       if (scrubbingRef.current) return;
-      if (audio.duration && Number.isFinite(audio.duration)) {
-        setProgress(audio.currentTime / audio.duration);
+      const dur = resolvePlaybackDuration(metaDuration, audio.duration);
+      if (dur > 0) {
+        setProgress(Math.min(1, audio.currentTime / dur));
         setCurrent(audio.currentTime);
       }
     };
     const onMeta = () => {
       if (audio.duration && Number.isFinite(audio.duration)) {
-        setDuration(Math.round(audio.duration));
+        setMediaDuration(audio.duration);
       }
     };
     const onEnd = () => {
       setPlaying(false);
-      setProgress(0);
-      setCurrent(0);
+      const dur = resolvePlaybackDuration(metaDuration, audio.duration);
+      setProgress(1);
+      setCurrent(dur > 0 ? dur : 0);
       releaseMediaPlayback(stopRef.current);
     };
     const onAudioError = () => {
@@ -143,13 +149,14 @@ export function VoiceMessagePlayer({ src, duration: metaDuration }: { src: strin
       audio.removeEventListener("ended", onEnd);
       audio.removeEventListener("error", onAudioError);
     };
-  }, [src]);
+  }, [src, metaDuration]);
 
   useEffect(() => {
+    setMediaDuration(metaDuration ?? 0);
     stopPlayback();
     setError(false);
     return () => releaseMediaPlayback(stopRef.current);
-  }, [src, stopPlayback]);
+  }, [src, metaDuration, stopPlayback]);
 
   function toggle() {
     const audio = audioRef.current;

@@ -20,7 +20,10 @@ import StickerPackViewModal from "../components/StickerPackViewModal";
 import { getChat, getChats, getMessages, uploadFile, uploadFileWithProgress, removeGroupMember, deleteChat, updateGroup, deleteMessage, editMessage, forwardMessage, signMediaPaths, markChatReadApi, getChatReadCursors, setMessageReaction, sendDmMessage } from "../api";
 import { extFromBlobType } from "../utils/mediaMime";
 import { compressImage, isGifFileDeep, getImageDimensions } from "../utils/imageCompress";
+import { getVideoDimensions } from "../utils/videoDimensions";
 import ImageLightbox from "../components/ImageLightbox";
+import MediaLightbox from "../components/MediaLightbox";
+import { MessageVideoPlayer } from "../components/MessageVideoPlayer";
 import { MessageMediaGallery } from "../components/MessageMediaGallery";
 import {
   MAX_ATTACHMENTS_PER_MESSAGE,
@@ -56,6 +59,8 @@ import {
 import { getMessageReaders, isMessageReadByAnyPeer, isMessageReadByCursor, mergeReadCursor } from "../utils/messageRead";
 import { formatMessageDateLabel, shouldShowDateDivider } from "../utils/messageDates";
 import { captureCirclePoster } from "../utils/circlePoster";
+import { captureVideoPoster } from "../utils/videoPoster";
+import { getVideoMetaCache, probeVideoMeta, setVideoMetaCache } from "../utils/videoMetaCache";
 import { playMessageSound } from "../utils/messageSounds";
 import {
   clearComposeDraft,
@@ -96,6 +101,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
   const [emojiPanelOpen, setEmojiPanelOpen] = useState(false);
   const [stickerPackViewId, setStickerPackViewId] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
+  const [videoLightbox, setVideoLightbox] = useState<string | null>(null);
   const [fileDragActive, setFileDragActive] = useState(false);
   const [contactInfoOpen, setContactInfoOpen] = useState(false);
   const [deleteChatConfirmOpen, setDeleteChatConfirmOpen] = useState(false);
@@ -1181,6 +1187,24 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     };
   }, [messagesReady, chatId]);
 
+  useEffect(() => {
+    for (const m of messages) {
+      if ((m.messageType ?? "text") !== "video" || !m.attachmentUrl) continue;
+      const url = mediaUrl(m.attachmentUrl);
+      const meta = m.attachmentMetadata;
+      if (meta?.width && meta?.height) {
+        setVideoMetaCache(url, {
+          width: meta.width,
+          height: meta.height,
+          duration: meta.duration,
+        });
+        continue;
+      }
+      if (getVideoMetaCache(url)) continue;
+      void probeVideoMeta(url);
+    }
+  }, [messages]);
+
   function dispatchMessage(
     opts: {
       content: string;
@@ -1435,8 +1459,9 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     const isGif = await isGifFileDeep(file);
     const isImage = file.type.startsWith("image/") && !isGif;
     const toUpload = isImage ? await compressImage(file) : file;
-    const dims = isImage || isGif ? await getImageDimensions(file) : null;
-    const type = isGif || isImage ? "image" : file.type.startsWith("video/") ? "video" : "file";
+    const isVideo = file.type.startsWith("video/");
+    const dims = isImage || isGif ? await getImageDimensions(file) : isVideo ? await getVideoDimensions(file) : null;
+    const type = isGif || isImage ? "image" : isVideo ? "video" : "file";
     const fallback = isGif ? "GIF" : type === "image" ? "Фотография" : type === "video" ? "Видео" : file.name;
     const content = withReply ? resolveMediaCaption(caption, fallback) : fallback;
     const previewUrl =
@@ -1446,6 +1471,8 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
         ? { fileName: file.name || "animation.gif", mimeType: "image/gif", size: file.size, ...(dims ?? {}) }
         : type === "image"
         ? { fileName: "Фотография", mimeType: toUpload.type, size: toUpload.size, ...(dims ?? {}) }
+        : type === "video"
+        ? { fileName: file.name, mimeType: file.type, size: file.size, ...(dims ?? {}) }
         : { fileName: file.name, mimeType: file.type, size: file.size };
 
     const pendingId = insertOptimisticMessage(
@@ -1459,16 +1486,47 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
       withReply
     );
 
+    let posterBlobUrl: string | undefined;
+    if (isVideo) {
+      const posterBlob = await captureVideoPoster(file);
+      if (posterBlob) {
+        posterBlobUrl = URL.createObjectURL(posterBlob);
+        updateOptimisticMessage(pendingId, {
+          attachmentMetadata: { ...baseMeta, posterUrl: posterBlobUrl },
+        });
+      }
+    }
+
     try {
+      let posterPath: string | undefined;
+      if (isVideo && posterBlobUrl) {
+        const posterBlob = await fetch(posterBlobUrl).then((r) => r.blob());
+        const posterFile = new File([posterBlob], "video-poster.jpg", { type: "image/jpeg" });
+        const uploadedPoster = await uploadFileWithProgress(posterFile, (pct) => {
+          updateOptimisticMessage(pendingId, { uploadProgress: Math.round(pct * 0.12) });
+        });
+        posterPath = uploadedPoster.path;
+      }
+
       const { path, fileName, mimeType, size } = await uploadFileWithProgress(toUpload, (pct) => {
-        updateOptimisticMessage(pendingId, { uploadProgress: pct });
+        const base = posterPath ? 12 : 0;
+        updateOptimisticMessage(pendingId, { uploadProgress: base + Math.round(pct * (1 - base / 100)) });
       });
       if (previewUrl) URL.revokeObjectURL(previewUrl);
+      if (posterBlobUrl) URL.revokeObjectURL(posterBlobUrl);
       const finalMeta: AttachmentMetadata =
         isGif
           ? { fileName: file.name || "animation.gif", mimeType: "image/gif", size: file.size, ...(dims ?? {}) }
           : type === "image"
           ? { fileName: "Фотография", mimeType: toUpload.type, size: toUpload.size, ...(dims ?? {}) }
+          : type === "video"
+          ? {
+              fileName: file.name ?? fileName,
+              mimeType: mimeType ?? file.type,
+              size: size ?? file.size,
+              ...(dims ?? {}),
+              ...(posterPath ? { posterUrl: posterPath } : {}),
+            }
           : { fileName: file.name ?? fileName, mimeType: mimeType ?? file.type, size: size ?? file.size };
 
       dispatchMessage(
@@ -1483,6 +1541,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
       );
     } catch (err) {
       console.error(err);
+      if (posterBlobUrl) URL.revokeObjectURL(posterBlobUrl);
       updateOptimisticMessage(pendingId, { sendFailed: true, uploadProgress: undefined });
     }
   }
@@ -2337,13 +2396,13 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
               )}
               {(m.messageType ?? "text") === "video" && m.attachmentUrl && (
                 <div className="message-media-wrap">
-                  <video
+                  <MessageVideoPlayer
                     src={mediaUrl(m.attachmentUrl)}
-                    poster={m.attachmentMetadata?.posterUrl ? mediaUrl(m.attachmentMetadata.posterUrl) : undefined}
-                    controls
-                    preload="metadata"
-                    playsInline
-                    className="message-video"
+                    poster={m.attachmentMetadata?.posterUrl ? mediaUrl(m.attachmentMetadata.posterUrl) : null}
+                    width={m.attachmentMetadata?.width}
+                    height={m.attachmentMetadata?.height}
+                    duration={m.attachmentMetadata?.duration}
+                    onExpand={() => setVideoLightbox(mediaUrl(m.attachmentUrl!))}
                   />
                   {isPending && uploadPct != null && uploadPct >= 0 && (
                     <div className="message-pending-progress">{uploadPct}%</div>
@@ -2591,6 +2650,13 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
           initialIndex={lightbox.index}
           onClose={() => setLightbox(null)}
           title="Фото"
+        />
+      )}
+      {videoLightbox && (
+        <MediaLightbox
+          items={[{ url: videoLightbox, kind: "video" }]}
+          onClose={() => setVideoLightbox(null)}
+          title="Видео"
         />
       )}
 

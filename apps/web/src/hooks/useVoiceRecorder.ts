@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { isSafariBrowser, pickVoiceMime } from "../utils/mediaMime";
+import { finalizeRecordedDuration, probeBlobDuration } from "../utils/mediaPlaybackDuration";
 
 const BAR_COUNT = 14;
 const LEVEL_UPDATE_MS = 80;
@@ -188,7 +189,7 @@ export function useVoiceRecorder() {
         : 1;
       const mime = recorder.mimeType || "audio/webm";
       let finalized = false;
-      const finish = () => {
+      const finish = async () => {
         if (finalized) return;
         finalized = true;
         stopAnalyser();
@@ -198,7 +199,8 @@ export function useVoiceRecorder() {
         mediaRecorderRef.current = null;
         startTimeRef.current = null;
         const blob = new Blob(chunksRef.current, { type: mime });
-        resolve({ blob, duration: wallDuration });
+        const probed = await probeBlobDuration(blob, "audio");
+        resolve({ blob, duration: finalizeRecordedDuration(wallDuration, probed) });
       };
       const finishWhenReady = (attempt = 0) => {
         const size = chunksRef.current.reduce((n, c) => n + c.size, 0);
