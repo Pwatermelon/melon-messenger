@@ -2,7 +2,7 @@ import { getApiUrl } from "../config";
 
 /** Strip signed URLs back to `/uploads/{filename}` before saving to profile. */
 export function canonicalStoragePath(path: string): string {
-  const trimmed = path.trim();
+  const trimmed = path.trim().split("?")[0]!.split("#")[0]!;
   if (!trimmed) return trimmed;
   const uploads = trimmed.match(/\/uploads\/([^/?#]+)/);
   if (uploads?.[1]) return `/uploads/${uploads[1]}`;
@@ -17,31 +17,33 @@ export function canonicalStoragePath(path: string): string {
   return trimmed;
 }
 
-function isUnsignedUploadPath(path: string): boolean {
-  return /\/uploads\/[^/?#]+/.test(path) && !path.includes("access=");
+export function isCanonicalStoragePath(path: string | null | undefined): boolean {
+  if (!path) return false;
+  const c = canonicalStoragePath(path);
+  return c.startsWith("/uploads/");
 }
 
-/** Turn API-signed or storage path into a browser-loadable URL */
+function filenameFromMediaPath(path: string): string | null {
+  const canonical = canonicalStoragePath(path);
+  const m = canonical.match(/^\/uploads\/([^/?#]+)$/);
+  return m?.[1] ?? null;
+}
+
+/** Публичный URL медиа для in-app fetch (без секретов в query — доступ только с Bearer + grant в чате). */
 export function mediaUrl(path: string | null | undefined): string {
   if (!path) return "";
   if (path.startsWith("blob:")) return path;
-  if (path.startsWith("http://") || path.startsWith("https://")) {
-    if (isUnsignedUploadPath(path)) return "";
-    return path;
-  }
-  if (path.includes("access=")) {
-    if (path.startsWith("/api/")) {
-      const origin = typeof window !== "undefined" ? window.location.origin : "";
-      return `${origin}${path}`;
+
+  const filename = filenameFromMediaPath(path);
+  if (!filename) {
+    if (path.startsWith("http://") || path.startsWith("https://")) {
+      const fromHttp = filenameFromMediaPath(path);
+      if (fromHttp) return `${getApiUrl()}/media/${encodeURIComponent(fromHttp)}`;
+      return path;
     }
-    if (path.startsWith("/media/")) return `${getApiUrl()}${path}`;
-    return path;
-  }
-  if (path.startsWith("/uploads/") || path.startsWith("uploads/")) {
     return "";
   }
-  if (path.startsWith("/media/")) return `${getApiUrl()}${path}`;
-  return "";
+  return `${getApiUrl()}/media/${encodeURIComponent(filename)}`;
 }
 
 /** Media URL that suggests download with the original filename (server sends Content-Disposition). */

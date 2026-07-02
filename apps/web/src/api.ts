@@ -2,8 +2,10 @@ import { MAX_UPLOAD_BYTES, uploadTooLargeMessage } from "@melon/shared";
 import type { AttachmentMetadata, Chat, ChatFolder, ChatSharedCategory, ChatSharedItem, MessageType, StickerItem, StickerPackDetail, StickerPackSummary, User } from "@melon/shared";
 import { getApiUrl } from "./config";
 
+import { getAuthToken } from "./utils/authToken";
+
 function getToken(): string | null {
-  return localStorage.getItem("wm_token") ?? localStorage.getItem("melon_token");
+  return getAuthToken();
 }
 
 export async function getChats(): Promise<

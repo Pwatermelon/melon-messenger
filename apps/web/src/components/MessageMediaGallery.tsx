@@ -8,6 +8,7 @@ import {
 } from "../utils/messageAttachments";
 import { displayMessageMediaSize } from "../utils/messageMediaSize";
 import { MessageVideoPlayer } from "./MessageVideoPlayer";
+import { MediaImage } from "./MediaImage";
 import { IconPlay } from "./Icons";
 import type { MediaLightboxItem } from "./MediaLightbox";
 
@@ -44,11 +45,7 @@ function ImageTile({
   priority?: boolean;
   onOpen: (index: number) => void;
 }) {
-  const src = mediaUrl(attachment.url);
   const isGif = isGifAttachment(attachment);
-  const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(src.startsWith("blob:"));
-
   const w = attachment.width;
   const h = attachment.height;
   let reserveStyle: CSSProperties | undefined;
@@ -58,14 +55,6 @@ function ImageTile({
   }
   const reserved = Boolean(reserveStyle);
 
-  if (failed) {
-    return (
-      <div className="message-media-item message-media-item--failed" aria-hidden>
-        <span className="message-media-failed-label">Не удалось загрузить</span>
-      </div>
-    );
-  }
-
   return (
     <button
       type="button"
@@ -73,15 +62,12 @@ function ImageTile({
       style={reserveStyle}
       onClick={() => onOpen(index)}
     >
-      {!loaded && <span className="message-media-skeleton" aria-hidden />}
-      <img
-        src={src}
+      <MediaImage
+        src={attachment.url}
         alt=""
-        className={`message-media-img${isGif ? " message-media-img-gif" : ""}${loaded ? " is-loaded" : ""}`}
-        loading={priority ? "eager" : "lazy"}
-        decoding="async"
-        onLoad={() => setLoaded(true)}
-        onError={() => setFailed(true)}
+        className={`message-media-img${isGif ? " message-media-img-gif" : ""}`}
+        eager={priority}
+        placeholder={<span className="message-media-skeleton" aria-hidden />}
       />
       {isGif && <span className="message-media-gif-badge">GIF</span>}
     </button>
@@ -114,7 +100,7 @@ function VideoTile({
     );
   }
 
-  const posterSrc = attachment.posterUrl ? mediaUrl(attachment.posterUrl) : mediaUrl(attachment.url);
+  const posterSrc = attachment.posterUrl ? attachment.posterUrl : attachment.url;
   const [failed, setFailed] = useState(false);
 
   if (failed) {
@@ -131,12 +117,10 @@ function VideoTile({
       className={`message-media-item message-media-item--${count} message-media-item--video`}
       onClick={() => onOpen(index)}
     >
-      <img
+      <MediaImage
         src={posterSrc}
         alt=""
-        className="message-media-img message-media-video-poster is-loaded"
-        loading="lazy"
-        decoding="async"
+        className="message-media-img message-media-video-poster"
         onError={() => setFailed(true)}
       />
       <span className="message-media-play-badge" aria-hidden>

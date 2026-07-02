@@ -149,10 +149,9 @@ export async function signMediaPath(path: string | null | undefined, userId: str
   if (!filename) return null;
   const ok = await canAccessMedia(userId, filename);
   if (!ok) return null;
-  const access = await signMediaAccess(userId, filename);
   const base = (process.env.API_PUBLIC_URL ?? "").replace(/\/$/, "") || "";
   const prefix = base || "";
-  return `${prefix}/media/${encodeURIComponent(filename)}?access=${access}`;
+  return `${prefix}/media/${encodeURIComponent(filename)}`;
 }
 
 export function normalizeAttachmentMetadataForStorage(

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
 import type { User } from "@melon/shared";
 import { getApiUrl } from "../config";
+import { syncAuthTokenToServiceWorker } from "../utils/authToken";
 
 type AuthContextValue = {
   user: User | null;
@@ -73,6 +74,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
+  }, [token]);
+
+  useEffect(() => {
+    syncAuthTokenToServiceWorker(token);
   }, [token]);
 
   const loginWithYandex = useCallback(() => {

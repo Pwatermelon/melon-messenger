@@ -1,5 +1,6 @@
 import { MAX_BLOB_CACHE_BYTES, MAX_BLOB_CACHE_ITEM_BYTES } from "@melon/shared";
 import { canonicalStoragePath, mediaUrl } from "./mediaUrl";
+import { fetchAuthenticatedMedia } from "./mediaFetch";
 
 const blobCache = new Map<string, string>();
 const blobSizes = new Map<string, number>();
@@ -64,7 +65,7 @@ export async function resolveMediaBlobUrl(path: string): Promise<string> {
   const pending = inflight.get(key);
   if (pending) return pending;
 
-  const task = fetch(directUrl, { credentials: "include" })
+  const task = fetchAuthenticatedMedia(directUrl)
     .then((res) => {
       if (!res.ok) throw new Error(`media ${res.status}`);
       return res.blob();
@@ -81,7 +82,7 @@ export async function resolveMediaBlobUrl(path: string): Promise<string> {
     })
     .catch(() => {
       inflight.delete(key);
-      return directUrl;
+      return "";
     });
 
   inflight.set(key, task);

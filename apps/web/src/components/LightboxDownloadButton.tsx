@@ -1,4 +1,5 @@
 import { IconDownload } from "./Icons";
+import { downloadMediaFile } from "../utils/mediaFetch";
 
 type Props = {
   href: string;
@@ -8,15 +9,17 @@ type Props = {
 export function LightboxDownloadButton({ href, fileName }: Props) {
   if (!href) return null;
   return (
-    <a
-      href={href}
-      download={fileName ?? undefined}
+    <button
+      type="button"
       className="lightbox-download-btn"
-      onClick={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        void downloadMediaFile(href, fileName).catch((err) => console.error(err));
+      }}
       aria-label="Скачать"
       title="Скачать"
     >
       <IconDownload size={20} />
-    </a>
+    </button>
   );
 }

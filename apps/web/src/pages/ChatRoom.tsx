@@ -37,7 +37,8 @@ import { mediaMessageCaption, resolveMediaPartContent } from "../utils/mediaCapt
 import { formatPeerActivity, type PeerActivityKind } from "../utils/chatActivity";
 import type { MessageItem } from "../api";
 import { getWsUrl } from "../config";
-import { mediaUrl, mediaDownloadUrl } from "../utils/mediaUrl";
+import { mediaUrl, isCanonicalStoragePath } from "../utils/mediaUrl";
+import { downloadMediaFile } from "../utils/mediaFetch";
 import { UserAvatar } from "../components/UserAvatar";
 import { buildReplyTo } from "../utils/messagePreview";
 import { formatMessageText } from "../utils/formatMessageText";
@@ -55,7 +56,7 @@ import {
   scrollListToMessage,
   compareMessageId,
 } from "../utils/chatUnread";
-import { getMessageReaders, isMessageReadByAnyPeer, isMessageReadByCursor, mergeReadCursor } from "../utils/messageRead";
+import { getMessageReaders, isMessageReadByCursor, mergeReadCursor } from "../utils/messageRead";
 import { formatMessageDateLabel, shouldShowDateDivider } from "../utils/messageDates";
 import { captureCirclePoster } from "../utils/circlePoster";
 import { captureVideoPoster } from "../utils/videoPoster";
@@ -219,13 +220,15 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     const userKey = user.id.toLowerCase();
     const listEl = listRef.current;
 
-    // Внизу чата — прочитано до последнего сообщения (включая своё: TimeUUID курсора покрывает всё до него).
+    // Внизу чата — прочитано до последнего входящего (своё не двигает курсор).
     if (stickToBottomRef.current) {
       for (let i = list.length - 1; i >= 0; i--) {
         const m = list[i]!;
         if ((m.messageType ?? "text") === "system") continue;
+        if (m.senderId.toLowerCase() === userKey) continue;
         return m.id;
       }
+      return null;
     }
 
     // Иначе — самое новое видимое входящее.
@@ -406,7 +409,9 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     return () => window.removeEventListener("keydown", onKey);
   }, [selectionMode]);
 
-  const otherMember = chat?.type === "dm" ? chat.members.find((m) => m.id !== user?.id) : null;
+  const otherMember = chat?.type === "dm"
+    ? chat.members.find((m) => m.id.toLowerCase() !== user?.id?.toLowerCase())
+    : null;
 
   function getPeerReaders(m: Message) {
     if (!user?.id || m.senderId.toLowerCase() !== user.id.toLowerCase()) return [];
@@ -415,13 +420,32 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
 
   function isMessageReadByPeers(m: Message): boolean {
     if (!user?.id || m.senderId.toLowerCase() !== user.id.toLowerCase()) return false;
+    if (m.clientPending || m.id.startsWith("pending-")) return false;
+
+    const msgAt = m.createdAt ? Date.parse(m.createdAt) : NaN;
+
+    const peerReadMessage = (peerId: string): boolean => {
+      const peerKey = peerId.trim().toLowerCase();
+      if (!peerKey || peerKey === user.id.toLowerCase()) return false;
+      const peerCursor = readCursors[peerKey] ?? readCursors[peerId];
+      if (!isMessageReadByCursor(m.id, peerCursor)) return false;
+      const cursorTime = readCursorTimesRef.current[peerKey];
+      if (cursorTime && Number.isFinite(msgAt)) {
+        const curAt = Date.parse(cursorTime);
+        if (Number.isFinite(curAt) && curAt < msgAt) return false;
+      }
+      return true;
+    };
+
     if (chat?.type === "dm") {
-      const peerId = otherMember?.id ?? Object.keys(readCursors).find((k) => k !== user.id.toLowerCase());
+      const peerId = otherMember?.id;
       if (!peerId) return false;
-      const peerCursor = readCursors[peerId.toLowerCase()] ?? readCursors[peerId];
-      return isMessageReadByCursor(m.id, peerCursor);
+      return peerReadMessage(peerId);
     }
-    return isMessageReadByAnyPeer(m.id, m.senderId, membersForReadReceipts(), readCursors);
+
+    return membersForReadReceipts()
+      .filter((mem) => mem.id.toLowerCase() !== user.id.toLowerCase())
+      .some((mem) => peerReadMessage(mem.id));
   }
 
   const peerActivityLabel = useMemo(() => {
@@ -668,7 +692,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
           return next;
         };
         const paths = collectMessageMediaPaths(incoming);
-        const needsSign = paths.some((p) => p && !p.includes("access="));
+        const needsSign = paths.some((p) => p && isCanonicalStoragePath(p));
         if (needsSign && paths.length) {
           void signMediaPaths(paths).then((signed) => {
             const signedMsg = applySignedPathsToMessage(incoming, signed);
@@ -1004,20 +1028,30 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
       }
       const id = chatId;
       const list = messagesRef.current;
-      const lastMsg = list[list.length - 1];
-      if (!id || !lastMsg) return;
+      if (!id || !list.length) return;
+
+      const userKey = user?.id?.toLowerCase();
+      let lastIncoming: string | null = null;
+      for (let i = list.length - 1; i >= 0; i--) {
+        const m = list[i]!;
+        if ((m.messageType ?? "text") === "system") continue;
+        if (userKey && m.senderId.toLowerCase() === userKey) continue;
+        lastIncoming = m.id;
+        break;
+      }
+      if (!lastIncoming) return;
 
       const lastRead = lastMarkedReadRef.current;
       const atBottom = stickToBottomRef.current;
       const alreadyMarked =
         lastRead &&
         lastMarkedReadChatIdRef.current === id &&
-        compareMessageId(lastRead, lastMsg.id) >= 0;
+        compareMessageId(lastRead, lastIncoming) >= 0;
 
       if (!atBottom && !alreadyMarked) return;
       if (!canMarkChatReadNow()) return;
 
-      const targetId = alreadyMarked ? lastRead! : lastMsg.id;
+      const targetId = alreadyMarked ? lastRead! : lastIncoming;
       const apiId = canonicalMessageId(targetId);
       void markChatReadApi(id, apiId)
         .then(() => {
@@ -2146,14 +2180,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     setMessageMenu(null);
     const url = m.attachmentUrl;
     if (!url) return;
-    const a = document.createElement("a");
-    a.href = mediaDownloadUrl(url, m.attachmentMetadata?.fileName);
-    a.download = m.attachmentMetadata?.fileName ?? "";
-    a.rel = "noopener";
-    a.target = "_blank";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    void downloadMediaFile(url, m.attachmentMetadata?.fileName).catch((err) => console.error(err));
   }
 
   async function handleReaction(m: Message, emoji: string) {
@@ -2201,7 +2228,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
         let msg = (await forwardMessage(targetChatId, chatId, target.id)) as Message;
         if (targetChatId === chatId) {
           const paths = collectMessageMediaPaths(msg);
-          if (paths.length && paths.some((p) => p && !p.includes("access="))) {
+          if (paths.length && paths.some((p) => p && isCanonicalStoragePath(p))) {
             const signed = await signMediaPaths(paths);
             msg = applySignedPathsToMessage(msg, signed);
           }
@@ -2472,6 +2499,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
             }
             const naked = mt === "circle" || mt === "voice" || mt === "sticker";
             const hasMediaBubble = mt === "image" || mt === "video";
+            const mediaCaption = hasMediaBubble ? mediaMessageCaption(m) : null;
             const own = user?.id != null && m.senderId.toLowerCase() === user.id.toLowerCase();
             const isPending = Boolean(m.clientPending);
             const uploadPct = m.uploadProgress;
@@ -2576,56 +2604,74 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
                 <p className="message-content">{formatMessageText(displayContent(m))}</p>
               )}
               {(m.messageType ?? "text") === "image" && m.attachmentUrl && (
-                <div className="message-media-wrap">
-                  <MessageMediaGallery
-                    message={m}
-                    priority={msgIndex >= messages.length - 16}
-                    onOpenLightbox={(items, index) => setMediaLightbox({ items, index })}
-                  />
-                  {isPending && uploadPct != null && uploadPct >= 0 && (
-                    <div className="message-pending-progress">{uploadPct}%</div>
-                  )}
+                <div className="message-media-block">
+                  <div className="message-media-wrap">
+                    <MessageMediaGallery
+                      message={m}
+                      priority={msgIndex >= messages.length - 16}
+                      onOpenLightbox={(items, index) => setMediaLightbox({ items, index })}
+                    />
+                    {isPending && uploadPct != null && uploadPct >= 0 && (
+                      <div className="message-pending-progress">{uploadPct}%</div>
+                    )}
+                  </div>
+                  {mediaCaption ? (
+                    <p className="message-content message-media-caption">{formatMessageText(mediaCaption)}</p>
+                  ) : null}
                 </div>
               )}
-              {(m.messageType ?? "text") === "file" && m.attachmentUrl && (
-                <a
-                  href={mediaDownloadUrl(m.attachmentUrl, m.attachmentMetadata?.fileName)}
-                  download={m.attachmentMetadata?.fileName ?? undefined}
-                  className="message-file"
-                >
-                  <IconAttach size={16} className="message-file-icon" aria-hidden />
-                  {m.attachmentMetadata?.fileName ?? "File"}
-                </a>
-              )}
+              {(m.messageType ?? "text") === "file" && m.attachmentUrl && (() => {
+                const fileCaption = mediaMessageCaption(m);
+                return (
+                  <>
+                    <button
+                      type="button"
+                      className="message-file"
+                      onClick={() => void downloadMediaFile(m.attachmentUrl!, m.attachmentMetadata?.fileName).catch(console.error)}
+                    >
+                      <IconAttach size={16} className="message-file-icon" aria-hidden />
+                      {m.attachmentMetadata?.fileName ?? "File"}
+                    </button>
+                    {fileCaption ? (
+                      <p className="message-content message-media-caption">{formatMessageText(fileCaption)}</p>
+                    ) : null}
+                  </>
+                );
+              })()}
               {(m.messageType ?? "text") === "video" && m.attachmentUrl && (
-                <div className="message-media-wrap">
-                  <MessageVideoPlayer
-                    src={mediaUrl(m.attachmentUrl)}
-                    poster={m.attachmentMetadata?.posterUrl ? mediaUrl(m.attachmentMetadata.posterUrl) : null}
-                    width={m.attachmentMetadata?.width}
-                    height={m.attachmentMetadata?.height}
-                    duration={m.attachmentMetadata?.duration}
-                    onExpand={() =>
-                      setMediaLightbox({
-                        items: [
-                          {
-                            url: mediaUrl(m.attachmentUrl!),
-                            kind: "video",
-                            poster: m.attachmentMetadata?.posterUrl ? mediaUrl(m.attachmentMetadata.posterUrl) : null,
-                            width: m.attachmentMetadata?.width,
-                            height: m.attachmentMetadata?.height,
-                            duration: m.attachmentMetadata?.duration,
-                            downloadPath: m.attachmentUrl,
-                            fileName: m.attachmentMetadata?.fileName,
-                          },
-                        ],
-                        index: 0,
-                      })
-                    }
-                  />
-                  {isPending && uploadPct != null && uploadPct >= 0 && (
-                    <div className="message-pending-progress">{uploadPct}%</div>
-                  )}
+                <div className="message-media-block">
+                  <div className="message-media-wrap">
+                    <MessageVideoPlayer
+                      src={mediaUrl(m.attachmentUrl)}
+                      poster={m.attachmentMetadata?.posterUrl ? mediaUrl(m.attachmentMetadata.posterUrl) : null}
+                      width={m.attachmentMetadata?.width}
+                      height={m.attachmentMetadata?.height}
+                      duration={m.attachmentMetadata?.duration}
+                      onExpand={() =>
+                        setMediaLightbox({
+                          items: [
+                            {
+                              url: mediaUrl(m.attachmentUrl!),
+                              kind: "video",
+                              poster: m.attachmentMetadata?.posterUrl ? mediaUrl(m.attachmentMetadata.posterUrl) : null,
+                              width: m.attachmentMetadata?.width,
+                              height: m.attachmentMetadata?.height,
+                              duration: m.attachmentMetadata?.duration,
+                              downloadPath: m.attachmentUrl,
+                              fileName: m.attachmentMetadata?.fileName,
+                            },
+                          ],
+                          index: 0,
+                        })
+                      }
+                    />
+                    {isPending && uploadPct != null && uploadPct >= 0 && (
+                      <div className="message-pending-progress">{uploadPct}%</div>
+                    )}
+                  </div>
+                  {mediaCaption ? (
+                    <p className="message-content message-media-caption">{formatMessageText(mediaCaption)}</p>
+                  ) : null}
                 </div>
               )}
               {(m.messageType ?? "text") === "location" && (() => {
@@ -2658,12 +2704,6 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
                   <img src={mediaUrl(m.attachmentUrl)} alt={m.attachmentMetadata?.emoji ?? "Стикер"} className="message-sticker-img" />
                 </button>
               )}
-              {(() => {
-                const mt = m.messageType ?? "text";
-                if (mt !== "image" && mt !== "video" && mt !== "file") return null;
-                const cap = mediaMessageCaption(m);
-                return cap ? <p className="message-content message-media-caption">{formatMessageText(cap)}</p> : null;
-              })()}
               {(m.reactions?.length ?? 0) > 0 && (
                 <MessageReactions
                   reactions={m.reactions ?? []}

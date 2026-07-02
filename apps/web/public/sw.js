@@ -1,8 +1,8 @@
-const CACHE = "wm-static-v4";
-const MEDIA_CACHE = "wm-media-v1";
-/** Макс. размер одного файла в SW-кэше медиа (крупные видео не кэшируем) */
-const MEDIA_CACHE_MAX_ITEM_BYTES = 5 * 1024 * 1024;
+const CACHE = "wm-static-v6";
 const OFFLINE_URLS = ["/", "/index.html"];
+
+/** JWT из приложения — без него /media/* не отдаётся (см. API). */
+let authToken = null;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -15,9 +15,7 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) =>
-        Promise.all(keys.filter((k) => k !== CACHE && k !== MEDIA_CACHE).map((k) => caches.delete(k)))
-      )
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -26,30 +24,27 @@ function isMediaRequest(url) {
   return /\/media\/[^/?#]+/.test(url.pathname);
 }
 
-function mediaCacheKey(url) {
-  const m = url.pathname.match(/\/media\/([^/?#]+)/);
-  return m ? `/media/${m[1]}` : url.pathname;
-}
-
-async function trimMediaCache(cache) {
-  const keys = await cache.keys();
-  const maxEntries = 400;
-  if (keys.length <= maxEntries) return;
-  const excess = keys.length - maxEntries;
-  await Promise.all(keys.slice(0, excess).map((k) => cache.delete(k)));
-}
-
-function shouldCacheMediaResponse(res) {
-  const len = Number(res.headers.get("content-length") || 0);
-  if (len > MEDIA_CACHE_MAX_ITEM_BYTES) return false;
-  const type = (res.headers.get("content-type") || "").toLowerCase();
-  if (type.startsWith("video/")) return false;
-  return true;
+function mediaFetchInit(request) {
+  const headers = new Headers(request.headers);
+  if (authToken && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${authToken}`);
+  }
+  return {
+    method: request.method,
+    headers,
+    credentials: "same-origin",
+    mode: request.mode,
+    redirect: request.redirect,
+  };
 }
 
 self.addEventListener("message", (event) => {
   if (event.data === "SKIP_WAITING" || event.data?.type === "SKIP_WAITING") {
     self.skipWaiting();
+    return;
+  }
+  if (event.data?.type === "AUTH_TOKEN") {
+    authToken = typeof event.data.token === "string" ? event.data.token : null;
   }
 });
 
@@ -63,28 +58,11 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.pathname.startsWith("/api") || url.pathname.startsWith("/ws")) {
     if (isMediaRequest(url)) {
-      const key = mediaCacheKey(url);
-      event.respondWith(
-        caches.open(MEDIA_CACHE).then(async (cache) => {
-          const cached = await cache.match(key);
-          const network = fetch(request)
-            .then((res) => {
-              if (res.ok && shouldCacheMediaResponse(res)) {
-                cache.put(key, res.clone()).then(() => trimMediaCache(cache));
-              }
-              return res;
-            })
-            .catch(() => cached);
-          return cached ?? network;
-        })
-      );
+      event.respondWith(fetch(request.url, mediaFetchInit(request)));
     }
     return;
   }
 
-  // HTML/навигация: всегда сеть в первую очередь, кэш — только офлайн-запас.
-  // Это гарантирует, что после деплоя клиент получит свежий index.html
-  // (со ссылками на новые хэшированные бандлы), а не залипнет на старой версии.
   if (isNavigationRequest(request)) {
     event.respondWith(
       fetch(request)

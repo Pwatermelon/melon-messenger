@@ -7,7 +7,8 @@ import { VoiceMessagePlayer } from "./VoiceMessagePlayer";
 import AddGroupMemberModal from "./AddGroupMemberModal";
 import { IconBell, IconBellOff, IconFile, IconPlus, IconUser } from "./Icons";
 import { getChatShared, updateChatNotifications } from "../api";
-import { mediaDownloadUrl, mediaUrl } from "../utils/mediaUrl";
+import { mediaUrl } from "../utils/mediaUrl";
+import { downloadMediaFile } from "../utils/mediaFetch";
 
 type TabId = "participants" | ChatSharedCategory;
 
@@ -341,14 +342,22 @@ export default function ChatInfoModal({
         <ul className="chat-info-file-list">
           {items.map((item) => {
             const name = item.attachmentMetadata?.fileName ?? "Файл";
-            const href = item.attachmentUrl ? mediaDownloadUrl(item.attachmentUrl, name) : "#";
+            const url = item.attachmentUrl;
             return (
               <li key={item.messageId} className="chat-info-file-item">
-                <a href={href} className="chat-info-file-link" download target="_blank" rel="noopener noreferrer">
+                <button
+                  type="button"
+                  className="chat-info-file-link"
+                  disabled={!url}
+                  onClick={() => {
+                    if (!url) return;
+                    void downloadMediaFile(url, name).catch(console.error);
+                  }}
+                >
                   <IconFile size={22} />
                   <span className="chat-info-file-name">{name}</span>
                   <span className="chat-info-file-date">{formatSharedDate(item.createdAt)}</span>
-                </a>
+                </button>
               </li>
             );
           })}

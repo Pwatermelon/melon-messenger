@@ -5,12 +5,7 @@ import { authPlugin, requireAuth } from "../auth";
 import { legalRequiredPlugin } from "../plugins/legalRequired";
 import { db, mediaFiles } from "../db";
 import { getMediaStorage } from "../services/mediaStorage";
-import {
-  canAccessMedia,
-  signMediaPath,
-  signMediaPaths,
-  verifyMediaAccessToken,
-} from "../services/mediaAccess";
+import { canAccessMedia, signMediaPath, signMediaPaths } from "../services/mediaAccess";
 import { buildContentDisposition, defaultMediaDisposition, sanitizeOriginalFilename } from "../lib/contentDisposition";
 
 const UPLOAD_MIME: Record<string, string> = {
@@ -47,23 +42,14 @@ export const mediaRoutes = new Elysia({ prefix: "/media" })
     const urls = await signMediaPaths(paths, u.id);
     return { urls };
   })
-  .get("/:filename", async ({ params, query, set }) => {
+  .get("/:filename", async ({ params, query, set, user }) => {
+    const u = requireAuth(set)(user);
     const filename = decodeURIComponent(params.filename).replace(/\.\./g, "").replace(/\//g, "");
     if (!filename) {
       set.status = 400;
       return "Bad request";
     }
-    const access = typeof query.access === "string" ? query.access : "";
-    if (!access) {
-      set.status = 401;
-      return "Unauthorized";
-    }
-    const userId = await verifyMediaAccessToken(access, filename);
-    if (!userId) {
-      set.status = 401;
-      return "Unauthorized";
-    }
-    const allowed = await canAccessMedia(userId, filename);
+    const allowed = await canAccessMedia(u.id, filename);
     if (!allowed) {
       set.status = 403;
       return "Forbidden";
@@ -82,10 +68,11 @@ export const mediaRoutes = new Elysia({ prefix: "/media" })
     const queryName = typeof query.as === "string" ? sanitizeOriginalFilename(query.as) : null;
     const displayName = meta?.originalName || queryName || filename;
     const visibility = meta?.visibility ?? "chat";
-    const maxAge = visibility === "profile" ? 86400 : 3600;
+    const cacheControl = visibility === "profile" ? "private, max-age=86400" : "private, no-store";
     return new Response(file.body, {
       headers: {
-        "Cache-Control": `private, max-age=${maxAge}`,
+        "Cache-Control": cacheControl,
+        Vary: "Authorization",
         "Content-Type": contentType,
         "Content-Disposition": buildContentDisposition(displayName, disposition),
       },
