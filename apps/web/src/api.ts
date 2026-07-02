@@ -855,9 +855,8 @@ export async function uploadFileWithProgress(
           size?: number;
         };
         const path = typeof data.url === "string" ? data.url : "/uploads/";
-        const base = getApiUrl().replace(/\/api\/?$/, "");
         resolve({
-          url: `${base}${path.startsWith("/") ? path : `/${path}`}`,
+          url: path.startsWith("/") ? path : `/${path}`,
           path: path.startsWith("/") ? path : `/${path}`,
           fileName: data.fileName ?? file.name,
           mimeType: data.mimeType ?? file.type,

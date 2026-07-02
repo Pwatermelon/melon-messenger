@@ -38,6 +38,7 @@ import UserSearchSuggestions from "../components/UserSearchSuggestions";
 import { useUserSearchSuggestions } from "../hooks/useUserSearchSuggestions";
 import SupportThankYouModal from "../components/SupportThankYouModal";
 import { usePlatinumBalance } from "../hooks/usePlatinumBalance";
+import { canMarkChatReadNow } from "../utils/canMarkChatReadNow";
 
 function EmptyChat() {
   return (
@@ -376,9 +377,13 @@ export default function ChatLayout() {
             next = next.map((c) =>
               c.id === chatId ? { ...c, unreadCount: (c.unreadCount ?? 0) + 1 } : c
             );
-          } else if (!isSystem && fromOther && isActive) {
+          } else if (!isSystem && fromOther && isActive && canMarkChatReadNow()) {
             next = next.map((c) =>
               c.id === chatId ? { ...c, unreadCount: 0 } : c
+            );
+          } else if (!isSystem && fromOther && isActive) {
+            next = next.map((c) =>
+              c.id === chatId ? { ...c, unreadCount: (c.unreadCount ?? 0) + 1 } : c
             );
           }
           return next;

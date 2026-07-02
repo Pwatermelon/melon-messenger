@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type { StickerPackDetail } from "@melon/shared";
 import { getStickerPack, installStickerPack, uninstallStickerPack } from "../api";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
-import { AppleEmoji } from "./AppleEmoji";
 
 type Props = {
   packId: string;
@@ -64,8 +63,7 @@ export default function StickerPackViewModal({ packId, onClose, onInstalled }: P
             <div className="sticker-pack-view-grid">
               {pack.stickers.map((s) => (
                 <div key={s.id} className="sticker-pack-view-item" title={s.emoji}>
-                  <img src={s.imageUrl} alt={s.emoji} loading="lazy" />
-                  <span className="sticker-pack-view-emoji"><AppleEmoji emoji={s.emoji} size={16} /></span>
+                  <img src={s.imageUrl} alt={s.emoji} loading="lazy" className="sticker-pack-thumb" />
                 </div>
               ))}
             </div>

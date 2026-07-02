@@ -12,7 +12,7 @@ import { LocationPickerModal } from "../components/LocationPickerModal";
 import { LocationPreview } from "../components/LocationPreview";
 import ImageCropModal from "../components/ImageCropModal";
 import ChatInfoModal from "../components/ChatInfoModal";
-import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo, IconBack, IconChevronDown, IconSmile, IconSearch } from "../components/Icons";
+import { IconAttach, IconFile, IconLocation, IconPhoto, IconSend, IconTrash, IconVideo, IconBack, IconChevronDown, IconSmile, IconSearch, IconForward } from "../components/Icons";
 import { AppleEmoji } from "../components/AppleEmoji";
 import { ChatMessageSearchPanel } from "../components/ChatMessageSearchPanel";
 import ComposeEmojiStickerPanel from "../components/ComposeEmojiStickerPanel";
@@ -62,6 +62,9 @@ import { captureCirclePoster } from "../utils/circlePoster";
 import { captureVideoPoster } from "../utils/videoPoster";
 import { getVideoMetaCache, probeVideoMeta, setVideoMetaCache } from "../utils/videoMetaCache";
 import { playMessageSound } from "../utils/messageSounds";
+import { canMarkChatReadNow } from "../utils/canMarkChatReadNow";
+import { createOutgoingSendQueue } from "../utils/outgoingSendQueue";
+import { findPendingMessageForServer } from "../utils/matchPendingMessage";
 import {
   clearComposeDraft,
   getComposeDraft,
@@ -120,7 +123,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
   const fileDragDepthRef = useRef(0);
   const longPressRef = useRef<number | null>(null);
   const [messageMenu, setMessageMenu] = useState<{ message: Message; x: number; y: number } | null>(null);
-  const [forwardTarget, setForwardTarget] = useState<Message | null>(null);
+  const [forwardTargets, setForwardTargets] = useState<Message[] | null>(null);
   const [forwardChats, setForwardChats] = useState<Chat[]>([]);
   const [forwarding, setForwarding] = useState(false);
   const [replyDraft, setReplyDraft] = useState<Message | null>(null);
@@ -131,6 +134,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
   const composeInputRef = useRef<HTMLInputElement>(null);
   const composeDraftKeyRef = useRef<string | null>(null);
   const composeDraftTextRef = useRef("");
+  const outgoingSendQueueRef = useRef(createOutgoingSendQueue());
   const editDraftRef = useRef<Message | null>(null);
   editDraftRef.current = editDraft;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -192,8 +196,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
   }
 
   function canMarkReadNow(): boolean {
-    if (typeof document === "undefined") return true;
-    return document.visibilityState === "visible";
+    return canMarkChatReadNow();
   }
 
   function membersForReadReceipts(): User[] {
@@ -252,6 +255,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     }
 
     const run = async () => {
+      if (!canMarkReadNow()) return;
       try {
         if (ready) send({ type: "mark_read", chatId, messageId: apiId });
         await markChatReadApi(chatId, apiId);
@@ -335,6 +339,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     }
     setReplyDraft(null);
     setEditDraft(null);
+    outgoingSendQueueRef.current = createOutgoingSendQueue();
     setMediaSendDraft((draft) => {
       if (draft) revokeMediaSendItems(draft.items);
       return null;
@@ -591,9 +596,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     (serverMsg: Message) => {
       setMessages((prev) => {
         if (prev.some((m) => m.id === serverMsg.id)) return prev;
-        const idx = prev.findIndex(
-          (m) => m.clientPending && m.senderId.toLowerCase() === serverMsg.senderId.toLowerCase()
-        );
+        const idx = findPendingMessageForServer(prev, serverMsg);
         if (idx < 0) return [...prev, serverMsg];
         revokeMessageBlobUrls(prev[idx]!);
         const next = [...prev];
@@ -603,6 +606,10 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     },
     [revokeMessageBlobUrls]
   );
+
+  const enqueueOutgoingSend = useCallback(<T,>(task: () => Promise<T>): Promise<T> => {
+    return outgoingSendQueueRef.current.enqueue(task);
+  }, []);
 
   const insertOptimisticMessage = useCallback(
     (
@@ -650,7 +657,13 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
             setServerUnreadCount((c) => c + 1);
             suppressAutoReadRef.current = true;
           } else if (fromOther && stickToBottomRef.current) {
-            scheduleMarkChatRead(incoming.id);
+            if (canMarkReadNow()) {
+              scheduleMarkChatRead(incoming.id);
+            } else {
+              serverUnreadCountRef.current += 1;
+              setServerUnreadCount((c) => c + 1);
+              suppressAutoReadRef.current = true;
+            }
           } else if (!fromOther && stickToBottomRef.current) {
             requestAnimationFrame(() => scrollToBottom(false));
           }
@@ -1004,6 +1017,7 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
         compareMessageId(lastRead, lastMsg.id) >= 0;
 
       if (!atBottom && !alreadyMarked) return;
+      if (!canMarkChatReadNow()) return;
 
       const targetId = alreadyMarked ? lastRead! : lastMsg.id;
       const apiId = canonicalMessageId(targetId);
@@ -1062,9 +1076,11 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
       updateScrollAwayState();
       tryMarkReadFromScroll();
     };
-    const onFocus = () => tryMarkReadFromScroll();
+    const onFocus = () => {
+      if (canMarkReadNow()) tryMarkReadFromScroll();
+    };
     const onVisibility = () => {
-      if (document.visibilityState === "visible") tryMarkReadFromScroll();
+      if (canMarkReadNow()) tryMarkReadFromScroll();
     };
     list.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("focus", onFocus);
@@ -1298,12 +1314,19 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     attachmentMetadata?: AttachmentMetadata | null;
   }) {
     if (isDraft && draftPeer) {
-      await sendDraftMessage(opts);
-      setReplyDraft(null);
-      return;
+      return enqueueOutgoingSend(() => sendDraftMessage(opts));
     }
     if (!chatId) return;
-    dispatchMessage(opts);
+    const pendingId = insertOptimisticMessage({
+      content: opts.content,
+      messageType: opts.messageType,
+      attachmentUrl: opts.attachmentUrl,
+      attachmentMetadata: opts.attachmentMetadata,
+      uploadProgress: null,
+    });
+    return enqueueOutgoingSend(async () => {
+      dispatchMessage(opts, true, pendingId);
+    });
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -1621,29 +1644,31 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
 
   async function uploadFiles(files: File[], caption?: string) {
     if (!files.length || !chatId || !ready) return;
-    try {
-      const album: File[] = [];
-      const other: File[] = [];
-      for (const f of files) {
-        if (isAlbumImageFile(f)) album.push(f);
-        else other.push(f);
-      }
-      const albumChunks = chunkFiles(album, MAX_ATTACHMENTS_PER_MESSAGE);
-      let first = true;
-      for (const chunk of albumChunks) {
-        if (chunk.length > 0) {
-          await uploadAlbumFiles(chunk, first, first ? caption : undefined);
+    return enqueueOutgoingSend(async () => {
+      try {
+        const album: File[] = [];
+        const other: File[] = [];
+        for (const f of files) {
+          if (isAlbumImageFile(f)) album.push(f);
+          else other.push(f);
+        }
+        const albumChunks = chunkFiles(album, MAX_ATTACHMENTS_PER_MESSAGE);
+        let first = true;
+        for (const chunk of albumChunks) {
+          if (chunk.length > 0) {
+            await uploadSingleFile(chunk, first, first ? caption : undefined);
+            first = false;
+          }
+        }
+        for (const file of other) {
+          await uploadSingleFile(file, first, first ? caption : undefined);
           first = false;
         }
+        setReplyDraft(null);
+      } catch (err) {
+        console.error(err);
       }
-      for (const file of other) {
-        await uploadSingleFile(file, first, first ? caption : undefined);
-        first = false;
-      }
-      setReplyDraft(null);
-    } catch (err) {
-      console.error(err);
-    }
+    });
   }
 
   async function openMediaSendModal(files: File[]) {
@@ -1768,93 +1793,97 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
   async function handleVoiceSend(blob: Blob, d: number) {
     const minSize = 200;
     if (blob.size < minSize) return;
-    const mime = blob.type || "audio/webm";
-    const ext = extFromBlobType(mime, "audio");
-    const file = new File([blob], `voice.${ext}`, { type: mime });
-    const previewUrl = URL.createObjectURL(blob);
-    const pendingId = insertOptimisticMessage({
-      content: "Голосовое сообщение",
-      messageType: "voice",
-      attachmentUrl: previewUrl,
-      attachmentMetadata: { duration: d, mimeType: mime },
-      uploadProgress: 0,
-    });
-    try {
-      const { path } = await uploadFileWithProgress(file, (pct) => {
-        updateOptimisticMessage(pendingId, { uploadProgress: pct });
+    return enqueueOutgoingSend(async () => {
+      const mime = blob.type || "audio/webm";
+      const ext = extFromBlobType(mime, "audio");
+      const file = new File([blob], `voice.${ext}`, { type: mime });
+      const previewUrl = URL.createObjectURL(blob);
+      const pendingId = insertOptimisticMessage({
+        content: "Голосовое сообщение",
+        messageType: "voice",
+        attachmentUrl: previewUrl,
+        attachmentMetadata: { duration: d, mimeType: mime },
+        uploadProgress: 0,
       });
-      URL.revokeObjectURL(previewUrl);
-      dispatchMessage(
-        {
-          content: "Голосовое сообщение",
-          messageType: "voice",
-          attachmentUrl: path,
-          attachmentMetadata: { duration: d, mimeType: mime },
-        },
-        true,
-        pendingId
-      );
-    } catch (err) {
-      console.error("Voice send failed:", err);
-      updateOptimisticMessage(pendingId, { sendFailed: true, uploadProgress: undefined });
-    }
+      try {
+        const { path } = await uploadFileWithProgress(file, (pct) => {
+          updateOptimisticMessage(pendingId, { uploadProgress: pct });
+        });
+        URL.revokeObjectURL(previewUrl);
+        dispatchMessage(
+          {
+            content: "Голосовое сообщение",
+            messageType: "voice",
+            attachmentUrl: path,
+            attachmentMetadata: { duration: d, mimeType: mime },
+          },
+          true,
+          pendingId
+        );
+      } catch (err) {
+        console.error("Voice send failed:", err);
+        updateOptimisticMessage(pendingId, { sendFailed: true, uploadProgress: undefined });
+      }
+    });
   }
 
   async function handleCircleSend(blob: Blob, d: number) {
     const minSize = 200;
     if (blob.size < minSize) return;
-    const mime = blob.type || "video/webm";
-    const ext = extFromBlobType(mime, "video");
-    const file = new File([blob], `circle.${ext}`, { type: mime });
-    const previewUrl = URL.createObjectURL(blob);
-    let posterBlobUrl: string | undefined;
-    const pendingId = insertOptimisticMessage({
-      content: "Кружок",
-      messageType: "circle",
-      attachmentUrl: previewUrl,
-      attachmentMetadata: { duration: d, mimeType: mime },
-      uploadProgress: 0,
-    });
-    try {
-      const posterBlob = await captureCirclePoster(blob);
-      let posterUrl: string | undefined;
-      if (posterBlob) {
-        posterBlobUrl = URL.createObjectURL(posterBlob);
-        updateOptimisticMessage(pendingId, {
-          attachmentMetadata: { duration: d, mimeType: mime, posterUrl: posterBlobUrl },
-        });
-        const posterFile = new File([posterBlob], "circle-poster.jpg", { type: "image/jpeg" });
-        const uploadedPoster = await uploadFileWithProgress(posterFile, (pct) => {
-          updateOptimisticMessage(pendingId, { uploadProgress: Math.round(pct * 0.15) });
-        });
-        posterUrl = uploadedPoster.path;
-      }
-      const { path } = await uploadFileWithProgress(file, (pct) => {
-        const base = posterBlob ? 15 : 0;
-        updateOptimisticMessage(pendingId, { uploadProgress: base + Math.round(pct * (1 - base / 100)) });
+    return enqueueOutgoingSend(async () => {
+      const mime = blob.type || "video/webm";
+      const ext = extFromBlobType(mime, "video");
+      const file = new File([blob], `circle.${ext}`, { type: mime });
+      const previewUrl = URL.createObjectURL(blob);
+      let posterBlobUrl: string | undefined;
+      const pendingId = insertOptimisticMessage({
+        content: "Кружок",
+        messageType: "circle",
+        attachmentUrl: previewUrl,
+        attachmentMetadata: { duration: d, mimeType: mime },
+        uploadProgress: 0,
       });
-      URL.revokeObjectURL(previewUrl);
-      if (posterBlobUrl) URL.revokeObjectURL(posterBlobUrl);
-      dispatchMessage(
-        {
-          content: "Кружок",
-          messageType: "circle",
-          attachmentUrl: path,
-          attachmentMetadata: {
-            duration: d,
-            mimeType: mime,
-            ...(posterUrl ? { posterUrl } : {}),
+      try {
+        const posterBlob = await captureCirclePoster(blob);
+        let posterUrl: string | undefined;
+        if (posterBlob) {
+          posterBlobUrl = URL.createObjectURL(posterBlob);
+          updateOptimisticMessage(pendingId, {
+            attachmentMetadata: { duration: d, mimeType: mime, posterUrl: posterBlobUrl },
+          });
+          const posterFile = new File([posterBlob], "circle-poster.jpg", { type: "image/jpeg" });
+          const uploadedPoster = await uploadFileWithProgress(posterFile, (pct) => {
+            updateOptimisticMessage(pendingId, { uploadProgress: Math.round(pct * 0.15) });
+          });
+          posterUrl = uploadedPoster.path;
+        }
+        const { path } = await uploadFileWithProgress(file, (pct) => {
+          const base = posterBlob ? 15 : 0;
+          updateOptimisticMessage(pendingId, { uploadProgress: base + Math.round(pct * (1 - base / 100)) });
+        });
+        URL.revokeObjectURL(previewUrl);
+        if (posterBlobUrl) URL.revokeObjectURL(posterBlobUrl);
+        dispatchMessage(
+          {
+            content: "Кружок",
+            messageType: "circle",
+            attachmentUrl: path,
+            attachmentMetadata: {
+              duration: d,
+              mimeType: mime,
+              ...(posterUrl ? { posterUrl } : {}),
+            },
           },
-        },
-        true,
-        pendingId
-      );
-    } catch (err) {
-      console.error("Circle send failed:", err);
-      URL.revokeObjectURL(previewUrl);
-      if (posterBlobUrl) URL.revokeObjectURL(posterBlobUrl);
-      updateOptimisticMessage(pendingId, { sendFailed: true, uploadProgress: undefined });
-    }
+          true,
+          pendingId
+        );
+      } catch (err) {
+        console.error("Circle send failed:", err);
+        URL.revokeObjectURL(previewUrl);
+        if (posterBlobUrl) URL.revokeObjectURL(posterBlobUrl);
+        updateOptimisticMessage(pendingId, { sendFailed: true, uploadProgress: undefined });
+      }
+    });
   }
 
   function displayContent(m: Message | MessageItem): string {
@@ -1995,31 +2024,51 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
     }
   }
 
-  function handleForwardStart(m: Message) {
-    setMessageMenu(null);
-    setForwardTarget(m);
+  function canForwardMessage(m: Message): boolean {
+    if ((m.messageType ?? "text") === "system") return false;
+    if (m.clientPending) return false;
+    return Boolean(chatId);
+  }
+
+  function openForwardModal(targets: Message[]) {
+    const list = targets.filter(canForwardMessage);
+    if (!list.length) return;
+    setForwardTargets(list);
     getChats()
-      .then((list) => setForwardChats(list as Chat[]))
+      .then((chats) => setForwardChats(chats as Chat[]))
       .catch(() => setForwardChats([]));
   }
 
+  function handleForwardStart(m: Message) {
+    setMessageMenu(null);
+    openForwardModal([m]);
+  }
+
+  function handleForwardSelected() {
+    const ordered = messages.filter((m) => selectedIds.has(m.id));
+    openForwardModal(ordered);
+  }
+
   async function handleForwardTo(targetChatId: string) {
-    if (!chatId || !forwardTarget) return;
+    if (!chatId || !forwardTargets?.length) return;
     setForwarding(true);
     try {
-      let msg = (await forwardMessage(targetChatId, chatId, forwardTarget.id)) as Message;
-      if (targetChatId === chatId) {
-        const paths = collectMessageMediaPaths(msg);
-        if (paths.length && paths.some((p) => p && !p.includes("access="))) {
-          const signed = await signMediaPaths(paths);
-          msg = applySignedPathsToMessage(msg, signed);
+      for (const target of forwardTargets) {
+        let msg = (await forwardMessage(targetChatId, chatId, target.id)) as Message;
+        if (targetChatId === chatId) {
+          const paths = collectMessageMediaPaths(msg);
+          if (paths.length && paths.some((p) => p && !p.includes("access="))) {
+            const signed = await signMediaPaths(paths);
+            msg = applySignedPathsToMessage(msg, signed);
+          }
+          setMessages((prev) => {
+            if (prev.some((x) => x.id === msg.id)) return prev;
+            return [...prev, msg];
+          });
         }
-        setMessages((prev) => {
-          if (prev.some((x) => x.id === msg.id)) return prev;
-          return [...prev, msg];
-        });
       }
-      setForwardTarget(null);
+      setForwardTargets(null);
+      setSelectedIds(new Set());
       window.dispatchEvent(new Event("wm:refresh-chats"));
     } catch (err) {
       console.error(err);
@@ -2130,13 +2179,23 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
             <span className="chat-header-select-count">
               {selectedIds.size} {selectedIds.size === 1 ? "сообщение" : selectedIds.size < 5 ? "сообщения" : "сообщений"}
             </span>
-            <button
-              type="button"
-              className="chat-header-select-delete"
-              onClick={() => void handleDeleteSelected()}
-            >
-              <IconTrash size={18} /> Удалить
-            </button>
+            <div className="chat-header-select-actions">
+              <button
+                type="button"
+                className="chat-header-select-forward"
+                disabled={!messages.some((m) => selectedIds.has(m.id) && canForwardMessage(m))}
+                onClick={() => handleForwardSelected()}
+              >
+                <IconForward size={18} /> Переслать
+              </button>
+              <button
+                type="button"
+                className="chat-header-select-delete"
+                onClick={() => void handleDeleteSelected()}
+              >
+                <IconTrash size={18} /> Удалить
+              </button>
+            </div>
           </>
         ) : (
           <>
@@ -2763,14 +2822,15 @@ export default function ChatRoom({ chatId, draftPeer, onDraftChatCreated, onClos
         />
       )}
 
-      {forwardTarget && (
+      {forwardTargets && (
         <ForwardMessageModal
           chats={forwardChats}
           userId={user?.id}
           currentChatId={chatId}
           sending={forwarding}
+          messageCount={forwardTargets.length}
           onSelect={(id) => void handleForwardTo(id)}
-          onClose={() => !forwarding && setForwardTarget(null)}
+          onClose={() => !forwarding && setForwardTargets(null)}
         />
       )}
 

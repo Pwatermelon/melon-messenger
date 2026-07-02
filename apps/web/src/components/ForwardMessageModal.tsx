@@ -7,6 +7,7 @@ type Props = {
   chats: Chat[];
   userId?: string;
   currentChatId?: string;
+  messageCount?: number;
   onSelect: (chatId: string) => void;
   onClose: () => void;
   sending?: boolean;
@@ -43,7 +44,7 @@ function chatAvatar(chat: Chat, userId?: string): string | null {
   return other?.avatarUrl ?? null;
 }
 
-export function ForwardMessageModal({ chats, userId, currentChatId, onSelect, onClose, sending }: Props) {
+export function ForwardMessageModal({ chats, userId, currentChatId, messageCount = 1, onSelect, onClose, sending }: Props) {
   const [query, setQuery] = useState("");
 
   const list = useMemo(() => {
@@ -61,7 +62,11 @@ export function ForwardMessageModal({ chats, userId, currentChatId, onSelect, on
         <button type="button" className="modal-close" onClick={onClose} disabled={sending} aria-label="Закрыть">
           ×
         </button>
-        <h3>Переслать в…</h3>
+        <h3>
+          {messageCount > 1
+            ? `Переслать ${messageCount} ${messageCount < 5 ? "сообщения" : "сообщений"} в…`
+            : "Переслать в…"}
+        </h3>
         <input
           type="search"
           className="forward-modal-search"

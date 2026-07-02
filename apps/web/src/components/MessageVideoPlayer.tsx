@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { IconExpand, IconPause, IconPlay } from "./Icons";
 import { canPlayMediaUrl, mimeFromMediaUrl } from "../utils/mediaMime";
 import { claimMediaPlayback, releaseMediaPlayback } from "../utils/mediaPlayback";
-import { displayMessageMediaSize } from "../utils/messageMediaSize";
+import { displayMessageMediaSize, lightboxViewportMediaSize } from "../utils/messageMediaSize";
 import { resolvePlaybackDuration } from "../utils/mediaPlaybackDuration";
 import {
   getVideoMetaCache,
@@ -69,19 +69,47 @@ export function MessageVideoPlayer({
   const [posterSrc, setPosterSrc] = useState<string | null>(() => poster ?? getVideoPosterCache(src));
   const [showFrame, setShowFrame] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
+  const [buffering, setBuffering] = useState(false);
+  const [bufferedRatio, setBufferedRatio] = useState(0);
+  const [lightboxLayout, setLightboxLayout] = useState<{ width: number; height: number } | null>(null);
+  const wantPlayRef = useRef(false);
 
   const duration = resolvePlaybackDuration(metaDuration, mediaDuration);
   const mime = mimeFromMediaUrl(src, "video");
   const isLightbox = variant === "lightbox";
 
+  const refreshBufferedRatio = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const dur = resolvePlaybackDuration(metaDuration, video.duration) || video.duration;
+    if (!dur || !Number.isFinite(dur) || dur <= 0) {
+      setBufferedRatio(0);
+      return;
+    }
+    const ranges = video.buffered;
+    if (!ranges.length) {
+      setBufferedRatio(0);
+      return;
+    }
+    let end = 0;
+    for (let i = 0; i < ranges.length; i++) {
+      end = Math.max(end, ranges.end(i));
+    }
+    setBufferedRatio(Math.min(1, end / dur));
+  }, [metaDuration]);
+
   const stopPlayback = useCallback(() => {
+    wantPlayRef.current = false;
     videoRef.current?.pause();
     setPlaying(false);
+    setBuffering(false);
   }, []);
 
   stopRef.current = () => {
+    wantPlayRef.current = false;
     videoRef.current?.pause();
     setPlaying(false);
+    setBuffering(false);
   };
 
   const seekFromClientX = useCallback(
@@ -163,6 +191,9 @@ export function MessageVideoPlayer({
     setShowFrame(false);
     setDims(resolveDims(width, height, src));
     setPosterSrc(poster ?? getVideoPosterCache(src));
+    setBuffering(false);
+    setBufferedRatio(0);
+    wantPlayRef.current = false;
     return () => releaseMediaPlayback(stopRef.current);
   }, [src, poster, width, height, metaDuration]);
 
@@ -209,9 +240,12 @@ export function MessageVideoPlayer({
         setProgress(Math.min(1, video.currentTime / dur));
         setCurrent(video.currentTime);
       }
+      refreshBufferedRatio();
     };
     const onEnded = () => {
+      wantPlayRef.current = false;
       setPlaying(false);
+      setBuffering(false);
       const dur = resolvePlaybackDuration(metaDuration, video.duration);
       setProgress(1);
       setCurrent(dur > 0 ? dur : 0);
@@ -231,28 +265,93 @@ export function MessageVideoPlayer({
       if (video.duration && Number.isFinite(video.duration)) {
         setMediaDuration(video.duration);
       }
+      refreshBufferedRatio();
     };
+    const onPlaying = () => {
+      setPlaying(true);
+      setBuffering(false);
+    };
+    const onPause = () => {
+      if (wantPlayRef.current && !video.ended) return;
+      setPlaying(false);
+      setBuffering(false);
+    };
+    const onWaiting = () => {
+      if (wantPlayRef.current) setBuffering(true);
+    };
+    const onStalled = () => {
+      if (wantPlayRef.current) setBuffering(true);
+    };
+    const onSeeking = () => {
+      if (wantPlayRef.current) setBuffering(true);
+    };
+    const onSeeked = () => {
+      refreshBufferedRatio();
+      if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+        setBuffering(false);
+      }
+    };
+    const onCanPlay = () => {
+      refreshBufferedRatio();
+      if (!wantPlayRef.current) {
+        setBuffering(false);
+        return;
+      }
+      setBuffering(false);
+      if (video.paused && !video.ended) {
+        void video.play().catch(() => {
+          setPlaying(false);
+          wantPlayRef.current = false;
+        });
+      }
+    };
+    const onProgress = () => refreshBufferedRatio();
 
     video.addEventListener("timeupdate", onTimeUpdate);
     video.addEventListener("ended", onEnded);
     video.addEventListener("loadedmetadata", onMeta);
+    video.addEventListener("playing", onPlaying);
+    video.addEventListener("pause", onPause);
+    video.addEventListener("waiting", onWaiting);
+    video.addEventListener("stalled", onStalled);
+    video.addEventListener("seeking", onSeeking);
+    video.addEventListener("seeked", onSeeked);
+    video.addEventListener("canplay", onCanPlay);
+    video.addEventListener("progress", onProgress);
     return () => {
       video.removeEventListener("timeupdate", onTimeUpdate);
       video.removeEventListener("ended", onEnded);
       video.removeEventListener("loadedmetadata", onMeta);
+      video.removeEventListener("playing", onPlaying);
+      video.removeEventListener("pause", onPause);
+      video.removeEventListener("waiting", onWaiting);
+      video.removeEventListener("stalled", onStalled);
+      video.removeEventListener("seeking", onSeeking);
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("canplay", onCanPlay);
+      video.removeEventListener("progress", onProgress);
     };
-  }, [src, metaDuration]);
+  }, [src, metaDuration, refreshBufferedRatio]);
 
   const startPlayback = useCallback(() => {
     const video = videoRef.current;
     if (!video || unsupported) return;
     setShowFrame(true);
+    wantPlayRef.current = true;
+    setBuffering(true);
     claimMediaPlayback(stopRef.current);
     void video
       .play()
-      .then(() => setPlaying(true))
+      .then(() => {
+        setPlaying(true);
+        if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+          setBuffering(false);
+        }
+      })
       .catch(() => {
+        wantPlayRef.current = false;
         setPlaying(false);
+        setBuffering(false);
         releaseMediaPlayback(stopRef.current);
       });
   }, [unsupported]);
@@ -270,23 +369,30 @@ export function MessageVideoPlayer({
     return () => video.removeEventListener("loadedmetadata", onReady);
   }, [autoPlay, src, unsupported, startPlayback]);
 
+  useEffect(() => {
+    if (!isLightbox) {
+      setLightboxLayout(null);
+      return;
+    }
+    const compute = () => {
+      const ar = dims ?? { w: 16, h: 9 };
+      setLightboxLayout(lightboxViewportMediaSize(ar.w, ar.h));
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, [isLightbox, dims]);
+
   let boxStyle: CSSProperties;
   if (isLightbox) {
-    if (dims) {
-      const size = displayMessageMediaSize(dims.w, dims.h);
-      boxStyle = {
-        width: size.width,
-        maxWidth: "min(92vw, 960px)",
-        maxHeight: "min(80vh, 720px)",
-        aspectRatio: `${dims.w} / ${dims.h}`,
-      };
-    } else {
-      boxStyle = {
-        width: "min(92vw, 960px)",
-        maxHeight: "min(80vh, 720px)",
-        aspectRatio: "16 / 9",
-      };
-    }
+    const size = lightboxLayout ?? lightboxViewportMediaSize(dims?.w ?? 16, dims?.h ?? 9);
+    boxStyle = {
+      width: size.width,
+      height: size.height,
+      maxWidth: "96vw",
+      maxHeight: "85dvh",
+      flexShrink: 0,
+    };
   } else if (dims) {
     const size = displayMessageMediaSize(dims.w, dims.h);
     boxStyle = { width: size.width, height: size.height };
@@ -302,8 +408,10 @@ export function MessageVideoPlayer({
     const video = videoRef.current;
     if (!video || unsupported) return;
     if (playing) {
+      wantPlayRef.current = false;
       video.pause();
       setPlaying(false);
+      setBuffering(false);
       releaseMediaPlayback(stopRef.current);
       return;
     }
@@ -335,7 +443,7 @@ export function MessageVideoPlayer({
 
   return (
     <div
-      className={`message-video-player${isLightbox ? " message-video-player--lightbox" : ""}${playing ? " is-playing" : ""}`}
+      className={`message-video-player${isLightbox ? " message-video-player--lightbox" : ""}${playing ? " is-playing" : ""}${buffering ? " is-buffering" : ""}`}
       style={boxStyle}
     >
       <div
@@ -372,8 +480,21 @@ export function MessageVideoPlayer({
           <source src={src} type={mime} />
         </video>
         <span className={`message-video-center-play${playing ? " is-playing" : ""}`} aria-hidden>
-          {unsupported ? "!" : playing ? <IconPause size={30} /> : <IconPlay size={30} />}
+          {unsupported ? (
+            "!"
+          ) : buffering ? (
+            <span className="message-video-buffer-spinner" />
+          ) : playing ? (
+            <IconPause size={30} />
+          ) : (
+            <IconPlay size={30} />
+          )}
         </span>
+        {buffering && (
+          <span className="message-video-buffer-label" aria-live="polite">
+            Загрузка…
+          </span>
+        )}
       </div>
       <div className="message-video-bar" onClick={(e) => e.stopPropagation()}>
         <button
@@ -381,9 +502,15 @@ export function MessageVideoPlayer({
           className="message-video-bar-btn"
           onClick={togglePlay}
           disabled={unsupported}
-          aria-label={playing ? "Пауза" : "Воспроизвести"}
+          aria-label={buffering ? "Загрузка" : playing ? "Пауза" : "Воспроизвести"}
         >
-          {playing ? <IconPause size={16} /> : <IconPlay size={16} />}
+          {buffering ? (
+            <span className="message-video-buffer-spinner message-video-buffer-spinner--small" />
+          ) : playing ? (
+            <IconPause size={16} />
+          ) : (
+            <IconPlay size={16} />
+          )}
         </button>
         <div
           className="message-video-scrub"
@@ -396,11 +523,12 @@ export function MessageVideoPlayer({
           aria-label="Позиция воспроизведения"
         >
           <div className="message-video-scrub-track">
+            <div className="message-video-scrub-buffer" style={{ width: `${bufferedRatio * 100}%` }} />
             <div className="message-video-scrub-fill" style={{ width: `${progress * 100}%` }} />
           </div>
         </div>
         <span className="message-video-bar-time">
-          {formatTime(current)} / {formatTime(duration)}
+          {buffering ? "Загрузка…" : `${formatTime(current)} / ${formatTime(duration)}`}
         </span>
         {onExpand && !isLightbox && (
           <button type="button" className="message-video-bar-btn" onClick={handleExpand} aria-label="На весь экран">

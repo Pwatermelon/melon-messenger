@@ -1063,6 +1063,39 @@ a {
   flex: 1;
   font-weight: 600;
   font-size: 0.95rem;
+  min-width: 0;
+}
+
+.chat-header-select-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.chat-header-select-forward {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  border: none;
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.18);
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.chat-header-select-forward:hover:not(:disabled) {
+  background: rgba(127, 127, 127, 0.28);
+}
+
+.chat-header-select-forward:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .chat-header-select-delete {
@@ -2510,6 +2543,14 @@ a {
 
 .message-row.own > .message-row-body {
   margin-left: auto;
+  margin-right: 0;
+  align-items: flex-end;
+}
+
+.message-row.own .message,
+.message-row.own .message.message-has-media,
+.message-row.own .message.message-pending {
+  align-self: flex-end;
 }
 
 .message-row-target-highlight .message {
@@ -2577,6 +2618,7 @@ a {
 
 .message-row.own.selection-mode .message {
   order: 1;
+  align-self: flex-end;
 }
 
 .message-row.selection-mode .message {
@@ -3379,11 +3421,12 @@ a {
 
 .message-video-player--lightbox {
   border-radius: 10px;
-  width: 100%;
+  flex-shrink: 0;
 }
 
 .message-video-player--lightbox .message-video-stage {
-  min-height: 180px;
+  flex: 1;
+  min-height: 0;
 }
 
 .message-video-player.is-playing .message-video-center-play {
@@ -3391,8 +3434,18 @@ a {
   pointer-events: none;
 }
 
+.message-video-player.is-buffering .message-video-center-play {
+  opacity: 1;
+  pointer-events: none;
+}
+
 .message-video-player.is-playing .message-video-stage:hover .message-video-center-play,
 .message-video-player.is-playing .message-video-stage:focus-visible .message-video-center-play {
+  opacity: 1;
+}
+
+.message-video-player.is-buffering .message-video-stage:hover .message-video-center-play,
+.message-video-player.is-buffering .message-video-stage:focus-visible .message-video-center-play {
   opacity: 1;
 }
 
@@ -3436,7 +3489,7 @@ a {
   position: absolute;
   left: 50%;
   top: 50%;
-  z-index: 2;
+  z-index: 3;
   transform: translate(-50%, -50%);
   display: flex;
   align-items: center;
@@ -3448,6 +3501,44 @@ a {
   color: #fff;
   pointer-events: none;
   transition: opacity 0.15s, background 0.15s;
+}
+
+.message-video-buffer-spinner {
+  display: block;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: message-video-buffer-spin 0.65s linear infinite;
+}
+
+.message-video-buffer-spinner--small {
+  width: 1rem;
+  height: 1rem;
+  border-width: 2px;
+}
+
+@keyframes message-video-buffer-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.message-video-buffer-label {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 2.35rem);
+  z-index: 3;
+  transform: translateX(-50%);
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 0.72rem;
+  font-weight: 600;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .message-video-player:not(.is-playing) .message-video-center-play {
@@ -3500,13 +3591,26 @@ a {
 }
 
 .message-video-scrub-track {
+  position: relative;
   height: 4px;
   border-radius: 2px;
   background: rgba(255, 255, 255, 0.28);
   overflow: hidden;
 }
 
+.message-video-scrub-buffer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.42);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
 .message-video-scrub-fill {
+  position: relative;
+  z-index: 1;
   height: 100%;
   background: #fff;
   border-radius: 2px;
@@ -3595,10 +3699,10 @@ a {
   color: rgba(255, 255, 255, 0.8);
 }
 
-/* Оптимистичная отправка: прозрачный фон + пульсация красным */
+/* Оптимистичная отправка: полупрозрачный красный, не «серый входящий» */
 .message.own.message-pending {
-  background: transparent;
-  border-color: rgba(232, 72, 85, 0.45);
+  background: rgba(232, 72, 85, 0.22);
+  border-color: rgba(232, 72, 85, 0.55);
   animation: message-pending-pulse 1.5s ease-in-out infinite;
 }
 
@@ -5590,7 +5694,7 @@ a {
   flex-direction: column;
   align-items: center;
   width: auto;
-  max-width: min(960px, 100%);
+  max-width: 98vw;
   cursor: default;
 }
 
@@ -8704,6 +8808,7 @@ video.message-circle {
   }
   .layout.layout-compact .main { flex: 1; min-height: 0; overflow: hidden; }
   .layout.layout-compact:not(.layout-chat-open) .app-report-fab { display: none; }
+  .layout.layout-compact.layout-chat-open .app-report-fab { display: none; }
   .profile-overlay .profile-modal { width: 100%; border-radius: 12px 12px 0 0; align-self: flex-end; }
   .record-circle-preview { width: 150px; height: 150px; }
   .voice-player { max-width: min(280px, 72vw); }
@@ -8952,17 +9057,21 @@ video.message-circle {
   overflow: hidden;
 }
 
-.sticker-pack-view-item img {
+.sticker-pack-view-item .sticker-pack-thumb,
+.sticker-pack-editor-item .sticker-pack-thumb {
   width: 100%;
-  height: 100%;
   object-fit: contain;
+  display: block;
 }
 
-.sticker-pack-view-emoji {
-  position: absolute;
-  right: 4px;
-  bottom: 2px;
-  font-size: 0.75rem;
+.sticker-pack-view-item .sticker-pack-thumb {
+  height: 100%;
+}
+
+.sticker-pack-view-emoji .apple-emoji {
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
 }
 
 .sticker-packs-settings {
@@ -9058,10 +9167,17 @@ video.message-circle {
   text-align: center;
 }
 
-.sticker-pack-editor-item img {
-  width: 100%;
+.sticker-pack-editor-item .sticker-pack-thumb {
   aspect-ratio: 1;
-  object-fit: contain;
+}
+
+.sticker-pack-view-emoji {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  font-size: 0.75rem;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .sticker-emoji-input {

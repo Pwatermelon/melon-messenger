@@ -286,6 +286,10 @@ async function main() {
     .use(uploadRoutes)
     .use(reportsRoutes)
     .use(mediaRoutes)
+    .get("/uploads/*", ({ set }) => {
+      set.status = 404;
+      return "Not found";
+    })
     .ws("/ws", wsHandlers);
 
   app.listen({ port: PORT, hostname: "0.0.0.0" });
